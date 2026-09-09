@@ -70,14 +70,10 @@ class MainActivity : Activity(), BillingManager.Listener {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (resultCode != RESULT_OK) return
-        val uri = data?.data ?: return
+        val resultData = data ?: return
+        val uri = resultData.data ?: return
 
-        val flags = data.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-        try {
-            contentResolver.takePersistableUriPermission(uri, flags)
-        } catch (_: SecurityException) {
-            // Some providers grant temporary access only; the current session still works.
-        }
+        persistUriPermission(uri, resultData)
 
         when (requestCode) {
             REQUEST_SOURCE_ISO, REQUEST_SOURCE_FOLDER -> {
@@ -90,6 +86,32 @@ class MainActivity : Activity(), BillingManager.Listener {
             }
         }
         updateRemuxButton()
+    }
+
+    private fun persistUriPermission(uri: Uri, data: Intent) {
+        val readGranted =
+            data.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0
+        val writeGranted =
+            data.flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION != 0
+
+        try {
+            when {
+                readGranted && writeGranted -> contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+                writeGranted -> contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+                readGranted -> contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+        } catch (_: SecurityException) {
+            // Some providers grant temporary access only; the current session still works.
+        }
     }
 
     private fun buildUi(): ViewGroup {
