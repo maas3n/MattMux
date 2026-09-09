@@ -1,0 +1,27 @@
+# Build outputs
+*.exe
+*.dll
+*.zip
+*.msi
+*.pdb
+
+# Go build/test artifacts
+*.test
+*.out
+coverage.out
+
+# MattMux runtime data
+MattMuxData/
+settings.json
+*.log
+*.partial.mkv
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.bak
