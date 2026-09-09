@@ -92,13 +92,12 @@ Current source release: **1.2.0**
 
 See [`CHANGELOG.md`](CHANGELOG.md) for release notes.
 
-## Support MattMux
-If MattMux is useful to you and you'd like to support its development, Bitcoin donations are appreciated but entirely optional.
-<div align="left">
-  
-<img src="https://upload.wikimedia.org/wikipedia/commons/4/46/Bitcoin.svg" width="14" height="14"> <small>**BTC:** `bc1q79hj2zukfmm75278a7wssjmexanuhvs5nequel`</small>
 
-</div>
+## Support MattMux
+
+If MattMux is useful to you and you'd like to support its development, Bitcoin donations are appreciated but entirely optional.
+
+<img src="https://upload.wikimedia.org/wikipedia/commons/4/46/Bitcoin.svg" width="14" height="14"> **BTC:** `bc1q79hj2zukfmm75278a7wssjmexanuhvs5nequel`
 
 ## License
 
