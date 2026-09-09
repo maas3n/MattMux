@@ -4,7 +4,7 @@ plugins {
 
 android {
     namespace = "io.github.maas3n.mattmux"
-    compileSdk = 37
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "io.github.maas3n.mattmux"
