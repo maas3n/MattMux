@@ -101,6 +101,6 @@ If MattMux is useful to you and you'd like to support its development, Bitcoin d
 
 ## License
 
-No open-source license has been selected for MattMux yet. The source is publicly viewable in this repository, but no additional reuse/distribution rights are granted until a license is added.
+MattMux is licensed under the [MIT License](LICENSE).
 
 FFmpeg, MediaInfo, and other third-party projects remain governed by their own licenses.
