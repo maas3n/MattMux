@@ -17,12 +17,15 @@ Implemented:
 
 Not yet implemented:
 
-- Android-native FFmpeg/libdvdnav remux engine
+- Android-native LGPL-only FFmpeg/libav remux engine
+- MattMux-owned DVD cell/navigation and ISO/UDF reading needed to avoid GPL DVD libraries
 - source scanning/title selection through Android content URIs
 - production purchase verification backend / Play Developer API validation
 - production signing and Play Console upload
 
 Purchases are deliberately disabled in `BuildConfig` until the native remux engine is functional. Do not enable charging users for an unfinished remux path.
+
+The Android commercial build must not bundle `libdvdnav`, `libdvdread`, `libdvdcss`, GPL-enabled FFmpeg, or `--enable-nonfree` FFmpeg components. See `native/FFMPEG_LGPL_POLICY.md`.
 
 ## Google Play product
 
