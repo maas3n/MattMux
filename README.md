@@ -1,3 +1,11 @@
+<div align="right">
+
+##### Donation
+<img src="https://upload.wikimedia.org/wikipedia/commons/4/46/Bitcoin.svg" width="14" height="14"> <small>**BTC:** `bc1q79hj2zukfmm75278a7wssjmexanuhvs5nequel`</small>
+
+</div>
+
+#
 # MattMux
 
 **MattMux** is a lightweight native Windows utility for remuxing a DVD-Video title to an MKV file **without transcoding**.
