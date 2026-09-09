@@ -1,0 +1,52 @@
+name: Android / ChromeOS
+
+on:
+  push:
+    branches:
+      - main
+      - android-chromeos
+  pull_request:
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        run: sdkmanager 'platforms;android-37' 'build-tools;36.0.0'
+
+      - name: Set up Gradle 9.6
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+
+      - name: Lint and build
+        run: |
+          gradle -p android :app:lintDebug :app:assembleDebug :app:bundleRelease
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: MattMux-Android-ChromeOS
+          if-no-files-found: error
+          path: |
+            android/app/build/outputs/apk/debug/*.apk
+            android/app/build/outputs/bundle/release/*.aab
