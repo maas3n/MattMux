@@ -89,11 +89,13 @@ class BillingManager(
             return null
         }
 
-        val offer = details.oneTimePurchaseOfferDetailsList?.firstOrNull()
+        val offerToken = details.oneTimePurchaseOfferDetailsList
+            ?.firstOrNull()
+            ?.offerToken
         val productParamsBuilder = BillingFlowParams.ProductDetailsParams.newBuilder()
             .setProductDetails(details)
-        if (offer != null && offer.offerToken.isNotEmpty()) {
-            productParamsBuilder.setOfferToken(offer.offerToken)
+        if (!offerToken.isNullOrEmpty()) {
+            productParamsBuilder.setOfferToken(offerToken)
         }
 
         val params = BillingFlowParams.newBuilder()
