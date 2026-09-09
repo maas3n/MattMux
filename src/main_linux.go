@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -55,6 +56,7 @@ func (g *linuxGUI) setBusy(b bool){controls:=[]interface{Disable();Enable()}{g.s
 func (g *linuxGUI) cancelCurrent(){g.mu.Lock();c:=g.cancel;g.mu.Unlock();if c!=nil{g.status.SetText("Cancelling…");c()}}
 
 func (g *linuxGUI) scan(ctx context.Context)error{src,err:=normalizeSource(g.sourceEntry.Text);if err!=nil{return err};tools,err:=ensureTools(ctx,false,g.progressCallback());if err!=nil{return err};titles,err:=scanTitles(ctx,src,tools,g.progressCallback());if err!=nil{return err};best,_:=longestTitle(titles);opts:=make([]string,0,len(titles));selected:="";for _,t:=range titles{label:=fmt.Sprintf("Title %d — %s",t.Number,formatDuration(t.Duration));opts=append(opts,label);if t.Number==best.Number{selected=label}};g.mu.Lock();g.titles=append([]titleInfo(nil),titles...);g.titlesSource=src;g.mu.Unlock();fyne.Do(func(){g.titleSelect.Options=opts;g.titleSelect.Refresh();g.titleSelect.SetSelected(selected);g.progress.SetValue(1);g.status.SetText(fmt.Sprintf("Found %d title(s). Selected title %d (%s) as the longest.",len(titles),best.Number,formatDuration(best.Duration)))});return nil}
+func parseTitleLabel(label string) int { fields:=strings.Fields(strings.TrimSpace(label)); if len(fields)<2 || fields[0]!="Title" { return 0 }; n,err:=strconv.Atoi(fields[1]); if err!=nil || n<1 { return 0 }; return n }
 func (g *linuxGUI) selectedTitle()(string,titleInfo,error){src,err:=normalizeSource(g.sourceEntry.Text);if err!=nil{return "",titleInfo{},err};n:=parseTitleLabel(g.titleSelect.Selected);if n<1{return "",titleInfo{},errors.New("scan the DVD and choose a title first")};g.mu.Lock();defer g.mu.Unlock();if filepath.Clean(src)!=filepath.Clean(g.titlesSource){return "",titleInfo{},errors.New("source changed after the last title scan; scan again")};for _,t:=range g.titles{if t.Number==n{return src,t,nil}};return "",titleInfo{},errors.New("selected title is no longer available; scan again")}
 func (g *linuxGUI) showMetadata(ctx context.Context)error{src,title,err:=g.selectedTitle();if err!=nil{return err};tools,err:=ensureTools(ctx,true,g.progressCallback());if err!=nil{return err};text,err:=metadataText(ctx,src,title,tools,g.preserve.Checked);if err!=nil{return err};fyne.Do(func(){entry:=widget.NewMultiLineEntry();entry.SetText(text);entry.Disable();w:=fyne.CurrentApp().NewWindow(fmt.Sprintf("MattMux — Title %d metadata",title.Number));w.SetContent(entry);w.Resize(fyne.NewSize(760,600));w.Show();g.progress.SetValue(1);g.status.SetText(fmt.Sprintf("Metadata loaded for title %d.",title.Number))});return nil}
 func (g *linuxGUI) remux(ctx context.Context)error{src,title,err:=g.selectedTitle();if err!=nil{return err};out:=strings.TrimSpace(g.outputEntry.Text);if out==""{return errors.New("choose an output folder")};g.saveSettings();tools,err:=ensureTools(ctx,false,g.progressCallback());if err!=nil{return err};final,err:=remuxTitle(ctx,src,title,out,g.preserve.Checked,tools,g.progressCallback());if err!=nil{return err};fyne.Do(func(){dialog.ShowInformation("Remux complete","Created:\n"+final,g.window)});return nil}
