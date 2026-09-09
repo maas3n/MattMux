@@ -12,8 +12,7 @@ Implemented:
 - Google Play Billing Library 9.1.0
 - non-consumable `mattmux_pro` entitlement flow
 - purchase restore/query and acknowledgement
-- API 36 target for current Google Play submission requirements
-- API 37 compile SDK
+- API 36 target/compile SDK for current Google Play submission requirements
 - CI build for APK/AAB
 
 Not yet implemented:
@@ -37,7 +36,7 @@ Set the price in Play Console. The app reads and displays the localized Play pri
 
 ## Build
 
-Requires JDK 17, Gradle 9.6.0, Android SDK platform 37, and build-tools 36.0.0.
+Requires JDK 17, Gradle 9.6.0, Android SDK platform 36, and build-tools 36.0.0.
 
 ```bash
 gradle :app:assembleDebug
