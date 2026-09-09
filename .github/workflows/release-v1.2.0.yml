@@ -47,10 +47,10 @@ jobs:
           Copy-Item .\packaging\offline-builder\BUILD-OFFLINE.cmd $stage -Force
           Copy-Item .\packaging\offline-builder\README-FIRST.txt $stage -Force
 
-          @'
-MattMux portable data directory.
-Settings, logs, and cached tools are stored here.
-'@ | Set-Content -LiteralPath (Join-Path $stage 'MattMuxData\README.txt') -Encoding ASCII
+          Set-Content -LiteralPath (Join-Path $stage 'MattMuxData\README.txt') -Encoding ASCII -Value @(
+            'MattMux portable data directory.',
+            'Settings, logs, and cached tools are stored here.'
+          )
 
           $builderChecksum = Join-Path $stage 'CHECKSUMS-BUILDER.txt'
           $lines = Get-ChildItem -LiteralPath $stage -File -Recurse |
