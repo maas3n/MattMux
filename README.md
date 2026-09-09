@@ -77,9 +77,8 @@ go vet ./...
 
 ```text
 MattMux/
-├── src/                       # Go source, tests, manifest, build script
-├── packaging/offline-builder # Fully portable/offline bundle builder
-├── .github/workflows/         # CI build/test workflow
+├── src/               # Go source, tests, manifest, build script
+├── .github/workflows/ # CI build/test workflow
 ├── CHANGELOG.md
 ├── THIRD_PARTY.md
 └── README.md
