@@ -158,7 +158,11 @@ class MainActivity : Activity(), BillingManager.Listener {
         root.addView(buyButton)
 
         root.addView(section("Remux"))
-        root.addView(value("ChromeOS-ready file picking and Play Billing are wired. The Android-native FFmpeg/libdvdnav engine is the remaining implementation milestone."))
+        val runtimeMessage = engine.runtimeInfo?.let {
+            "Bundled native runtime: $it\n\nThe LGPL FFmpeg libraries are inside this app. " +
+                "MattMux's DVD/ISO title and cell remux path is the remaining implementation milestone."
+        } ?: "The bundled native FFmpeg runtime could not be loaded in this build."
+        root.addView(value(runtimeMessage))
         remuxButton = button("Remux to MKV") {
             when {
                 !engine.isAvailable -> toast(engine.unavailableReason ?: "Remux engine unavailable.")
