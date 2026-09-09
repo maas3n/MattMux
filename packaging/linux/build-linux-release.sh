@@ -89,8 +89,14 @@ TXT
 
 dpkg-deb --build --root-owner-group "$DEBROOT" "$DIST/mattmux_${DEB_VERSION}_amd64.deb" >/dev/null
 
-# Reproducible source snapshot from the exact commit being built.
-git -C "$ROOT" archive --format=tar.gz --prefix="MattMux-$APP_VERSION-Source/" -o "$DIST/MattMux-$APP_VERSION-Source.tar.gz" HEAD
+# Source snapshot from the exact commit being built, plus the module metadata
+# resolved by CI so the archive is immediately buildable with normal Go tooling.
+SOURCE="$WORK/MattMux-$APP_VERSION-Source"
+mkdir -p "$SOURCE"
+git -C "$ROOT" archive HEAD | tar -x -C "$SOURCE"
+if [[ -f "$SRC/go.mod" ]]; then cp "$SRC/go.mod" "$SOURCE/src/go.mod"; fi
+if [[ -f "$SRC/go.sum" ]]; then cp "$SRC/go.sum" "$SOURCE/src/go.sum"; fi
+tar -C "$WORK" -czf "$DIST/MattMux-$APP_VERSION-Source.tar.gz" "$(basename "$SOURCE")"
 
 (
   cd "$DIST"
