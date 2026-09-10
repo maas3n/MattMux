@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_VERSION="${1:-1.3.0-dev2}"
+APP_VERSION="${1:-1.3.0-dev3}"
 DEB_VERSION="${APP_VERSION/-dev/~dev}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SRC="$ROOT/src"
@@ -14,12 +14,35 @@ FFMPEG_TAG="autobuild-2026-09-08-23-15"
 FFMPEG_ASSET="ffmpeg-N-126479-g08cd8df29d-linux64-gpl.tar.xz"
 FFMPEG_SHA256="635a2d74de852064852e95db5a9c475a86d36e2b6390e3c1ba5e46b2c46dfce0"
 FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/$FFMPEG_TAG/$FFMPEG_ASSET"
+
+# MediaInfo's static CMake build normally auto-fetches these repositories from
+# their moving master branches. Pin every checkout so rebuilding this release
+# cannot silently pick up different source later.
 MEDIAINFO_TAG="v26.05"
 MEDIAINFO_REPO="https://github.com/MediaArea/MediaInfo.git"
+MEDIAINFO_COMMIT="4728f24b666117a19d36515d95b9367fbb37aaf6"
+MEDIAINFOLIB_REPO="https://github.com/MediaArea/MediaInfoLib.git"
+MEDIAINFOLIB_COMMIT="8bfa658657da9e16470c9fb32035e0fa097c0112"
+ZENLIB_REPO="https://github.com/MediaArea/ZenLib.git"
+ZENLIB_COMMIT="2ddc277fe7ecfcbfe45616bb9cd9e23079113ecd"
+ZLIB_REPO="https://github.com/MediaArea/zlib.git"
+ZLIB_COMMIT="eaaf237c8cbc7310170c43202c6ec2cff64fff66"
 
 if [[ "$(uname -s)" != "Linux" ]]; then echo "This packaging script must run on Linux." >&2; exit 1; fi
 if [[ "$(uname -m)" != "x86_64" ]]; then echo "The bundled toolchain is currently pinned for amd64/x86_64 only." >&2; exit 1; fi
 for cmd in go git tar dpkg-deb sha256sum curl cmake ninja; do command -v "$cmd" >/dev/null 2>&1 || { echo "Missing build tool: $cmd" >&2; exit 1; }; done
+
+checkout_exact() {
+  local repo="$1" commit="$2" dst="$3" label="$4"
+  git init -q "$dst"
+  git -C "$dst" remote add origin "$repo"
+  git -C "$dst" fetch --quiet --depth 1 origin "$commit"
+  git -C "$dst" checkout --quiet --detach FETCH_HEAD
+  local actual
+  actual="$(git -C "$dst" rev-parse HEAD)"
+  [[ "$actual" == "$commit" ]] || { echo "$label commit verification failed: expected $commit, got $actual" >&2; exit 1; }
+  echo "$label source pinned to $actual"
+}
 
 rm -rf "$DIST" "$WORK"
 mkdir -p "$DIST" "$WORK/bin" "$WORK/tools"
@@ -71,13 +94,21 @@ BUNDLED_FFPROBE="$(find "$FF_EXTRACT" -type f -name ffprobe -perm -u+x | head -n
 [[ -n "$BUNDLED_FFMPEG" && -n "$BUNDLED_FFPROBE" ]] || { echo "FFmpeg archive did not contain ffmpeg/ffprobe" >&2; exit 1; }
 "$BUNDLED_FFMPEG" -hide_banner -demuxers 2>/dev/null | grep -q 'dvdvideo' || { echo "Pinned FFmpeg lacks dvdvideo demuxer" >&2; exit 1; }
 
-# Build a pinned static-oriented MediaInfo CLI from its immutable release tag.
-# MediaInfo's CMake project fetches/builds ZenLib and zlib when requested.
+# Build MediaInfo with all four source repositories pinned to exact commits.
+# Pre-populating the directories prevents CMake FetchContent from following
+# moving master branches at build time.
 MI_SRC="$WORK/tools/MediaInfo"
+MILIB_SRC="$WORK/tools/MediaInfoLib"
+ZEN_SRC="$WORK/tools/ZenLib"
+ZLIB_SRC="$WORK/tools/zlib"
 MI_BUILD="$WORK/tools/mediainfo-build"
 MI_INSTALL="$WORK/tools/mediainfo-install"
-echo "Building MediaInfo $MEDIAINFO_TAG for .deb bundle..."
-git clone --quiet --depth 1 --branch "$MEDIAINFO_TAG" "$MEDIAINFO_REPO" "$MI_SRC"
+echo "Preparing fully pinned MediaInfo $MEDIAINFO_TAG source set..."
+checkout_exact "$MEDIAINFO_REPO" "$MEDIAINFO_COMMIT" "$MI_SRC" "MediaInfo CLI"
+checkout_exact "$MEDIAINFOLIB_REPO" "$MEDIAINFOLIB_COMMIT" "$MILIB_SRC" "MediaInfoLib"
+checkout_exact "$ZENLIB_REPO" "$ZENLIB_COMMIT" "$ZEN_SRC" "ZenLib"
+checkout_exact "$ZLIB_REPO" "$ZLIB_COMMIT" "$ZLIB_SRC" "zlib"
+
 cmake -G Ninja \
   -D CMAKE_PREFIX_PATH="$MI_INSTALL" \
   -D CMAKE_INSTALL_PREFIX="$MI_INSTALL" \
@@ -217,6 +248,10 @@ the applicable copyright notices, license texts, build configuration and source.
 MediaInfo
 ---------
 Version/tag: $MEDIAINFO_TAG
+MediaInfo CLI commit: $MEDIAINFO_COMMIT
+MediaInfoLib commit: $MEDIAINFOLIB_COMMIT
+ZenLib commit: $ZENLIB_COMMIT
+MediaArea zlib commit: $ZLIB_COMMIT
 Source: https://github.com/MediaArea/MediaInfo
 License: BSD-2-Clause (see MediaInfo-LICENSE in this directory).
 
