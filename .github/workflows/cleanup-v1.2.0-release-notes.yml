@@ -1,0 +1,35 @@
+name: Cleanup v1.2.0 release notes
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup-release-notes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove obsolete Offline Builder references
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release view v1.2.0 --repo "$REPO" --json body --jq '.body' > /tmp/notes.md
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('/tmp/notes.md')
+          lines = p.read_text().splitlines()
+          remove = (
+              'MattMux-1.2.0-Offline-Builder.zip',
+              'Portable/offline bundle builder remains available',
+          )
+          cleaned = [line for line in lines if not any(marker in line for marker in remove)]
+          p.write_text('\n'.join(cleaned).rstrip() + '\n')
+          PY
+          gh release edit v1.2.0 --repo "$REPO" --notes-file /tmp/notes.md
+          echo 'Updated v1.2.0 release notes:'
+          gh release view v1.2.0 --repo "$REPO" --json body --jq '.body'
