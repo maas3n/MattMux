@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_VERSION="${1:-1.3.0-dev2}"
+APP_VERSION="${1:-1.3.0-dev3}"
 DEB_VERSION="${APP_VERSION/-dev/~dev}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SRC="$ROOT/src"
@@ -15,6 +15,7 @@ FFMPEG_ASSET="ffmpeg-N-126479-g08cd8df29d-linux64-gpl.tar.xz"
 FFMPEG_SHA256="635a2d74de852064852e95db5a9c475a86d36e2b6390e3c1ba5e46b2c46dfce0"
 FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/$FFMPEG_TAG/$FFMPEG_ASSET"
 MEDIAINFO_TAG="v26.05"
+MEDIAINFO_COMMIT="4728f24b666117a19d36515d95b9367fbb37aaf6"
 MEDIAINFO_REPO="https://github.com/MediaArea/MediaInfo.git"
 
 if [[ "$(uname -s)" != "Linux" ]]; then echo "This packaging script must run on Linux." >&2; exit 1; fi
@@ -71,13 +72,17 @@ BUNDLED_FFPROBE="$(find "$FF_EXTRACT" -type f -name ffprobe -perm -u+x | head -n
 [[ -n "$BUNDLED_FFMPEG" && -n "$BUNDLED_FFPROBE" ]] || { echo "FFmpeg archive did not contain ffmpeg/ffprobe" >&2; exit 1; }
 "$BUNDLED_FFMPEG" -hide_banner -demuxers 2>/dev/null | grep -q 'dvdvideo' || { echo "Pinned FFmpeg lacks dvdvideo demuxer" >&2; exit 1; }
 
-# Build a pinned static-oriented MediaInfo CLI from its immutable release tag.
-# MediaInfo's CMake project fetches/builds ZenLib and zlib when requested.
+# Build MediaInfo from an exact immutable commit. MEDIAINFO_TAG is retained for
+# human-readable release metadata, but the build itself does not trust a mutable tag.
 MI_SRC="$WORK/tools/MediaInfo"
 MI_BUILD="$WORK/tools/mediainfo-build"
 MI_INSTALL="$WORK/tools/mediainfo-install"
-echo "Building MediaInfo $MEDIAINFO_TAG for .deb bundle..."
-git clone --quiet --depth 1 --branch "$MEDIAINFO_TAG" "$MEDIAINFO_REPO" "$MI_SRC"
+echo "Building MediaInfo $MEDIAINFO_TAG ($MEDIAINFO_COMMIT) for .deb bundle..."
+git init -q "$MI_SRC"
+git -C "$MI_SRC" remote add origin "$MEDIAINFO_REPO"
+git -C "$MI_SRC" fetch --quiet --depth 1 origin "$MEDIAINFO_COMMIT"
+git -C "$MI_SRC" checkout --quiet --detach FETCH_HEAD
+[[ "$(git -C "$MI_SRC" rev-parse HEAD)" == "$MEDIAINFO_COMMIT" ]] || { echo "MediaInfo commit verification failed" >&2; exit 1; }
 cmake -G Ninja \
   -D CMAKE_PREFIX_PATH="$MI_INSTALL" \
   -D CMAKE_INSTALL_PREFIX="$MI_INSTALL" \
@@ -217,6 +222,7 @@ the applicable copyright notices, license texts, build configuration and source.
 MediaInfo
 ---------
 Version/tag: $MEDIAINFO_TAG
+Pinned commit: $MEDIAINFO_COMMIT
 Source: https://github.com/MediaArea/MediaInfo
 License: BSD-2-Clause (see MediaInfo-LICENSE in this directory).
 
