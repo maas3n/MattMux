@@ -2,6 +2,17 @@ plugins {
     id("com.android.application")
 }
 
+val playStoreFile = providers.gradleProperty("MATTMUX_UPLOAD_STORE_FILE").orNull
+val playStorePassword = providers.gradleProperty("MATTMUX_UPLOAD_STORE_PASSWORD").orNull
+val playKeyAlias = providers.gradleProperty("MATTMUX_UPLOAD_KEY_ALIAS").orNull
+val playKeyPassword = providers.gradleProperty("MATTMUX_UPLOAD_KEY_PASSWORD").orNull
+val hasPlaySigning = listOf(
+    playStoreFile,
+    playStorePassword,
+    playKeyAlias,
+    playKeyPassword,
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "io.github.maas3n.mattmux"
     compileSdk = 36
@@ -19,6 +30,25 @@ android {
 
         // Keep purchases disabled until the Android-native remux engine is shipped.
         buildConfigField("boolean", "ENABLE_BILLING_PURCHASES", "false")
+    }
+
+    signingConfigs {
+        if (hasPlaySigning) {
+            create("playUpload") {
+                storeFile = file(requireNotNull(playStoreFile))
+                storePassword = requireNotNull(playStorePassword)
+                keyAlias = requireNotNull(playKeyAlias)
+                keyPassword = requireNotNull(playKeyPassword)
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            signingConfigs.findByName("playUpload")?.let {
+                signingConfig = it
+            }
+        }
     }
 
     compileOptions {
