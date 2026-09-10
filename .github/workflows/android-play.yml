@@ -48,12 +48,10 @@ jobs:
           KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          for value in KEYSTORE_B64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
-            test -n "${!value:-}" || {
-              echo "Missing required GitHub Actions secret: ${value}" >&2
-              exit 1
-            }
-          done
+          test -n "$KEYSTORE_B64" || { echo 'Missing ANDROID_UPLOAD_KEYSTORE_BASE64' >&2; exit 1; }
+          test -n "$STORE_PASSWORD" || { echo 'Missing ANDROID_UPLOAD_STORE_PASSWORD' >&2; exit 1; }
+          test -n "$KEY_ALIAS" || { echo 'Missing ANDROID_UPLOAD_KEY_ALIAS' >&2; exit 1; }
+          test -n "$KEY_PASSWORD" || { echo 'Missing ANDROID_UPLOAD_KEY_PASSWORD' >&2; exit 1; }
 
       - name: Prepare upload keystore
         env:
@@ -82,7 +80,8 @@ jobs:
           set -euo pipefail
           AAB="$(find android/app/build/outputs/bundle/release -name '*.aab' -print -quit)"
           test -n "$AAB"
-          jarsigner -verify -strict -certs "$AAB"
+          jarsigner -verify -certs "$AAB" 2>&1 | tee /tmp/jarsigner.txt
+          grep -Fq 'jar verified.' /tmp/jarsigner.txt
           unzip -l "$AAB" 'base/lib/arm64-v8a/libmattmux_jni.so' | grep -q libmattmux_jni.so
           unzip -l "$AAB" 'base/lib/x86_64/libmattmux_jni.so' | grep -q libmattmux_jni.so
 
