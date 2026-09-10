@@ -71,8 +71,8 @@ jobs:
           test -n "${AAB}"
 
           BADGING="$("${ANDROID_HOME}/build-tools/36.0.0/aapt" dump badging "${APK}")"
-          grep -Fq "versionCode='102'" <<<"${BADGING}"
-          grep -Fq "versionName='1.2.0-chromeos-alpha2'" <<<"${BADGING}"
+          grep -Fq "versionCode='103'" <<<"${BADGING}"
+          grep -Fq "versionName='1.2.0-chromeos-alpha3'" <<<"${BADGING}"
 
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
@@ -83,8 +83,6 @@ jobs:
               unzip -p "${APK}" "lib/${abi}/${lib}" > "${unpacked}"
               unzip -l "${AAB}" "base/lib/${abi}/${lib}" | grep -q "${lib}"
 
-              # Android 15+ / Play requires native LOAD segments compatible with
-              # 16 KB pages. Check the packaged ELF, not only ZIP alignment.
               mapfile -t load_alignments < <(
                 readelf -lW "${unpacked}" | awk '$1 == "LOAD" { print $NF }'
               )
@@ -99,8 +97,6 @@ jobs:
                 }
               done
 
-              # Re-check the final APK for forbidden native dependencies so a
-              # packaging change cannot bypass the build-script policy.
               if readelf -dW "${unpacked}" \
                 | grep -Eiq 'NEEDED.*(dvdnav|dvdread|dvdcss|x264|x265|xvid)'; then
                 echo "Forbidden dependency in packaged ${abi}/${lib}" >&2
