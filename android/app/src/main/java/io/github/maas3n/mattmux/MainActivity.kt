@@ -31,18 +31,24 @@ class MainActivity : Activity(), BillingManager.Listener {
     private lateinit var outputValue: TextView
     private lateinit var proValue: TextView
     private lateinit var billingValue: TextView
+    private lateinit var remuxStatus: TextView
     private lateinit var buyButton: Button
     private lateinit var remuxButton: Button
+    private lateinit var cancelButton: Button
 
     private var sourceUri: Uri? = null
     private var outputUri: Uri? = null
     private var proOwned = false
+    @Volatile private var remuxRunning = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(buildUi())
         restoreSelectionState(savedInstanceState)
 
+        engine.setProgressListener { percent ->
+            runOnUiThread { remuxStatus.text = "Remuxing… $percent%" }
+        }
         billing = BillingManager(this, this)
         billing.start()
         updateRemuxButton()
@@ -55,6 +61,8 @@ class MainActivity : Activity(), BillingManager.Listener {
     }
 
     override fun onDestroy() {
+        if (remuxRunning) engine.cancel()
+        engine.setProgressListener(null)
         billing.close()
         super.onDestroy()
     }
@@ -62,11 +70,7 @@ class MainActivity : Activity(), BillingManager.Listener {
     override fun onBillingState(state: BillingManager.State) {
         runOnUiThread {
             proOwned = state.proOwned
-            proValue.text = if (state.proOwned) {
-                "MattMux Pro: unlocked"
-            } else {
-                "MattMux Pro: not unlocked"
-            }
+            proValue.text = if (state.proOwned) "MattMux Pro: unlocked" else "MattMux Pro: not unlocked"
             val price = state.price ?: "price loads from Google Play"
             buyButton.text = if (state.proOwned) "MattMux Pro owned" else "Buy MattMux Pro ($price)"
             buyButton.isEnabled = !state.proOwned && BuildConfig.ENABLE_BILLING_PURCHASES
@@ -81,7 +85,6 @@ class MainActivity : Activity(), BillingManager.Listener {
         if (resultCode != RESULT_OK) return
         val resultData = data ?: return
         val uri = resultData.data ?: return
-
         persistUriPermission(uri, resultData)
 
         when (requestCode) {
@@ -98,42 +101,22 @@ class MainActivity : Activity(), BillingManager.Listener {
     }
 
     private fun restoreSelectionState(savedInstanceState: Bundle?) {
-        sourceUri = savedInstanceState
-            ?.getString(STATE_SOURCE_URI)
-            ?.takeIf { it.isNotBlank() }
-            ?.let(Uri::parse)
-        outputUri = savedInstanceState
-            ?.getString(STATE_OUTPUT_URI)
-            ?.takeIf { it.isNotBlank() }
-            ?.let(Uri::parse)
-
+        sourceUri = savedInstanceState?.getString(STATE_SOURCE_URI)?.takeIf { it.isNotBlank() }?.let(Uri::parse)
+        outputUri = savedInstanceState?.getString(STATE_OUTPUT_URI)?.takeIf { it.isNotBlank() }?.let(Uri::parse)
         sourceValue.text = sourceUri?.let(::describeUri) ?: "No source selected"
         outputValue.text = outputUri?.let(::describeUri) ?: "No output folder selected"
     }
 
     private fun persistUriPermission(uri: Uri, data: Intent) {
-        val readGranted =
-            data.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0
-        val writeGranted =
-            data.flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION != 0
-
+        val readGranted = data.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0
+        val writeGranted = data.flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION != 0
         try {
             when {
-                readGranted && writeGranted -> contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-                )
-                writeGranted -> contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-                )
-                readGranted -> contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                )
+                readGranted && writeGranted -> contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                writeGranted -> contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                readGranted -> contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
         } catch (_: SecurityException) {
-            // Some providers grant temporary access only; the current session still works.
         }
     }
 
@@ -142,14 +125,11 @@ class MainActivity : Activity(), BillingManager.Listener {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(28), dp(24), dp(28), dp(28))
         }
-
-        val title = TextView(this).apply {
+        root.addView(TextView(this).apply {
             text = "MattMux"
             textSize = 30f
             setTypeface(typeface, Typeface.BOLD)
-        }
-        root.addView(title)
-
+        })
         root.addView(TextView(this).apply {
             text = "DVD / VIDEO_TS / ISO → MKV without transcoding"
             textSize = 16f
@@ -159,7 +139,6 @@ class MainActivity : Activity(), BillingManager.Listener {
         root.addView(section("Source"))
         sourceValue = value("No source selected")
         root.addView(sourceValue)
-
         val sourceButtons = sourceButtonContainer()
         sourceButtons.addView(button("Choose ISO") { chooseIso() })
         sourceButtons.addView(button("Choose DVD folder") { chooseSourceFolder() })
@@ -175,29 +154,57 @@ class MainActivity : Activity(), BillingManager.Listener {
         billingValue = value("Connecting to Google Play…")
         root.addView(proValue)
         root.addView(billingValue)
-        buyButton = button("Buy MattMux Pro") {
-            billing.launchProPurchase(this)
-        }
+        buyButton = button("Buy MattMux Pro") { billing.launchProPurchase(this) }
         root.addView(buyButton)
 
         root.addView(section("Remux"))
         val runtimeMessage = engine.runtimeInfo?.let {
-            "Bundled native runtime: $it\n\nThe LGPL FFmpeg libraries are inside this app. " +
-                "MattMux's DVD/ISO title and cell remux path is the remaining implementation milestone."
+            "Bundled native runtime: $it\n\nVIDEO_TS folders use MattMux's native IFO/cell planner and LGPL FFmpeg stream-copy muxer. ISO/UDF input is the next source-reader milestone."
         } ?: "The bundled native FFmpeg runtime could not be loaded in this build."
         root.addView(value(runtimeMessage))
-        remuxButton = button("Remux to MKV") {
-            when {
-                !engine.isAvailable -> toast(engine.unavailableReason ?: "Remux engine unavailable.")
-                !proOwned -> billing.launchProPurchase(this)
-                else -> toast("Remux engine is ready to be invoked.")
-            }
-        }
+        remuxStatus = value("Ready")
+        root.addView(remuxStatus)
+        remuxButton = button("Remux to MKV") { startRemux() }
         root.addView(remuxButton)
+        cancelButton = button("Cancel remux") {
+            engine.cancel()
+            remuxStatus.text = "Cancelling…"
+        }.apply { isEnabled = false }
+        root.addView(cancelButton)
 
-        val scroll = ScrollView(this)
-        scroll.addView(root)
-        return scroll
+        return ScrollView(this).apply { addView(root) }
+    }
+
+    private fun startRemux() {
+        val source = sourceUri ?: return
+        val output = outputUri ?: return
+        if (!engine.isAvailable) {
+            toast(engine.unavailableReason ?: "Remux engine unavailable")
+            return
+        }
+        if (BuildConfig.ENABLE_BILLING_PURCHASES && !proOwned) {
+            billing.launchProPurchase(this)
+            return
+        }
+        if (remuxRunning) return
+
+        remuxRunning = true
+        remuxStatus.text = "Preparing DVD title…"
+        updateRemuxButton()
+        Thread {
+            val result = runCatching { engine.remux(this, source, output) }
+            runOnUiThread {
+                remuxRunning = false
+                result.onSuccess {
+                    remuxStatus.text = "Complete: title ${it.title} → ${describeUri(it.outputUri)}"
+                    toast("Remux complete")
+                }.onFailure {
+                    remuxStatus.text = "Remux failed: ${it.message ?: it.javaClass.simpleName}"
+                    toast(it.message ?: "Remux failed")
+                }
+                updateRemuxButton()
+            }
+        }.apply { name = "MattMux-remux" }.start()
     }
 
     private fun chooseIso() {
@@ -211,29 +218,25 @@ class MainActivity : Activity(), BillingManager.Listener {
     }
 
     private fun chooseSourceFolder() {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
-        }
-        startActivityForResult(intent, REQUEST_SOURCE_FOLDER)
+        }, REQUEST_SOURCE_FOLDER)
     }
 
     private fun chooseOutputFolder() {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
-            addFlags(
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
-                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
-            )
-        }
-        startActivityForResult(intent, REQUEST_OUTPUT_FOLDER)
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }, REQUEST_OUTPUT_FOLDER)
     }
 
     private fun updateRemuxButton() {
         val hasPaths = sourceUri != null && outputUri != null
-        remuxButton.isEnabled = hasPaths
+        remuxButton.isEnabled = hasPaths && !remuxRunning && engine.isAvailable
+        cancelButton.isEnabled = remuxRunning
         remuxButton.text = when {
-            !engine.isAvailable -> "Remux engine pending"
-            !proOwned -> "Unlock Pro to remux"
+            remuxRunning -> "Remuxing…"
+            !engine.isAvailable -> "Remux engine unavailable"
+            BuildConfig.ENABLE_BILLING_PURCHASES && !proOwned -> "Unlock Pro to remux"
             else -> "Remux to MKV"
         }
     }
@@ -242,15 +245,10 @@ class MainActivity : Activity(), BillingManager.Listener {
         try {
             contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
                 val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (index >= 0 && cursor.moveToFirst()) {
-                    return cursor.getString(index)
-                }
+                if (index >= 0 && cursor.moveToFirst()) return cursor.getString(index)
             }
         } catch (_: SecurityException) {
-            // A temporary provider grant can disappear after process recreation.
-            // Keep the URI visible instead of crashing while the user reselects it.
         } catch (_: RuntimeException) {
-            // Document providers are external processes and may fail transiently.
         }
         return uri.toString()
     }
@@ -269,16 +267,7 @@ class MainActivity : Activity(), BillingManager.Listener {
     }
 
     private fun sourceButtonContainer() = LinearLayout(this).apply {
-        orientation = if (
-            WindowLayoutPolicy.stackSourceButtons(
-                resources.configuration.screenWidthDp,
-                resources.configuration.fontScale,
-            )
-        ) {
-            LinearLayout.VERTICAL
-        } else {
-            LinearLayout.HORIZONTAL
-        }
+        orientation = if (WindowLayoutPolicy.stackSourceButtons(resources.configuration.screenWidthDp, resources.configuration.fontScale)) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
         gravity = Gravity.START
     }
 
@@ -287,9 +276,6 @@ class MainActivity : Activity(), BillingManager.Listener {
         setOnClickListener { onClick() }
     }
 
-    private fun toast(message: String) {
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-    }
-
+    private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 }
