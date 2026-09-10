@@ -79,17 +79,29 @@ jobs:
 
           for abi in arm64-v8a x86_64; do
             for lib in libavutil.so libavcodec.so libavformat.so libmattmux_jni.so; do
-              unzip -p "${APK}" "lib/${abi}/${lib}" > "${tmp}/${abi}-${lib}"
+              unpacked="${tmp}/${abi}-${lib}"
+              unzip -p "${APK}" "lib/${abi}/${lib}" > "${unpacked}"
               unzip -l "${AAB}" "base/lib/${abi}/${lib}" | grep -q "${lib}"
 
               # Android 15+ / Play requires native LOAD segments compatible with
               # 16 KB pages. Check the packaged ELF, not only ZIP alignment.
-              readelf -lW "${tmp}/${abi}-${lib}" \
-                | awk '$1 == "LOAD" { if (strtonum($NF) < 0x4000) exit 1; found=1 } END { exit !found }'
+              mapfile -t load_alignments < <(
+                readelf -lW "${unpacked}" | awk '$1 == "LOAD" { print $NF }'
+              )
+              (( ${#load_alignments[@]} > 0 )) || {
+                echo "No ELF LOAD segments found in ${abi}/${lib}" >&2
+                exit 1
+              }
+              for alignment in "${load_alignments[@]}"; do
+                (( alignment >= 0x4000 )) || {
+                  echo "ELF LOAD alignment below 16 KB in ${abi}/${lib}: ${alignment}" >&2
+                  exit 1
+                }
+              done
 
               # Re-check the final APK for forbidden native dependencies so a
               # packaging change cannot bypass the build-script policy.
-              if readelf -dW "${tmp}/${abi}-${lib}" \
+              if readelf -dW "${unpacked}" \
                 | grep -Eiq 'NEEDED.*(dvdnav|dvdread|dvdcss|x264|x265|xvid)'; then
                 echo "Forbidden dependency in packaged ${abi}/${lib}" >&2
                 exit 1
