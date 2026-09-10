@@ -14,7 +14,7 @@ permissions:
 env:
   FFMPEG_VERSION: '9.0.1'
   ANDROID_NDK_VERSION: '30.0.16248370'
-  RELEASE_TAG: 'v1.2.0-chromeos-alpha2'
+  RELEASE_TAG: 'v1.2.0-chromeos-alpha3'
 
 jobs:
   release:
@@ -36,7 +36,7 @@ jobs:
       - name: Install Android platform and native toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl patchelf xz-utils
+          sudo apt-get install -y binutils curl patchelf xz-utils
           sdkmanager \
             'platforms;android-36' \
             'build-tools;36.0.0' \
@@ -52,9 +52,9 @@ jobs:
           ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" \
             bash android/native/build-ffmpeg-android.sh
 
-      - name: Lint and build APK
+      - name: Test, lint and build APK
         run: |
-          gradle -p android :app:lintDebug :app:assembleDebug
+          gradle -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 
       - name: Verify APK version and bundled native libraries
         shell: bash
@@ -64,12 +64,33 @@ jobs:
           test -n "${APK}"
 
           BADGING="$("${ANDROID_HOME}/build-tools/36.0.0/aapt" dump badging "${APK}")"
-          grep -Fq "versionCode='102'" <<<"${BADGING}"
-          grep -Fq "versionName='1.2.0-chromeos-alpha2'" <<<"${BADGING}"
+          grep -Fq "versionCode='103'" <<<"${BADGING}"
+          grep -Fq "versionName='1.2.0-chromeos-alpha3'" <<<"${BADGING}"
+
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
 
           for abi in arm64-v8a x86_64; do
             for lib in libavutil.so libavcodec.so libavformat.so libmattmux_jni.so; do
-              unzip -l "${APK}" "lib/${abi}/${lib}" | grep -q "${lib}"
+              unpacked="${tmp}/${abi}-${lib}"
+              unzip -p "${APK}" "lib/${abi}/${lib}" > "${unpacked}"
+
+              mapfile -t load_alignments < <(
+                readelf -lW "${unpacked}" | awk '$1 == "LOAD" { print $NF }'
+              )
+              (( ${#load_alignments[@]} > 0 )) || exit 1
+              for alignment in "${load_alignments[@]}"; do
+                (( alignment >= 0x4000 )) || {
+                  echo "ELF LOAD alignment below 16 KB in ${abi}/${lib}: ${alignment}" >&2
+                  exit 1
+                }
+              done
+
+              if readelf -dW "${unpacked}" \
+                | grep -Eiq 'NEEDED.*(dvdnav|dvdread|dvdcss|x264|x265|xvid)'; then
+                echo "Forbidden dependency in packaged ${abi}/${lib}" >&2
+                exit 1
+              fi
             done
           done
 
@@ -85,7 +106,7 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           APK="$(find android/app/build/outputs/apk/debug -name '*.apk' -print -quit)"
-          cp "${APK}" dist/MattMux-1.2.0-ChromeOS-Alpha2.apk
+          cp "${APK}" dist/MattMux-1.2.0-ChromeOS-Alpha3.apk
           cp android/native/.work/ffmpeg-${FFMPEG_VERSION}.tar.xz \
             dist/FFmpeg-${FFMPEG_VERSION}-source.tar.xz
           cp android/app/src/main/assets/ffmpeg/ffmpeg-build-info.txt \
@@ -98,7 +119,7 @@ jobs:
           (
             cd dist
             sha256sum \
-              MattMux-1.2.0-ChromeOS-Alpha2.apk \
+              MattMux-1.2.0-ChromeOS-Alpha3.apk \
               FFmpeg-${FFMPEG_VERSION}-source.tar.xz \
               FFmpeg-build-info.txt \
               COPYING.LGPLv2.1.txt \
@@ -107,17 +128,23 @@ jobs:
           )
 
           cat > dist/RELEASE_NOTES.md <<'EOF'
-          # MattMux 1.2.0 ChromeOS Alpha 2
+          # MattMux 1.2.0 ChromeOS Alpha 3
 
-          Early Chromebook/Android test build.
+          Early Chromebook/Android test build with ChromeOS window-state and release-integrity hardening.
 
-          This APK is self-contained and bundles an LGPL-only FFmpeg 9.0.1 runtime for both arm64-v8a and x86_64. No FFmpeg download is required after installation.
+          Changes since Alpha 2:
+          - preserves selected source/output URIs across Activity recreation, including ChromeOS free-form window resizing;
+          - stacks source buttons in compact windows and with large font scaling;
+          - adds Android unit tests for responsive layout policy;
+          - verifies packaged native ELF LOAD alignment is at least 16 KB for both arm64-v8a and x86_64;
+          - re-checks the final APK for forbidden GPL/DVD native dependencies;
+          - adds a separate signed Google Play AAB workflow that uses repository secrets and verifies the AAB signature.
 
-          This release corrects the package/release version mismatch from Alpha 1. The APK now reports versionName 1.2.0-chromeos-alpha2 and versionCode 102, matching the release tag and filename.
+          This APK remains self-contained and bundles an LGPL-only FFmpeg 9.0.1 runtime for arm64-v8a and x86_64. No FFmpeg download is required after installation.
 
-          Important: the Android/ChromeOS remux engine is still under development and Google Play purchases remain disabled. This APK is for installation/UI/native-runtime testing only and is not the final paid Play Store build.
+          Important: the Android/ChromeOS remux engine is still under development and Google Play purchases remain disabled. This APK is for installation/UI/native-runtime testing only and is not the final Play Store build.
 
-          The APK is signed with the standard Android debug key for test installation. A production Play Store build will use release signing / Play App Signing.
+          The APK is signed with the standard Android debug key for test installation. The Play workflow is prepared for upload-key signing once the required GitHub Actions secrets are configured.
 
           Bundled FFmpeg is built without GPL, nonfree, libdvdnav, libdvdread, or libdvdcss components. The exact FFmpeg source archive, LGPL notice, FFmpeg license file, build provenance, and SHA-256 checksums are included as release assets.
           EOF
@@ -129,7 +156,7 @@ jobs:
         run: |
           set -euo pipefail
           ASSETS=(
-            dist/MattMux-1.2.0-ChromeOS-Alpha2.apk
+            dist/MattMux-1.2.0-ChromeOS-Alpha3.apk
             dist/FFmpeg-${FFMPEG_VERSION}-source.tar.xz
             dist/FFmpeg-build-info.txt
             dist/COPYING.LGPLv2.1.txt
@@ -148,7 +175,7 @@ jobs:
           else
             gh release create "${RELEASE_TAG}" "${ASSETS[@]}" \
               --target "${GITHUB_SHA}" \
-              --title 'MattMux 1.2.0 ChromeOS Alpha 2' \
+              --title 'MattMux 1.2.0 ChromeOS Alpha 3' \
               --notes-file dist/RELEASE_NOTES.md \
               --prerelease
           fi
