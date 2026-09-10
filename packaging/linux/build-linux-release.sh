@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_VERSION="${1:-1.3.0-dev3}"
+APP_VERSION="${1:-1.3.0-dev4}"
 DEB_VERSION="${APP_VERSION/-dev/~dev}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SRC="$ROOT/src"
 DIST="$ROOT/dist/linux-release"
 WORK="$ROOT/dist/linux-work"
 
-# Pinned third-party tools for the Debian package. They are installed below
-# /usr/lib/mattmux and never replace distro executables in /usr/bin.
+# Pinned third-party tools for the Debian package. They are installed only
+# below /usr/lib/mattmux and never replace distro executables in /usr/bin.
 FFMPEG_TAG="autobuild-2026-09-08-23-15"
 FFMPEG_ASSET="ffmpeg-N-126479-g08cd8df29d-linux64-gpl.tar.xz"
 FFMPEG_SHA256="635a2d74de852064852e95db5a9c475a86d36e2b6390e3c1ba5e46b2c46dfce0"
@@ -56,7 +56,7 @@ go build -tags cli -trimpath -ldflags "-s -w -X main.appVersion=$APP_VERSION" -o
 popd >/dev/null
 
 # The portable tarball remains small and uses the normal MattMux runtime tool
-# discovery/fallback behavior. The .deb below additionally embeds private tools.
+# discovery/fallback behavior. The .deb below is the self-contained installer.
 PORTABLE="$WORK/MattMux-$APP_VERSION-Linux-amd64"
 mkdir -p "$PORTABLE"
 install -m 0755 "$WORK/bin/mattmux-bin" "$PORTABLE/mattmux"
@@ -73,18 +73,18 @@ If system FFmpeg is missing or incompatible, MattMux can prepare its pinned,
 SHA-256-verified FFmpeg fallback in the current user's cache.
 MediaInfo is optional for the portable archive.
 
-The .deb release additionally embeds private FFmpeg, FFprobe and MediaInfo
-copies under /usr/lib/mattmux and does not overwrite distro tools.
+For a one-file installer with all required multimedia tools included, use the
+MattMux .deb package. Its private tools never replace system multimedia tools.
 
 MattMux does not bypass DVD copy protection such as CSS.
 TXT
 tar -C "$WORK" -czf "$DIST/MattMux-$APP_VERSION-Linux-amd64.tar.gz" "$(basename "$PORTABLE")"
 
-# Download and verify the exact GPL FFmpeg build used as the private .deb
-# fallback. dvdvideo requires a GPL-enabled FFmpeg build with libdvdnav/read.
+# Download and verify the exact GPL FFmpeg build used inside the self-contained
+# .deb. dvdvideo requires a GPL-enabled FFmpeg build with libdvdnav/read.
 FF_ARCHIVE="$WORK/tools/$FFMPEG_ASSET"
 FF_EXTRACT="$WORK/tools/ffmpeg"
-echo "Downloading pinned FFmpeg build for .deb bundle..."
+echo "Downloading pinned FFmpeg build for self-contained .deb..."
 curl --fail --location --retry 3 --proto '=https' --tlsv1.2 -o "$FF_ARCHIVE" "$FFMPEG_URL"
 printf '%s  %s\n' "$FFMPEG_SHA256" "$FF_ARCHIVE" | sha256sum --check --strict
 mkdir -p "$FF_EXTRACT"
@@ -141,19 +141,16 @@ install -m 0755 "$BUNDLED_FFMPEG" "$DEBROOT/usr/lib/mattmux/ffmpeg-bin/ffmpeg"
 install -m 0755 "$BUNDLED_FFPROBE" "$DEBROOT/usr/lib/mattmux/ffmpeg-bin/ffprobe"
 install -m 0755 "$BUNDLED_MEDIAINFO" "$DEBROOT/usr/lib/mattmux/mediainfo-bin/mediainfo"
 
-# Launchers preserve the normal system PATH. A compatible system FFmpeg wins;
-# otherwise only MattMux's private FFmpeg directory is prepended. The private
-# MediaInfo directory is appended so an installed system mediainfo also wins.
+# These launchers modify PATH only for the MattMux child process. They do not
+# write to /etc/environment, shell profiles, alternatives, or any system PATH
+# configuration. This makes the .deb self-contained while leaving any existing
+# /usr/bin/ffmpeg, /usr/bin/ffprobe, and /usr/bin/mediainfo completely untouched.
 cat > "$DEBROOT/usr/bin/mattmux" <<'LAUNCHER'
 #!/bin/sh
 set -eu
 FFDIR=/usr/lib/mattmux/ffmpeg-bin
 MIDIR=/usr/lib/mattmux/mediainfo-bin
-if command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1 && ffmpeg -hide_banner -demuxers 2>/dev/null | grep -q 'dvdvideo'; then
-    PATH="$PATH:$MIDIR"
-else
-    PATH="$FFDIR:$PATH:$MIDIR"
-fi
+PATH="$FFDIR:$MIDIR:$PATH"
 export PATH
 exec /usr/lib/mattmux/app/mattmux-bin "$@"
 LAUNCHER
@@ -164,11 +161,7 @@ cat > "$DEBROOT/usr/bin/mattmux-cli" <<'LAUNCHER'
 set -eu
 FFDIR=/usr/lib/mattmux/ffmpeg-bin
 MIDIR=/usr/lib/mattmux/mediainfo-bin
-if command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1 && ffmpeg -hide_banner -demuxers 2>/dev/null | grep -q 'dvdvideo'; then
-    PATH="$PATH:$MIDIR"
-else
-    PATH="$FFDIR:$PATH:$MIDIR"
-fi
+PATH="$FFDIR:$MIDIR:$PATH"
 export PATH
 exec /usr/lib/mattmux/app/mattmux-cli-bin "$@"
 LAUNCHER
@@ -182,13 +175,12 @@ Priority: optional
 Architecture: amd64
 Maintainer: MattMux project <noreply@github.com>
 Depends: libc6, libstdc++6, libgcc-s1, ca-certificates, libgl1, libx11-6, libxcursor1, libxrandr2, libxinerama1, libxi6, libxkbcommon0, libwayland-client0
-Suggests: ffmpeg, mediainfo
 Homepage: https://github.com/maas3n/MattMux
-Description: Lossless DVD title remuxing to Matroska
+Description: Self-contained lossless DVD title remuxer
  MattMux scans DVD-Video titles and remuxes the selected title to MKV without
- transcoding. This package installs both the MattMux desktop GUI and mattmux-cli,
- plus private bundled FFmpeg, FFprobe and MediaInfo fallbacks under
- /usr/lib/mattmux. Existing distro multimedia tools are never overwritten.
+ transcoding. This package installs the MattMux desktop GUI and CLI together
+ with private FFmpeg, FFprobe and MediaInfo binaries under /usr/lib/mattmux.
+ Existing distro multimedia tools and the user's system PATH are never replaced.
 CONTROL
 
 cat > "$DEBROOT/usr/share/applications/mattmux.desktop" <<DESKTOP
@@ -207,24 +199,29 @@ cat > "$DEBROOT/usr/share/doc/mattmux/README.Debian" <<TXT
 MattMux for Debian/Ubuntu
 =========================
 
+This .deb is the self-contained Linux installer for MattMux $APP_VERSION.
+Install this one package; FFmpeg, FFprobe and MediaInfo are already included.
+
 Commands installed by this package:
   /usr/bin/mattmux
   /usr/bin/mattmux-cli
 
-Private bundled tools:
+Private bundled tools used only by MattMux:
   /usr/lib/mattmux/ffmpeg-bin/ffmpeg
   /usr/lib/mattmux/ffmpeg-bin/ffprobe
   /usr/lib/mattmux/mediainfo-bin/mediainfo
 
-MattMux DOES NOT install /usr/bin/ffmpeg, /usr/bin/ffprobe, or
-/usr/bin/mediainfo. Existing distro installations are left untouched.
+MattMux DOES NOT install or replace:
+  /usr/bin/ffmpeg
+  /usr/bin/ffprobe
+  /usr/bin/mediainfo
 
-At startup the launchers test the system ffmpeg/ffprobe first. If the system
-FFmpeg exposes the dvdvideo demuxer, those tools are preferred. Otherwise the
-private MattMux FFmpeg/FFprobe pair is selected. System MediaInfo is preferred
-when installed; the private MediaInfo copy is the fallback.
+It also does not modify /etc/environment, shell startup files, alternatives, or
+any other system PATH configuration. The launcher prepends the private tool
+directories only to the MattMux process, so an existing system FFmpeg,
+FFprobe, or MediaInfo remains exactly as it was before MattMux was installed.
 
-Use "mattmux-cli tools" to see the paths MattMux currently resolves.
+Use "mattmux-cli tools" to see the private paths MattMux resolves.
 TXT
 
 cat > "$DEBROOT/usr/share/doc/mattmux/THIRD-PARTY-NOTICES" <<TXT
@@ -264,7 +261,9 @@ install -m 0644 "$MI_SRC/LICENSE" "$DEBROOT/usr/share/doc/mattmux/MediaInfo-LICE
 FF_LICENSE="$(find "$FF_EXTRACT" -type f \( -iname 'license*' -o -iname 'copying*' \) | head -n1 || true)"
 if [[ -n "$FF_LICENSE" ]]; then install -m 0644 "$FF_LICENSE" "$DEBROOT/usr/share/doc/mattmux/FFmpeg-LICENSE"; fi
 
-dpkg-deb --build --root-owner-group "$DEBROOT" "$DIST/mattmux_${DEB_VERSION}_amd64.deb" >/dev/null
+# Use an installer-style release filename while retaining a Debian-compliant
+# package name/version in DEBIAN/control.
+dpkg-deb --build --root-owner-group "$DEBROOT" "$DIST/MattMux-$APP_VERSION-Linux-amd64.deb" >/dev/null
 
 # Source snapshot from the exact MattMux commit being built, plus the module
 # metadata resolved by CI so the archive is immediately buildable.

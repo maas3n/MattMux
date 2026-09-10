@@ -35,13 +35,13 @@ jobs:
         working-directory: src
         run: go mod tidy
 
-      - name: Build GUI, CLI, bundled-tools DEB and tarballs
-        run: bash packaging/linux/build-linux-release.sh 1.3.0-dev3
+      - name: Build GUI, CLI, self-contained DEB and tarballs
+        run: bash packaging/linux/build-linux-release.sh 1.3.0-dev4
 
       - name: Inspect and validate Debian package
         run: |
           set -euo pipefail
-          deb='dist/linux-release/mattmux_1.3.0~dev3_amd64.deb'
+          deb='dist/linux-release/MattMux-1.3.0-dev4-Linux-amd64.deb'
           dpkg-deb --info "$deb"
           dpkg-deb --contents "$deb"
 
@@ -51,14 +51,25 @@ jobs:
 
           test -x "$tmp/usr/bin/mattmux"
           test -x "$tmp/usr/bin/mattmux-cli"
+          test -x "$tmp/usr/lib/mattmux/app/mattmux-bin"
+          test -x "$tmp/usr/lib/mattmux/app/mattmux-cli-bin"
           test -x "$tmp/usr/lib/mattmux/ffmpeg-bin/ffmpeg"
           test -x "$tmp/usr/lib/mattmux/ffmpeg-bin/ffprobe"
           test -x "$tmp/usr/lib/mattmux/mediainfo-bin/mediainfo"
 
-          # The package must not replace distribution multimedia commands.
+          # Installing MattMux must never replace the distribution multimedia
+          # commands or ship same-named binaries into /usr/bin.
           test ! -e "$tmp/usr/bin/ffmpeg"
           test ! -e "$tmp/usr/bin/ffprobe"
           test ! -e "$tmp/usr/bin/mediainfo"
+
+          # MattMux's launcher may expose its private tools only to its own child
+          # process. It must not edit global PATH/configuration or prefer system
+          # multimedia tools over the verified bundle.
+          grep -F 'PATH="$FFDIR:$MIDIR:$PATH"' "$tmp/usr/bin/mattmux"
+          grep -F 'PATH="$FFDIR:$MIDIR:$PATH"' "$tmp/usr/bin/mattmux-cli"
+          ! grep -q 'command -v ffmpeg' "$tmp/usr/bin/mattmux"
+          ! grep -q 'command -v ffmpeg' "$tmp/usr/bin/mattmux-cli"
 
           "$tmp/usr/lib/mattmux/ffmpeg-bin/ffmpeg" -hide_banner -demuxers 2>/dev/null | grep dvdvideo
           "$tmp/usr/lib/mattmux/ffmpeg-bin/ffprobe" -version | head -n 1
@@ -68,7 +79,7 @@ jobs:
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: MattMux-Linux-amd64-dev3
+          name: MattMux-Linux-amd64-dev4
           path: |
             dist/linux-release/*.deb
             dist/linux-release/*.tar.gz
@@ -81,14 +92,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag='v1.3.0-dev3'
+          tag='v1.3.0-dev4'
           assets=(
-            dist/linux-release/mattmux_1.3.0~dev3_amd64.deb
-            dist/linux-release/MattMux-1.3.0-dev3-Linux-amd64.tar.gz
-            dist/linux-release/MattMux-1.3.0-dev3-Source.tar.gz
+            dist/linux-release/MattMux-1.3.0-dev4-Linux-amd64.deb
+            dist/linux-release/MattMux-1.3.0-dev4-Linux-amd64.tar.gz
+            dist/linux-release/MattMux-1.3.0-dev4-Source.tar.gz
             dist/linux-release/SHA256SUMS.txt
           )
-          notes='Linux preview for Debian/Ubuntu amd64. Fixes FFprobe/MediaInfo output handling, fully pins the MediaInfo source set, and contains private bundled FFmpeg, FFprobe and MediaInfo fallbacks under /usr/lib/mattmux. Existing /usr/bin multimedia tools are not replaced. Compatible system FFmpeg/FFprobe and system MediaInfo remain preferred.'
+          notes='Self-contained Debian/Ubuntu amd64 preview. The .deb bundles pinned Linux FFmpeg, FFprobe and MediaInfo privately under /usr/lib/mattmux and MattMux always uses those verified copies. Installing the package does not install, replace or modify /usr/bin/ffmpeg, /usr/bin/ffprobe, /usr/bin/mediainfo, alternatives, shell profiles, /etc/environment, or the system PATH. The private tool directories are added only to the MattMux child process. Includes the FFprobe/MediaInfo stderr separation fixes and fully pinned MediaInfo source set from dev3.'
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha')"
             if [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
@@ -100,7 +111,7 @@ jobs:
           else
             gh release create "$tag" "${assets[@]}" \
               --target "$GITHUB_SHA" \
-              --title 'MattMux 1.3.0-dev3 Linux hardened preview' \
+              --title 'MattMux 1.3.0-dev4 self-contained Linux package' \
               --prerelease \
               --notes "$notes" \
               --repo "$GITHUB_REPOSITORY"
