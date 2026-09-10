@@ -1,120 +1,17 @@
-name: Release v1.2.0
+name: Release v1.2.0 (archived)
 
 on:
-  push:
-    branches:
-      - release-v1.2.0
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
-    runs-on: windows-latest
-
+  archived:
+    runs-on: ubuntu-latest
     steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-
-      - name: Set up Go 1.27.1
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.27.1'
-          cache: false
-
-      - name: Test and build MattMux
-        shell: pwsh
-        working-directory: src
+      - name: Explain archived release
         run: |
-          go version
-          go test ./...
-          go vet ./...
-          .\build.ps1
-
-      - name: Prepare offline builder ZIP
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          $stage = Join-Path $PWD 'dist\MattMux-1.2.0-Offline-Builder'
-          New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          New-Item -ItemType Directory -Force -Path (Join-Path $stage 'MattMuxData') | Out-Null
-
-          Copy-Item .\MattMux.exe (Join-Path $stage 'MattMux-Portable.exe') -Force
-          Copy-Item .\src\MattMux.exe.manifest (Join-Path $stage 'MattMux-Portable.exe.manifest') -Force
-          Copy-Item .\src\MattMux.ico (Join-Path $stage 'MattMux.ico') -Force
-          Copy-Item .\packaging\offline-builder\Build-Offline-Package.ps1 $stage -Force
-          Copy-Item .\packaging\offline-builder\BUILD-OFFLINE.cmd $stage -Force
-          Copy-Item .\packaging\offline-builder\README-FIRST.txt $stage -Force
-
-          Set-Content -LiteralPath (Join-Path $stage 'MattMuxData\README.txt') -Encoding ASCII -Value @(
-            'MattMux portable data directory.',
-            'Settings, logs, and cached tools are stored here.'
-          )
-
-          $builderChecksum = Join-Path $stage 'CHECKSUMS-BUILDER.txt'
-          $lines = Get-ChildItem -LiteralPath $stage -File -Recurse |
-            Where-Object { $_.FullName -ne $builderChecksum } |
-            Sort-Object FullName |
-            ForEach-Object {
-              $rel = $_.FullName.Substring($stage.Length + 1).Replace('\','/')
-              $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant()
-              "$hash  $rel"
-            }
-          $lines | Set-Content -LiteralPath $builderChecksum -Encoding ASCII
-
-          Compress-Archive -LiteralPath $stage -DestinationPath .\dist\MattMux-1.2.0-Offline-Builder.zip -CompressionLevel Optimal
-
-      - name: Install Inno Setup
-        shell: pwsh
-        run: choco install innosetup --no-progress -y
-
-      - name: Build Windows installer
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
-          if (-not (Test-Path -LiteralPath $iscc)) {
-            $cmd = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-            if ($null -eq $cmd) { throw 'Inno Setup compiler (ISCC.exe) was not found.' }
-            $iscc = $cmd.Source
-          }
-          & $iscc '/DMyAppVersion=1.2.0' '.\packaging\installer\MattMux.iss'
-
-      - name: Create release checksums
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $assets = @(
-            '.\dist\MattMux-1.2.0-Setup.exe',
-            '.\dist\MattMux-1.2.0-Offline-Builder.zip'
-          )
-          $lines = foreach ($asset in $assets) {
-            if (-not (Test-Path -LiteralPath $asset)) { throw "Missing release asset: $asset" }
-            $item = Get-Item -LiteralPath $asset
-            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $asset).Hash.ToLowerInvariant()
-            "$hash  $($item.Name)"
-          }
-          $lines | Set-Content -LiteralPath .\dist\SHA256SUMS.txt -Encoding ASCII
-          Get-Content .\dist\SHA256SUMS.txt
-
-      - name: Publish GitHub release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $tag = 'v1.2.0'
-          $assets = @(
-            '.\dist\MattMux-1.2.0-Setup.exe',
-            '.\dist\MattMux-1.2.0-Offline-Builder.zip',
-            '.\dist\SHA256SUMS.txt'
-          )
-
-          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag @assets --clobber --repo $env:GITHUB_REPOSITORY
-            gh release edit $tag --title 'MattMux 1.2.0' --notes-file '.\.github\RELEASE_NOTES_1.2.0.md' --repo $env:GITHUB_REPOSITORY
-          } else {
-            gh release create $tag @assets --target main --title 'MattMux 1.2.0' --notes-file '.\.github\RELEASE_NOTES_1.2.0.md' --repo $env:GITHUB_REPOSITORY
-          }
+          echo 'MattMux v1.2.0 is an immutable historical release.'
+          echo 'Do not rebuild or replace its binary assets from this workflow.'
+          echo 'Publish binary changes under a new version/tag instead.'
