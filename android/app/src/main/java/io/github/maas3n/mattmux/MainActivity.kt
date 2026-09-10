@@ -20,6 +20,8 @@ class MainActivity : Activity(), BillingManager.Listener {
         private const val REQUEST_SOURCE_ISO = 1001
         private const val REQUEST_SOURCE_FOLDER = 1002
         private const val REQUEST_OUTPUT_FOLDER = 1003
+        private const val STATE_SOURCE_URI = "source_uri"
+        private const val STATE_OUTPUT_URI = "output_uri"
     }
 
     private val engine: RemuxEngine = AndroidNativeRemuxEngine()
@@ -39,10 +41,17 @@ class MainActivity : Activity(), BillingManager.Listener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(buildUi())
+        restoreSelectionState(savedInstanceState)
 
         billing = BillingManager(this, this)
         billing.start()
         updateRemuxButton()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString(STATE_SOURCE_URI, sourceUri?.toString())
+        outState.putString(STATE_OUTPUT_URI, outputUri?.toString())
+        super.onSaveInstanceState(outState)
     }
 
     override fun onDestroy() {
@@ -86,6 +95,20 @@ class MainActivity : Activity(), BillingManager.Listener {
             }
         }
         updateRemuxButton()
+    }
+
+    private fun restoreSelectionState(savedInstanceState: Bundle?) {
+        sourceUri = savedInstanceState
+            ?.getString(STATE_SOURCE_URI)
+            ?.takeIf { it.isNotBlank() }
+            ?.let(Uri::parse)
+        outputUri = savedInstanceState
+            ?.getString(STATE_OUTPUT_URI)
+            ?.takeIf { it.isNotBlank() }
+            ?.let(Uri::parse)
+
+        sourceValue.text = sourceUri?.let(::describeUri) ?: "No source selected"
+        outputValue.text = outputUri?.let(::describeUri) ?: "No output folder selected"
     }
 
     private fun persistUriPermission(uri: Uri, data: Intent) {
@@ -137,7 +160,7 @@ class MainActivity : Activity(), BillingManager.Listener {
         sourceValue = value("No source selected")
         root.addView(sourceValue)
 
-        val sourceButtons = horizontalRow()
+        val sourceButtons = sourceButtonContainer()
         sourceButtons.addView(button("Choose ISO") { chooseIso() })
         sourceButtons.addView(button("Choose DVD folder") { chooseSourceFolder() })
         root.addView(sourceButtons)
@@ -216,11 +239,18 @@ class MainActivity : Activity(), BillingManager.Listener {
     }
 
     private fun describeUri(uri: Uri): String {
-        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-            val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (index >= 0 && cursor.moveToFirst()) {
-                return cursor.getString(index)
+        try {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index >= 0 && cursor.moveToFirst()) {
+                    return cursor.getString(index)
+                }
             }
+        } catch (_: SecurityException) {
+            // A temporary provider grant can disappear after process recreation.
+            // Keep the URI visible instead of crashing while the user reselects it.
+        } catch (_: RuntimeException) {
+            // Document providers are external processes and may fail transiently.
         }
         return uri.toString()
     }
@@ -238,8 +268,17 @@ class MainActivity : Activity(), BillingManager.Listener {
         setPadding(0, dp(3), 0, dp(8))
     }
 
-    private fun horizontalRow() = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
+    private fun sourceButtonContainer() = LinearLayout(this).apply {
+        orientation = if (
+            WindowLayoutPolicy.stackSourceButtons(
+                resources.configuration.screenWidthDp,
+                resources.configuration.fontScale,
+            )
+        ) {
+            LinearLayout.VERTICAL
+        } else {
+            LinearLayout.HORIZONTAL
+        }
         gravity = Gravity.START
     }
 

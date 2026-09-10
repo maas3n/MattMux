@@ -41,7 +41,7 @@ jobs:
       - name: Install Android platform and native toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl patchelf xz-utils
+          sudo apt-get install -y binutils curl patchelf xz-utils
           sdkmanager \
             'platforms;android-36' \
             'build-tools;36.0.0' \
@@ -57,20 +57,43 @@ jobs:
           ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" \
             bash android/native/build-ffmpeg-android.sh
 
-      - name: Lint and build
+      - name: Test, lint and build
         run: |
-          gradle -p android :app:lintDebug :app:assembleDebug :app:bundleRelease
+          gradle -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:bundleRelease
 
       - name: Verify bundled native libraries
         shell: bash
         run: |
           set -euo pipefail
           APK="$(find android/app/build/outputs/apk/debug -name '*.apk' -print -quit)"
+          AAB="$(find android/app/build/outputs/bundle/release -name '*.aab' -print -quit)"
           test -n "${APK}"
+          test -n "${AAB}"
+
+          BADGING="$("${ANDROID_HOME}/build-tools/36.0.0/aapt" dump badging "${APK}")"
+          grep -Fq "versionCode='102'" <<<"${BADGING}"
+          grep -Fq "versionName='1.2.0-chromeos-alpha2'" <<<"${BADGING}"
+
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
 
           for abi in arm64-v8a x86_64; do
             for lib in libavutil.so libavcodec.so libavformat.so libmattmux_jni.so; do
-              unzip -l "${APK}" "lib/${abi}/${lib}" | grep -q "${lib}"
+              unzip -p "${APK}" "lib/${abi}/${lib}" > "${tmp}/${abi}-${lib}"
+              unzip -l "${AAB}" "base/lib/${abi}/${lib}" | grep -q "${lib}"
+
+              # Android 15+ / Play requires native LOAD segments compatible with
+              # 16 KB pages. Check the packaged ELF, not only ZIP alignment.
+              readelf -lW "${tmp}/${abi}-${lib}" \
+                | awk '$1 == "LOAD" { if (strtonum($NF) < 0x4000) exit 1; found=1 } END { exit !found }'
+
+              # Re-check the final APK for forbidden native dependencies so a
+              # packaging change cannot bypass the build-script policy.
+              if readelf -dW "${tmp}/${abi}-${lib}" \
+                | grep -Eiq 'NEEDED.*(dvdnav|dvdread|dvdcss|x264|x265|xvid)'; then
+                echo "Forbidden dependency in packaged ${abi}/${lib}" >&2
+                exit 1
+              fi
             done
           done
 
