@@ -40,6 +40,19 @@ func main() {
 	}
 }
 
+func windowDPI(hwnd uintptr) int32 {
+	hdc, _, _ := procGetDC.Call(hwnd)
+	dpi, _, _ := procGetDeviceCaps.Call(hdc, LOGPIXELSY)
+	procReleaseDC.Call(hwnd, hdc)
+	if dpi == 0 { return 96 }
+	return int32(dpi)
+}
+
+func scale96(v, dpi int32) int32 {
+	if dpi <= 0 { dpi = 96 }
+	return (v*dpi + 48) / 96
+}
+
 func createMainWindow() error {
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 	className := utf16Ptr("MattMuxWindowClass")
@@ -48,13 +61,19 @@ func createMainWindow() error {
 	bg, _, _ := procGetStockObject.Call(5)
 	wc := WNDCLASSEX{CbSize: uint32(unsafe.Sizeof(WNDCLASSEX{})), LpfnWndProc: syscall.NewCallback(windowProc), HInstance: hInstance, HIcon: icon, HCursor: cursor, HbrBackground: bg, HIconSm: icon, LpszClassName: className}
 	if r, _, err := procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc))); r == 0 { return fmt.Errorf("RegisterClassExW failed: %v", err) }
+
+	// The UI is authored on a 96-DPI design grid. Scale both the window and every
+	// child control to the monitor DPI; previously only the fonts were scaled,
+	// which caused clipping and overlap at 125%/150%/175% Windows scaling.
+	dpi := windowDPI(0)
+	winW, winH := scale96(820, dpi), scale96(615, dpi)
 	style := uintptr(WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX)
-	hwnd, _, err := procCreateWindowExW.Call(WS_EX_CONTROLPARENT, uintptr(unsafe.Pointer(className)), uintptr(unsafe.Pointer(utf16Ptr(appName+" "+appVersion))), style, 0, 0, 820, 615, 0, 0, hInstance, 0)
+	hwnd, _, err := procCreateWindowExW.Call(WS_EX_CONTROLPARENT, uintptr(unsafe.Pointer(className)), uintptr(unsafe.Pointer(utf16Ptr(appName+" "+appVersion))), style, 0, 0, uintptr(winW), uintptr(winH), 0, 0, hInstance, 0)
 	if hwnd == 0 { return fmt.Errorf("CreateWindowExW failed: %v", err) }
 	app.hwnd = hwnd
 	createFonts(hwnd)
 	createControls(hwnd, hInstance)
-	centerWindow(hwnd, 820, 615)
+	centerWindow(hwnd, winW, winH)
 	procDragAcceptFiles.Call(hwnd, 1)
 	procShowWindow.Call(hwnd, SW_SHOW)
 	procUpdateWindow.Call(hwnd)
@@ -80,11 +99,8 @@ func loadAppIcon() uintptr {
 }
 
 func createFonts(hwnd uintptr) {
-	hdc, _, _ := procGetDC.Call(hwnd)
-	dpi, _, _ := procGetDeviceCaps.Call(hdc, LOGPIXELSY)
-	procReleaseDC.Call(hwnd, hdc)
-	if dpi == 0 { dpi = 96 }
-	fontHeight := func(pt int32) int32 { r, _, _ := procMulDiv.Call(uintptr(pt), uintptr(dpi), 72); return -int32(r) }
+	dpi := uintptr(windowDPI(hwnd))
+	fontHeight := func(pt int32) int32 { r, _, _ := procMulDiv.Call(uintptr(pt), dpi, 72); return -int32(r) }
 	app.bodyFont = createFont(fontHeight(10), FW_NORMAL, "Segoe UI")
 	app.headerFont = createFont(fontHeight(22), FW_SEMIBOLD, "Segoe UI")
 	app.monoFont = createFont(fontHeight(10), FW_NORMAL, "Consolas")
@@ -96,8 +112,10 @@ func createFont(height int32, weight int32, face string) uintptr {
 }
 
 func createControls(hwnd, hInstance uintptr) {
+	dpi := windowDPI(hwnd)
+	s := func(v int32) int32 { return scale96(v, dpi) }
 	add := func(ex uint32, class, text string, style uint32, x, y, w, h int32, id int, font uintptr) uintptr {
-		c, _, _ := procCreateWindowExW.Call(uintptr(ex), uintptr(unsafe.Pointer(utf16Ptr(class))), uintptr(unsafe.Pointer(utf16Ptr(text))), uintptr(style), uintptr(x), uintptr(y), uintptr(w), uintptr(h), hwnd, uintptr(id), hInstance, 0)
+		c, _, _ := procCreateWindowExW.Call(uintptr(ex), uintptr(unsafe.Pointer(utf16Ptr(class))), uintptr(unsafe.Pointer(utf16Ptr(text))), uintptr(style), uintptr(s(x)), uintptr(s(y)), uintptr(s(w)), uintptr(s(h)), hwnd, uintptr(id), hInstance, 0)
 		if font != 0 { procSendMessageW.Call(c, WM_SETFONT, font, 1) }
 		return c
 	}

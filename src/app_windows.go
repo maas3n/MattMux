@@ -19,7 +19,7 @@ const (
 	// against this hard-coded SHA-256 before trusting the archive checksum inside it.
 	ffmpegReleaseTag   = "autobuild-2026-09-08-23-15"
 	ffmpegAssetName    = "ffmpeg-N-126479-g08cd8df29d-win64-gpl-shared.zip"
-	ffmpegManifestSHA  = "d0bc1f689725bead0681dbcc0bfbf6eb12582d3100e6973d32837c6571b2e1dc"
+	ffmpegManifestSHA  = "f64be162403094773397bfcc299a4a059507028afa7563591fd05c17d56b3214"
 	mediaInfoVersion   = "26.05"
 	mediaInfoAssetName = "MediaInfo_CLI_26.05_Windows_x64.zip"
 	mediaInfoSHA       = "f7f80620ce6d14f4995f0de6f98e3ef18ad29496db01899571152ee3311229f9"
