@@ -1,8 +1,22 @@
 # MattMux
 
-**MattMux** is a lightweight native Windows utility for remuxing a DVD-Video title to an MKV file **without transcoding**.
+**MattMux** remuxes DVD-Video titles to MKV **without transcoding**. Windows and Linux builds are functional today, and there is also an experimental ChromeOS/Android app preview.
 
-It accepts a DVD folder / `VIDEO_TS` structure or an ISO image, scans the available titles, and uses FFmpeg to copy the selected title's streams into MKV. Chapter preservation is optional and enabled by default.
+MattMux accepts a DVD folder / `VIDEO_TS` structure or an ISO image, scans the available titles, and uses FFmpeg to copy the selected title's streams into MKV. Chapter preservation is optional and enabled by default.
+
+## Downloads
+
+| Platform | Status | Recommended download |
+| --- | --- | --- |
+| Windows x64 | **Stable — 1.2.0** | [MattMux 1.2.0 release](https://github.com/maas3n/MattMux/releases/tag/v1.2.0) — All-in-One EXE, installer, or portable ZIP |
+| Linux amd64 | **Preview — 1.3.0-dev5** | [MattMux 1.3.0-dev5 release](https://github.com/maas3n/MattMux/releases/tag/v1.3.0-dev5) — standalone executable or self-contained `.deb` |
+| ChromeOS / Android | **Experimental — 1.2.0 Alpha 2** | [ChromeOS Alpha 2 release](https://github.com/maas3n/MattMux/releases/tag/v1.2.0-chromeos-alpha2) |
+
+For Linux, `MattMux-1.3.0-dev5-Linux-amd64Standalone` is the simplest no-install option: make it executable and run it directly. The `.deb` is the recommended option if you want normal Debian/Ubuntu installation and menu integration.
+
+The ChromeOS/Android build is currently an **app/native-runtime preview**. Its Android-native remux engine is still in development, so it should not be treated as equivalent to the Windows or Linux builds yet.
+
+All published binaries and checksums are available under [GitHub Releases](https://github.com/maas3n/MattMux/releases).
 
 ## Highlights
 
@@ -12,20 +26,59 @@ It accepts a DVD folder / `VIDEO_TS` structure or an ISO image, scans the availa
 - Optional DVD chapter preservation
 - Native Go IFO chapter parser with FFprobe fallback
 - Metadata viewer with detected chapter start times and durations
-- Cancelable scans, downloads, metadata reads, and remuxes
+- Cancelable scans, metadata reads, and remuxes
 - Writes to `*.partial.mkv` and renames only after a successful FFmpeg exit
-- Pinned and SHA-256-verified FFmpeg and MediaInfo downloads
-- ZIP path-traversal and oversized-entry protections
-- Persistent settings and local logs under `%LOCALAPPDATA%\MattMux`
-- Native Win32 UI written in dependency-free Go
+- Pinned and SHA-256-verified third-party runtime tools
+- Windows installer, portable ZIP, and one-file All-in-One EXE
+- Linux self-contained `.deb` and one-file standalone executable
+- Bundled Linux tools remain private to MattMux and do not replace system FFmpeg, FFprobe, or MediaInfo
 
 ## Requirements
 
-- Windows x64
-- An unencrypted DVD-Video folder/ISO, or media you are authorized to process
-- Internet access on first use if FFmpeg/MediaInfo are not already cached
+### Windows
 
-MattMux does **not** bypass DVD copy protection such as CSS.
+- Windows x64
+- Use one of the published self-contained packages for the easiest setup
+- The current binaries are not Authenticode-signed, so Windows may show a publisher/security warning
+
+### Linux
+
+- amd64 / x86_64
+- The `.deb` is intended for Debian/Ubuntu-family systems
+- The standalone build expects a normal 64-bit desktop Linux runtime with the usual graphical system libraries
+- No system-wide FFmpeg, FFprobe, or MediaInfo replacement is performed by the self-contained `.deb` or standalone build
+
+### ChromeOS / Android
+
+- Experimental preview only
+- Android 8.0 / API 26 or newer
+- arm64-v8a and x86_64 builds are currently targeted
+
+For every platform, use an unencrypted DVD-Video source or media you are authorized to process. MattMux does **not** bypass DVD copy protection such as CSS.
+
+## Quick start
+
+### Windows
+
+Download either the All-in-One EXE, Setup EXE, or Portable ZIP from the [1.2.0 release](https://github.com/maas3n/MattMux/releases/tag/v1.2.0), then launch MattMux normally.
+
+### Linux standalone
+
+```bash
+chmod +x MattMux-1.3.0-dev5-Linux-amd64Standalone
+./MattMux-1.3.0-dev5-Linux-amd64Standalone
+```
+
+The standalone file contains MattMux plus its pinned FFmpeg, FFprobe, and MediaInfo runtime. On first launch it extracts its private runtime into the current user's cache and adjusts `PATH` only for the MattMux process. It does not modify the global system `PATH` or replace `/usr/bin/ffmpeg`, `/usr/bin/ffprobe`, or `/usr/bin/mediainfo`.
+
+### Debian / Ubuntu package
+
+```bash
+sudo apt install ./MattMux-1.3.0-dev5-Linux-amd64.deb
+mattmux
+```
+
+The package installs MattMux normally while keeping its bundled multimedia tools private under `/usr/lib/mattmux`.
 
 ## How it works
 
@@ -36,7 +89,7 @@ MattMux does **not** bypass DVD copy protection such as CSS.
 5. Leave **Preserve chapters in the output MKV** enabled if you want chapters retained.
 6. Click **Remux**.
 
-FFmpeg remains the component that writes the final MKV. MattMux orchestrates source detection, title selection, dependency verification, metadata/chapter inspection, progress reporting, cancellation, and safe output handling.
+FFmpeg remains the component that writes the final MKV. MattMux orchestrates source detection, title selection, dependency/runtime verification, metadata and chapter inspection, progress reporting, cancellation, and safe output handling.
 
 ## Chapter handling
 
@@ -46,16 +99,17 @@ When chapter preservation is enabled, MattMux uses FFmpeg's DVD pre-indexing and
 
 No mkvmerge, ChapterGrabber, .NET runtime, or separate chapter utility is required.
 
-## Third-party tools
+## Third-party runtime tools
 
-MattMux downloads third-party tools on demand and verifies the expected files before use:
+MattMux uses **FFmpeg / FFprobe** and **MediaInfo CLI**. The source repository does not commit their binary distributions, but the self-contained Windows and Linux release packages bundle verified copies so normal users do not need to install or replace those tools system-wide.
 
-- **FFmpeg / FFprobe** — BtbN FFmpeg Builds
-- **MediaInfo CLI** — MediaArea
+The Linux portable tarball is intentionally lighter and may use runtime discovery/fallback behavior instead of carrying the full self-contained bundle.
 
-The exact pinned versions and verification values are documented in [`THIRD_PARTY.md`](THIRD_PARTY.md).
+Exact pinned versions, source revisions, hashes, and licensing notes are documented in [`THIRD_PARTY.md`](THIRD_PARTY.md).
 
 ## Build from source
+
+### Windows (`main` branch)
 
 Release builds require **Go 1.27.1 or newer** on Windows.
 
@@ -63,9 +117,7 @@ Release builds require **Go 1.27.1 or newer** on Windows.
 powershell -ExecutionPolicy Bypass -File .\src\build.ps1
 ```
 
-The build script runs the test suite before producing `MattMux.exe`.
-
-You can also run the tests directly:
+You can run the tests directly with:
 
 ```powershell
 cd src
@@ -73,35 +125,33 @@ go test ./...
 go vet ./...
 ```
 
-## Repository layout
+### Linux (`linux-support` branch)
 
-```text
-MattMux/
-├── src/               # Go source, tests, manifest, build script
-├── .github/workflows/ # CI build/test workflow
-├── CHANGELOG.md
-├── THIRD_PARTY.md
-└── README.md
+The Linux release builder produces the GUI, CLI, self-contained `.deb`, portable tarball, source archive, and single-file standalone build:
+
+```bash
+git switch linux-support
+bash packaging/linux/build-linux-release.sh 1.3.0-dev5
 ```
 
-Prebuilt installers and portable bundles should be distributed through **GitHub Releases** rather than committed into normal repository history.
+The script checks for its required build tools, downloads only the pinned third-party sources/assets used for packaging, and verifies the FFmpeg archive before use.
 
-## Version
+### ChromeOS / Android (`android-chromeos` branch)
 
-Current source release: **1.2.0**
+Android development lives on the `android-chromeos` branch while the native remux engine is being completed.
 
-See [`CHANGELOG.md`](CHANGELOG.md) for release notes.
+## Repository branches
 
-## Support MattMux
-If MattMux is useful to you and you'd like to support its development, Bitcoin donations are appreciated but entirely optional.
-<div align="left">
-  
-<img src="https://upload.wikimedia.org/wikipedia/commons/4/46/Bitcoin.svg" width="14" height="14"> <small>**BTC:** `bc1q79hj2zukfmm75278a7wssjmexanuhvs5nequel`</small>
+- **`main`** — stable Windows source and Windows release tooling
+- **`linux-support`** — current Linux GUI/CLI and packaging work
+- **`android-chromeos`** — experimental ChromeOS/Android app
 
-</div>
+Prebuilt binaries belong in **GitHub Releases** rather than normal repository history.
+
+See [`CHANGELOG.md`](CHANGELOG.md) for the stable Windows release history.
 
 ## License
 
-No open-source license has been selected for MattMux yet. The source is publicly viewable in this repository, but no additional reuse/distribution rights are granted until a license is added.
+MattMux is licensed under the [MIT License](LICENSE).
 
-FFmpeg, MediaInfo, and other third-party projects remain governed by their own licenses.
+FFmpeg, MediaInfo, and other third-party projects remain governed by their own licenses. See [`THIRD_PARTY.md`](THIRD_PARTY.md) for the runtime components currently used by each platform.
