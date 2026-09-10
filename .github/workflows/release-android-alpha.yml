@@ -14,7 +14,7 @@ permissions:
 env:
   FFMPEG_VERSION: '9.0.1'
   ANDROID_NDK_VERSION: '30.0.16248370'
-  RELEASE_TAG: 'v1.2.0-chromeos-alpha1'
+  RELEASE_TAG: 'v1.2.0-chromeos-alpha2'
 
 jobs:
   release:
@@ -56,12 +56,16 @@ jobs:
         run: |
           gradle -p android :app:lintDebug :app:assembleDebug
 
-      - name: Verify bundled native libraries
+      - name: Verify APK version and bundled native libraries
         shell: bash
         run: |
           set -euo pipefail
           APK="$(find android/app/build/outputs/apk/debug -name '*.apk' -print -quit)"
           test -n "${APK}"
+
+          BADGING="$("${ANDROID_HOME}/build-tools/36.0.0/aapt" dump badging "${APK}")"
+          grep -Fq "versionCode='102'" <<<"${BADGING}"
+          grep -Fq "versionName='1.2.0-chromeos-alpha2'" <<<"${BADGING}"
 
           for abi in arm64-v8a x86_64; do
             for lib in libavutil.so libavcodec.so libavformat.so libmattmux_jni.so; do
@@ -81,7 +85,7 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           APK="$(find android/app/build/outputs/apk/debug -name '*.apk' -print -quit)"
-          cp "${APK}" dist/MattMux-1.2.0-ChromeOS-Alpha1.apk
+          cp "${APK}" dist/MattMux-1.2.0-ChromeOS-Alpha2.apk
           cp android/native/.work/ffmpeg-${FFMPEG_VERSION}.tar.xz \
             dist/FFmpeg-${FFMPEG_VERSION}-source.tar.xz
           cp android/app/src/main/assets/ffmpeg/ffmpeg-build-info.txt \
@@ -94,7 +98,7 @@ jobs:
           (
             cd dist
             sha256sum \
-              MattMux-1.2.0-ChromeOS-Alpha1.apk \
+              MattMux-1.2.0-ChromeOS-Alpha2.apk \
               FFmpeg-${FFMPEG_VERSION}-source.tar.xz \
               FFmpeg-build-info.txt \
               COPYING.LGPLv2.1.txt \
@@ -103,11 +107,13 @@ jobs:
           )
 
           cat > dist/RELEASE_NOTES.md <<'EOF'
-          # MattMux 1.2.0 ChromeOS Alpha 1
+          # MattMux 1.2.0 ChromeOS Alpha 2
 
           Early Chromebook/Android test build.
 
           This APK is self-contained and bundles an LGPL-only FFmpeg 9.0.1 runtime for both arm64-v8a and x86_64. No FFmpeg download is required after installation.
+
+          This release corrects the package/release version mismatch from Alpha 1. The APK now reports versionName 1.2.0-chromeos-alpha2 and versionCode 102, matching the release tag and filename.
 
           Important: the Android/ChromeOS remux engine is still under development and Google Play purchases remain disabled. This APK is for installation/UI/native-runtime testing only and is not the final paid Play Store build.
 
@@ -123,7 +129,7 @@ jobs:
         run: |
           set -euo pipefail
           ASSETS=(
-            dist/MattMux-1.2.0-ChromeOS-Alpha1.apk
+            dist/MattMux-1.2.0-ChromeOS-Alpha2.apk
             dist/FFmpeg-${FFMPEG_VERSION}-source.tar.xz
             dist/FFmpeg-build-info.txt
             dist/COPYING.LGPLv2.1.txt
@@ -132,11 +138,17 @@ jobs:
           )
 
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/${RELEASE_TAG}" --jq '.object.sha')"
+            if [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
+              echo "Refusing to replace ${RELEASE_TAG} assets: tag points to $tag_sha but this build is $GITHUB_SHA." >&2
+              echo "Bump the alpha version instead of publishing different source under the same tag." >&2
+              exit 1
+            fi
             gh release upload "${RELEASE_TAG}" "${ASSETS[@]}" --clobber
           else
             gh release create "${RELEASE_TAG}" "${ASSETS[@]}" \
               --target "${GITHUB_SHA}" \
-              --title 'MattMux 1.2.0 ChromeOS Alpha 1' \
+              --title 'MattMux 1.2.0 ChromeOS Alpha 2' \
               --notes-file dist/RELEASE_NOTES.md \
               --prerelease
           fi
