@@ -20,7 +20,7 @@ fi
 
 : "${ANDROID_NDK_HOME:?Set ANDROID_NDK_HOME to the Android NDK directory.}"
 
-for tool in curl sha256sum tar make patchelf; do
+for tool in curl git sha256sum tar make patchelf autoreconf; do
   command -v "${tool}" >/dev/null 2>&1 || {
     echo "Required build tool not found: ${tool}" >&2
     exit 1
@@ -61,6 +61,16 @@ echo "${FFMPEG_SHA256}  ${ARCHIVE}" | sha256sum -c -
 tar -xf "${ARCHIVE}" -C "${WORK_DIR}"
 SOURCE_DIR="${WORK_DIR}/ffmpeg-${FFMPEG_VERSION}"
 
+# Official VideoLAN 1.1.2 release; verify the peeled commit, not only the tag.
+UDFREAD_COMMIT=a35513813819efadca82c4b90edbe1407b1b9e05
+UDF_SOURCE="${WORK_DIR}/libudfread"
+git clone --depth 1 --branch 1.1.2 https://code.videolan.org/videolan/libudfread.git "${UDF_SOURCE}"
+test "$(git -C "${UDF_SOURCE}" rev-parse HEAD)" = "${UDFREAD_COMMIT}"
+git -C "${UDF_SOURCE}" archive --format=tar --prefix=libudfread-1.1.2/ HEAD | gzip -n > "${WORK_DIR}/libudfread-1.1.2-source.tar.gz"
+cp "${UDF_SOURCE}/COPYING" "${ASSET_ROOT}/LIBUDFREAD_COPYING.txt"
+(cd "${UDF_SOURCE}" && autoreconf -fi)
+
+
 cp "${SOURCE_DIR}/COPYING.LGPLv2.1" "${ASSET_ROOT}/COPYING.LGPLv2.1"
 cp "${SOURCE_DIR}/LICENSE.md" "${ASSET_ROOT}/FFMPEG_LICENSE.md"
 
@@ -77,7 +87,10 @@ Android minimum native API: ${ANDROID_API}
 License mode: LGPL-only dynamic libraries
 GPL enabled: no
 nonfree enabled: no
-Bundled DVD libraries: none
+Bundled GPL DVD libraries: none
+UDF reader: libudfread 1.1.2, LGPL-2.1-or-later, separate shared library
+UDF source: https://code.videolan.org/videolan/libudfread
+UDF commit: ${UDFREAD_COMMIT}
 Supported ABIs: arm64-v8a, x86_64
 
 The FFmpeg shared libraries are built from the unmodified upstream source archive.
@@ -199,17 +212,33 @@ build_abi() {
   copy_android_shared_library "${prefix}" "${abi}" avcodec
   copy_android_shared_library "${prefix}" "${abi}" avformat
 
+  mkdir -p "${WORK_DIR}/udf-${abi}"
+  (
+    cd "${WORK_DIR}/udf-${abi}"
+    CC="${cc}" AR="${AR}" RANLIB="${RANLIB}" STRIP="${STRIP}" \
+      CFLAGS="-O2 -fPIC" LDFLAGS="-Wl,-z,max-page-size=16384" \
+      "${UDF_SOURCE}/configure" --host="${target}" --prefix="${prefix}" --enable-shared --disable-static
+    make -j2
+    make install
+  )
+  cp "$(readlink -f "${prefix}/lib/libudfread.so")" "${jni_dir}/libudfread.so"
+  patchelf --set-soname libudfread.so "${jni_dir}/libudfread.so"
+
   "${cc}" \
     -shared \
     -fPIC \
     -O2 \
     -I"${prefix}/include" \
+    -I"${prefix}/include/udfread" \
     "${SCRIPT_DIR}/mattmux_jni.c" \
+    "${SCRIPT_DIR}/udf_source.c" \
     -L"${jni_dir}" \
     -Wl,--no-as-needed \
     -lavformat \
     -lavcodec \
     -lavutil \
+    -ludfread \
+    -Wl,-z,max-page-size=16384 \
     -llog \
     -Wl,--no-undefined \
     -Wl,-soname,libmattmux_jni.so \

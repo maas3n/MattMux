@@ -9,7 +9,15 @@ internal data class DvdTitlePlan(
     val cells: List<DvdCellRange>,
     val chapterStartsMs: LongArray,
     val chapterEndsMs: LongArray,
-)
+) {
+    /** Stable source-independent diagnostic contract (sector ends are exclusive). */
+    fun diagnosticJson(): String = "{\"global_title\":$globalTitle,\"title_set\":$titleSet,\"duration_ms\":$durationMs," +
+        "\"cells\":[" + cells.joinToString(",") {
+            "{\"start_sector\":${it.startSector},\"end_sector_exclusive\":${it.endSectorExclusive}}"
+        } + "],\"chapters\":[" + chapterStartsMs.indices.joinToString(",") {
+            "{\"start_ms\":${chapterStartsMs[it]},\"end_ms\":${chapterEndsMs[it]}}"
+        } + "]}"
+}
 
 /** Conservative DVD-Video IFO parser used by the Android LGPL build. */
 internal object DvdIfoParser {
@@ -40,7 +48,7 @@ internal object DvdIfoParser {
                 }
                 val plan = buildPlan(location, vts)
                 if (best == null || plan.durationMs > best!!.durationMs) best = plan
-            } catch (t: Throwable) {
+            } catch (t: IllegalArgumentException) {
                 lastError = t
             }
         }
@@ -82,6 +90,7 @@ internal object DvdIfoParser {
         val pgc = parsePgc(vts, pgcn)
         require(pgc.playbackMode == 0) { "Title uses random/shuffle playback" }
         require(pgc.stillTime == 0) { "Title uses still-time semantics" }
+        validateCells(pgc)
         val starts = programStartsMs(pgc)
         val total = totalDurationMs(pgc)
         val firstPgn = ptts.first().pgn
@@ -174,6 +183,30 @@ internal object DvdIfoParser {
         return Pgc(programs, cells, u8(vts, pgcBase + 0xA3), u8(vts, pgcBase + 0xA2), map, vts.copyOfRange(cellStart, cellStart + cells * 24))
     }
 
+    private fun validateCells(pgc: Pgc) {
+        var angleBlock = false
+        for (cell in 0 until pgc.cells) {
+            val flags = u8(pgc.cellData, cell * 24)
+            val mode = flags ushr 6
+            val type = (flags ushr 4) and 3
+            require(flags and 4 == 0) { "Interleaved angle VOBs require NAV/VOBU selection, which this build does not support" }
+            when (type) {
+                0 -> require(mode == 0 && !angleBlock) { "Malformed DVD angle block" }
+                1 -> when (mode) {
+                    1 -> { require(!angleBlock); angleBlock = true }
+                    2 -> require(angleBlock) { "Orphan middle angle cell" }
+                    3 -> { require(angleBlock); angleBlock = false }
+                    else -> error("Invalid angle block mode")
+                }
+                else -> throw IllegalArgumentException("Unsupported DVD cell block type")
+            }
+            if (cell + 1 in pgc.programMap && cell > 0) {
+                require(mode == 0 || mode == 1) { "Program starts inside an angle block" }
+            }
+        }
+        require(!angleBlock) { "Unterminated DVD angle block" }
+    }
+
     private fun programStartsMs(pgc: Pgc): LongArray {
         val starts = LongArray(pgc.programs)
         var total = 0L
@@ -208,11 +241,11 @@ internal object DvdIfoParser {
         require(mm < 60 && ss < 60) { "Invalid DVD time" }
         val frame = u8(data, off + 3)
         val rate = frame ushr 6
-        val frames = ((frame ushr 4) and 3) * 10 + (frame and 15)
+        val frames = bcd(frame and 0x3f)
         val base = (hh * 3600L + mm * 60L + ss) * 1000L
         return when (rate) {
             1 -> { require(frames < 25); base + frames * 1000L / 25L }
-            3 -> { require(frames < 30); base + frames * 1000L / 30L }
+            3 -> { require(frames < 30); base + frames * 1001L / 30L }
             0, 2 -> { require(frames == 0); base }
             else -> error("Invalid frame rate")
         }
@@ -224,7 +257,7 @@ internal object DvdIfoParser {
         val base = sector.toInt() * SECTOR_SIZE
         require(base + 8 <= data.size) { "IFO table points outside file" }
         val endAddr = u32(data, base + 4)
-        require(endAddr < Int.MAX_VALUE && base + endAddr.toInt() + 1 <= data.size) { "IFO table end is outside file" }
+        require(endAddr < Int.MAX_VALUE && base.toLong() + endAddr + 1 <= data.size) { "IFO table end is outside file" }
         return base to (base + endAddr.toInt() + 1)
     }
 

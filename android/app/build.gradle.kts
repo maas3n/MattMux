@@ -21,8 +21,8 @@ android {
         applicationId = "io.github.maas3n.mattmux"
         minSdk = 26
         targetSdk = 36
-        versionCode = 103
-        versionName = "1.2.0-chromeos-alpha3"
+        versionCode = 104
+        versionName = "1.2.0-chromeos-alpha4"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")

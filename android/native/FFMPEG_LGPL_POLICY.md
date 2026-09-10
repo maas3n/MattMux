@@ -47,7 +47,7 @@ This list is intentionally conservative and is not exhaustive. Any new native de
 
 ## Intended native surface
 
-Use only the FFmpeg/libav pieces MattMux needs for remuxing DVD program streams into Matroska without transcoding, plus MattMux-owned code for DVD structure and ISO/UDF access.
+Use only the FFmpeg/libav pieces MattMux needs for remuxing DVD program streams into Matroska without transcoding, plus MattMux-owned DVD structure code and a thin read-only fd adapter to LGPL libudfread.
 
 The native build exposes a small JNI surface to Kotlin. The first implemented call reports the loaded FFmpeg/libav versions; the next implementation stage will add:
 
@@ -64,3 +64,12 @@ DVD title/cell selection stays outside FFmpeg in MattMux-owned code.
 ## Release gate
 
 Billing must remain disabled until CI proves the production native build uses the approved configuration and real Chromebook tests confirm correct remux output.
+
+## Alpha 4 UDF dependency
+
+Approved filesystem-only dependency: VideoLAN libudfread 1.1.2, official peeled
+commit `a35513813819efadca82c4b90edbe1407b1b9e05`. Source headers and COPYING
+specify LGPL-2.1-or-later. Build a separate `libudfread.so`, retain its license
+in APK assets, and publish the exact source archive alongside each APK.
+No static link into JNI, root, mounts, FUSE, CSS decryption, or GPL DVD library.
+The same final ELF alignment/dependency checks apply to this library.

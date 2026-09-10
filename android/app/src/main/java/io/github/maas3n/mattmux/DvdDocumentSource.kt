@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
 import android.os.ParcelFileDescriptor
+import java.util.Locale
 
 internal class DvdDocumentSource(
     private val resolver: ContentResolver,
@@ -30,18 +31,21 @@ internal class DvdDocumentSource(
             }?.documentId ?: error("VIDEO_TS folder was not found in the selected tree")
         }
         val entries = listChildren(videoTsId)
-        val byName = entries.associateBy { it.name.uppercase() }
+        val byName = entries.associateBy { it.name.uppercase(Locale.ROOT) }
         val vmg = readEntry(byName["VIDEO_TS.IFO"] ?: error("VIDEO_TS.IFO is missing"))
         val plan = DvdIfoParser.selectLongestTitle(vmg) { titleSet ->
-            byName["VTS_%02d_0.IFO".format(titleSet)]?.let(::readEntry)
+            byName[String.format(Locale.ROOT, "VTS_%02d_0.IFO", titleSet)]?.let(::readEntry)
         }
 
-        val prefix = "VTS_%02d_".format(plan.titleSet)
+        val prefix = String.format(Locale.ROOT, "VTS_%02d_", plan.titleSet)
         val vobEntries = entries
-            .filter { it.name.uppercase().matches(Regex("${prefix}[1-9]\\.VOB")) }
-            .sortedBy { it.name.uppercase() }
+            .filter { it.name.uppercase(Locale.ROOT).matches(Regex("${prefix}[1-9]\\.VOB")) }
+            .sortedBy { it.name.uppercase(Locale.ROOT) }
         require(vobEntries.isNotEmpty()) { "No title VOB files were found for VTS ${plan.titleSet}" }
 
+        vobEntries.forEachIndexed { index, entry ->
+            require(entry.name.equals("${prefix}${index + 1}.VOB", true)) { "Title has a missing VOB part" }
+        }
         val opened = mutableListOf<ParcelFileDescriptor>()
         try {
             vobEntries.forEach { entry ->

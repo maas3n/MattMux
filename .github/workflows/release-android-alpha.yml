@@ -14,7 +14,7 @@ permissions:
 env:
   FFMPEG_VERSION: '9.0.1'
   ANDROID_NDK_VERSION: '30.0.16248370'
-  RELEASE_TAG: 'v1.2.0-chromeos-alpha3'
+  RELEASE_TAG: 'v1.2.0-chromeos-alpha4'
 
 jobs:
   release:
@@ -36,7 +36,7 @@ jobs:
       - name: Install Android platform and native toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y binutils curl patchelf xz-utils
+          sudo apt-get install -y binutils curl patchelf xz-utils autoconf automake libtool pkg-config
           sdkmanager \
             'platforms;android-36' \
             'build-tools;36.0.0' \
@@ -64,14 +64,14 @@ jobs:
           test -n "${APK}"
 
           BADGING="$("${ANDROID_HOME}/build-tools/36.0.0/aapt" dump badging "${APK}")"
-          grep -Fq "versionCode='103'" <<<"${BADGING}"
-          grep -Fq "versionName='1.2.0-chromeos-alpha3'" <<<"${BADGING}"
+          grep -Fq "versionCode='104'" <<<"${BADGING}"
+          grep -Fq "versionName='1.2.0-chromeos-alpha4'" <<<"${BADGING}"
 
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
 
           for abi in arm64-v8a x86_64; do
-            for lib in libavutil.so libavcodec.so libavformat.so libmattmux_jni.so; do
+            for lib in libavutil.so libavcodec.so libavformat.so libudfread.so libmattmux_jni.so; do
               unpacked="${tmp}/${abi}-${lib}"
               unzip -p "${APK}" "lib/${abi}/${lib}" > "${unpacked}"
 
@@ -106,10 +106,14 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           APK="$(find android/app/build/outputs/apk/debug -name '*.apk' -print -quit)"
-          cp "${APK}" dist/MattMux-1.2.0-ChromeOS-Alpha3.apk
+          cp "${APK}" dist/MattMux-1.2.0-ChromeOS-Alpha4.apk
           cp android/native/.work/ffmpeg-${FFMPEG_VERSION}.tar.xz \
             dist/FFmpeg-${FFMPEG_VERSION}-source.tar.xz
+          cp android/native/.work/libudfread-1.1.2-source.tar.gz dist/
+          cp android/app/src/main/assets/ffmpeg/LIBUDFREAD_COPYING.txt dist/
           cp android/app/src/main/assets/ffmpeg/ffmpeg-build-info.txt \
+            dist/libudfread-1.1.2-source.tar.gz
+            dist/LIBUDFREAD_COPYING.txt
             dist/FFmpeg-build-info.txt
           cp android/app/src/main/assets/ffmpeg/COPYING.LGPLv2.1 \
             dist/COPYING.LGPLv2.1.txt
@@ -119,8 +123,10 @@ jobs:
           (
             cd dist
             sha256sum \
-              MattMux-1.2.0-ChromeOS-Alpha3.apk \
+              MattMux-1.2.0-ChromeOS-Alpha4.apk \
               FFmpeg-${FFMPEG_VERSION}-source.tar.xz \
+              libudfread-1.1.2-source.tar.gz \
+              LIBUDFREAD_COPYING.txt \
               FFmpeg-build-info.txt \
               COPYING.LGPLv2.1.txt \
               FFMPEG_LICENSE.md \
@@ -128,25 +134,26 @@ jobs:
           )
 
           cat > dist/RELEASE_NOTES.md <<'EOF'
-          # MattMux 1.2.0 ChromeOS Alpha 3
+          # MattMux 1.2.0 ChromeOS Alpha 4
 
-          Early Chromebook/Android test build with ChromeOS window-state and release-integrity hardening.
+          Experimental DVD remux build for Android and ChromeOS.
 
-          Changes since Alpha 2:
-          - preserves selected source/output URIs across Activity recreation, including ChromeOS free-form window resizing;
-          - stacks source buttons in compact windows and with large font scaling;
-          - adds Android unit tests for responsive layout policy;
-          - verifies packaged native ELF LOAD alignment is at least 16 KB for both arm64-v8a and x86_64;
-          - re-checks the final APK for forbidden GPL/DVD native dependencies;
-          - adds a separate signed Google Play AAB workflow that uses repository secrets and verifies the AAB signature.
+          Changes since Alpha 3:
+          - native VIDEO_TS stream-copy remuxing through the IFO/title/cell planner;
+          - read-only UDF ISO access through a separately linked LGPL libudfread;
+          - the same planner and cell-span input for folders and ISO files;
+          - cancellation, bounded input validation, temporary output and flush checks;
+          - corrected BCD fixtures and source-independent DVD plan diagnostics.
 
-          This APK remains self-contained and bundles an LGPL-only FFmpeg 9.0.1 runtime for arm64-v8a and x86_64. No FFmpeg download is required after installation.
+          Full Linux/Windows output parity and physical Chromebook validation are not yet established.
+          Interleaved multi-angle discs are rejected until NAV/VOBU-aware selection is implemented.
+          Still-time, shuffle and multi-PGC layouts remain unsupported. Encrypted VOBs are not decrypted.
+          ISO9660-only images and non-seekable storage providers are unsupported.
+          Purchases remain disabled. This is not a production Play release.
 
-          Important: the Android/ChromeOS remux engine is still under development and Google Play purchases remain disabled. This APK is for installation/UI/native-runtime testing only and is not the final Play Store build.
-
-          The APK is signed with the standard Android debug key for test installation. The Play workflow is prepared for upload-key signing once the required GitHub Actions secrets are configured.
-
-          Bundled FFmpeg is built without GPL, nonfree, libdvdnav, libdvdread, or libdvdcss components. The exact FFmpeg source archive, LGPL notice, FFmpeg license file, build provenance, and SHA-256 checksums are included as release assets.
+          This self-contained APK includes LGPL FFmpeg 9.0.1 and libudfread 1.1.2 for arm64-v8a and x86_64.
+          It uses an Android debug signing key for testing. The exact library sources, notices,
+          build provenance and checksums accompany the APK. No libdvdread, libdvdnav or libdvdcss is bundled.
           EOF
 
       - name: Publish GitHub pre-release
@@ -156,8 +163,10 @@ jobs:
         run: |
           set -euo pipefail
           ASSETS=(
-            dist/MattMux-1.2.0-ChromeOS-Alpha3.apk
+            dist/MattMux-1.2.0-ChromeOS-Alpha4.apk
             dist/FFmpeg-${FFMPEG_VERSION}-source.tar.xz
+            dist/libudfread-1.1.2-source.tar.gz
+            dist/LIBUDFREAD_COPYING.txt
             dist/FFmpeg-build-info.txt
             dist/COPYING.LGPLv2.1.txt
             dist/FFMPEG_LICENSE.md
@@ -171,11 +180,12 @@ jobs:
               echo "Bump the alpha version instead of publishing different source under the same tag." >&2
               exit 1
             fi
-            gh release upload "${RELEASE_TAG}" "${ASSETS[@]}" --clobber
+            echo "Release already exists; refusing to replace published binaries." >&2
+            exit 1
           else
             gh release create "${RELEASE_TAG}" "${ASSETS[@]}" \
               --target "${GITHUB_SHA}" \
-              --title 'MattMux 1.2.0 ChromeOS Alpha 3' \
+              --title 'MattMux 1.2.0 ChromeOS Alpha 4' \
               --notes-file dist/RELEASE_NOTES.md \
               --prerelease
           fi

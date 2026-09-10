@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <errno.h>
-#include <stdatomic.h>
+#include <limits.h>
+#include "udf_source.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,7 +20,15 @@
 #define IO_BUFFER_SIZE (64 * 1024)
 #define DVD_SECTOR_SIZE 2048LL
 
-static _Atomic int g_cancel_requested = 0;
+typedef struct { JNIEnv *env; jobject engine; jmethodID method; } CancelContext;
+
+static int is_cancelled(void *opaque)
+{
+    CancelContext *ctx = opaque;
+    if (!ctx || !ctx->method) return 0;
+    jboolean result = (*ctx->env)->CallBooleanMethod(ctx->env, ctx->engine, ctx->method);
+    return (*ctx->env)->ExceptionCheck(ctx->env) || result;
+}
 
 typedef struct {
     int64_t source_start;
@@ -28,6 +37,9 @@ typedef struct {
 } SourceSpan;
 
 typedef struct {
+    CancelContext *cancel;
+    DvdUdfSource *udf; /* borrowed for this JNI call */
+    UDFFILE *udf_files[9];
     int *fds;
     int fd_count;
     int64_t *file_starts;
@@ -40,6 +52,7 @@ typedef struct {
 
 typedef struct {
     int fd;
+    CancelContext *cancel;
     int64_t pos;
 } OutputContext;
 
@@ -81,7 +94,7 @@ static int find_file(const SourceContext *ctx, int64_t source_pos)
 static int source_read(void *opaque, uint8_t *buf, int buf_size)
 {
     SourceContext *ctx = (SourceContext *)opaque;
-    if (atomic_load(&g_cancel_requested)) return AVERROR_EXIT;
+    if (is_cancelled(ctx->cancel)) return AVERROR_EXIT;
     if (ctx->pos >= ctx->stream_size) return AVERROR_EOF;
 
     int span_index = find_span(ctx, ctx->pos);
@@ -101,9 +114,17 @@ static int source_read(void *opaque, uint8_t *buf, int buf_size)
     if (wanted > remaining_file) wanted = remaining_file;
     if (wanted <= 0) return AVERROR(EIO);
 
-    ssize_t n = pread(ctx->fds[file_index], buf, (size_t)wanted, (off_t)(source_pos - file_start));
-    if (n < 0) return AVERROR(errno);
-    if (n == 0) return AVERROR_EOF;
+    ssize_t n;
+    if (ctx->udf) {
+        UDFFILE *file = ctx->udf_files[file_index];
+        if (udfread_file_seek(file, source_pos - file_start, SEEK_SET) != source_pos - file_start)
+            return AVERROR(EIO);
+        n = udfread_file_read(file, buf, (size_t)wanted);
+    } else {
+        do { n = pread(ctx->fds[file_index], buf, (size_t)wanted, (off_t)(source_pos - file_start)); }
+        while (n < 0 && errno == EINTR && !is_cancelled(ctx->cancel));
+    }
+    if (n <= 0) return is_cancelled(ctx->cancel) ? AVERROR_EXIT : AVERROR(EIO);
     ctx->pos += n;
     return (int)n;
 }
@@ -128,10 +149,11 @@ static int64_t source_seek(void *opaque, int64_t offset, int whence)
 static int output_write(void *opaque, const uint8_t *buf, int buf_size)
 {
     OutputContext *ctx = (OutputContext *)opaque;
-    if (atomic_load(&g_cancel_requested)) return AVERROR_EXIT;
+    if (is_cancelled(ctx->cancel)) return AVERROR_EXIT;
     int written = 0;
     while (written < buf_size) {
         ssize_t n = pwrite(ctx->fd, buf + written, (size_t)(buf_size - written), (off_t)(ctx->pos + written));
+        if (n < 0 && errno == EINTR) continue;
         if (n < 0) return AVERROR(errno);
         if (n == 0) return AVERROR(EIO);
         written += (int)n;
@@ -166,10 +188,28 @@ static int64_t output_seek(void *opaque, int64_t offset, int whence)
 }
 
 static int init_source(JNIEnv *env, jintArray fd_array, jlongArray starts_array, jlongArray ends_array,
-                       SourceContext *ctx, char *error, size_t error_size)
+                       SourceContext *ctx, DvdUdfSource *udf, int title_set, CancelContext *cancel, char *error, size_t error_size)
 {
     memset(ctx, 0, sizeof(*ctx));
+    ctx->cancel = cancel;
+    ctx->udf = udf;
     jsize fd_count = (*env)->GetArrayLength(env, fd_array);
+    if (udf) {
+        udf->cancelled = is_cancelled;
+        udf->cancel_opaque = cancel;
+        fd_count = 0;
+        int gap = 0;
+        for (int part = 1; part <= 9; ++part) {
+            UDFFILE *file = dvd_udf_file(udf, title_set, part, 0);
+            if (!file) { gap = 1; continue; }
+            if (gap) {
+                udfread_file_close(file);
+                snprintf(error, error_size, "ISO title has a missing VOB part");
+                return AVERROR_INVALIDDATA;
+            }
+            ctx->udf_files[fd_count++] = file;
+        }
+    }
     jsize span_count = (*env)->GetArrayLength(env, starts_array);
     if (fd_count <= 0 || span_count <= 0 || (*env)->GetArrayLength(env, ends_array) != span_count) {
         snprintf(error, error_size, "Invalid native DVD input arrays");
@@ -186,28 +226,42 @@ static int init_source(JNIEnv *env, jintArray fd_array, jlongArray starts_array,
     jint *fds = (*env)->GetIntArrayElements(env, fd_array, NULL);
     jlong *starts = (*env)->GetLongArrayElements(env, starts_array, NULL);
     jlong *ends = (*env)->GetLongArrayElements(env, ends_array, NULL);
-    if (!fds || !starts || !ends) return AVERROR(ENOMEM);
+    if ((!fds && !udf) || !starts || !ends) {
+        if (fds) (*env)->ReleaseIntArrayElements(env, fd_array, fds, JNI_ABORT);
+        if (starts) (*env)->ReleaseLongArrayElements(env, starts_array, starts, JNI_ABORT);
+        if (ends) (*env)->ReleaseLongArrayElements(env, ends_array, ends, JNI_ABORT);
+        return AVERROR(ENOMEM);
+    }
 
     int ret = 0;
     int64_t source_total = 0;
     for (int i = 0; i < fd_count; ++i) {
         struct stat st;
-        ctx->fds[i] = fds[i];
+        ctx->fds[i] = udf ? -1 : fds[i];
         ctx->file_starts[i] = source_total;
-        if (fstat(fds[i], &st) != 0 || st.st_size <= 0) {
+        int64_t size = udf ? udfread_file_size(ctx->udf_files[i]) :
+            (fstat(fds[i], &st) == 0 ? st.st_size : -1);
+        unsigned char probe;
+        if (size <= 0 || size % DVD_SECTOR_SIZE || size > INT64_MAX - source_total ||
+            (!udf && pread(fds[i], &probe, 1, 0) != 1)) {
             snprintf(error, error_size, "DVD VOB descriptor %d is not seekable", i + 1);
             ret = AVERROR(EIO);
             goto done;
         }
-        source_total += st.st_size;
+        source_total += size;
     }
     ctx->total_source_size = source_total;
 
     int64_t stream_total = 0;
     for (int i = 0; i < span_count; ++i) {
+        if (starts[i] < 0 || ends[i] <= starts[i] || ends[i] > source_total / DVD_SECTOR_SIZE) {
+            snprintf(error, error_size, "DVD cell %d points outside title VOB data", i + 1);
+            ret = AVERROR_INVALIDDATA;
+            goto done;
+        }
         int64_t start = starts[i] * DVD_SECTOR_SIZE;
         int64_t end = ends[i] * DVD_SECTOR_SIZE;
-        if (start < 0 || end <= start || end > source_total) {
+        if (start < 0 || end <= start || end > source_total || end - start > INT64_MAX - stream_total) {
             snprintf(error, error_size, "DVD cell %d points outside title VOB data", i + 1);
             ret = AVERROR_INVALIDDATA;
             goto done;
@@ -220,7 +274,7 @@ static int init_source(JNIEnv *env, jintArray fd_array, jlongArray starts_array,
     ctx->stream_size = stream_total;
 
 done:
-    (*env)->ReleaseIntArrayElements(env, fd_array, fds, JNI_ABORT);
+    if (fds) (*env)->ReleaseIntArrayElements(env, fd_array, fds, JNI_ABORT);
     (*env)->ReleaseLongArrayElements(env, starts_array, starts, JNI_ABORT);
     (*env)->ReleaseLongArrayElements(env, ends_array, ends, JNI_ABORT);
     return ret;
@@ -228,6 +282,8 @@ done:
 
 static void free_source(SourceContext *ctx)
 {
+    for (int i = 0; i < 9; ++i) if (ctx->udf_files[i]) udfread_file_close(ctx->udf_files[i]);
+    if (ctx->udf) { ctx->udf->cancelled = NULL; ctx->udf->cancel_opaque = NULL; }
     av_freep(&ctx->fds);
     av_freep(&ctx->file_starts);
     av_freep(&ctx->spans);
@@ -299,31 +355,76 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeVersionSummary(JNIE
     return (*env)->NewStringUTF(env, summary);
 }
 
+static void throw_io(JNIEnv *env, const char *message)
+{
+    jclass cls = (*env)->FindClass(env, "java/io/IOException");
+    if (cls) (*env)->ThrowNew(env, cls, message);
+}
+
+JNIEXPORT jlong JNICALL
+Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeOpenIso(JNIEnv *env, jobject thiz, jint fd)
+{
+    (void)thiz;
+    char error[256] = "Could not allocate UDF reader";
+    DvdUdfSource *source = dvd_udf_open(fd, error, sizeof(error));
+    if (!source) throw_io(env, error);
+    return (jlong)(intptr_t)source;
+}
+
 JNIEXPORT void JNICALL
-Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeCancel(JNIEnv *env, jobject thiz)
+Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeCloseIso(JNIEnv *env, jobject thiz, jlong handle)
 {
     (void)env; (void)thiz;
-    atomic_store(&g_cancel_requested, 1);
+    dvd_udf_close((DvdUdfSource *)(intptr_t)handle);
+}
+
+JNIEXPORT jbyteArray JNICALL
+Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeReadIsoIfo(JNIEnv *env, jobject thiz, jlong handle, jint title_set)
+{
+    (void)thiz;
+    UDFFILE *file = dvd_udf_file((DvdUdfSource *)(intptr_t)handle, title_set, 0, 1);
+    if (!file) return NULL;
+    int64_t size = udfread_file_size(file);
+    jbyteArray result = NULL;
+    uint8_t *bytes = NULL;
+    if (size <= 0 || size > 64 * 1024 * 1024) { throw_io(env, "Invalid ISO IFO size"); goto done; }
+    bytes = malloc((size_t)size);
+    if (!bytes) { throw_io(env, "Could not allocate IFO buffer"); goto done; }
+    int64_t done_bytes = 0;
+    while (done_bytes < size) {
+        ssize_t n = udfread_file_read(file, bytes + done_bytes, (size_t)(size - done_bytes));
+        if (n <= 0) { throw_io(env, "Truncated or unreadable IFO in ISO"); goto done; }
+        done_bytes += n;
+    }
+    result = (*env)->NewByteArray(env, (jsize)size);
+    if (result) (*env)->SetByteArrayRegion(env, result, 0, (jsize)size, (jbyte *)bytes);
+done:
+    free(bytes);
+    udfread_file_close(file);
+    return result;
 }
 
 JNIEXPORT jstring JNICALL
 Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
     JNIEnv *env, jobject thiz, jintArray fd_array, jlongArray starts_array, jlongArray ends_array,
-    jint output_fd, jlongArray chapter_starts, jlongArray chapter_ends)
+    jint output_fd, jlongArray chapter_starts, jlongArray chapter_ends, jlong iso_handle, jint title_set)
 {
-    atomic_store(&g_cancel_requested, 0);
+    jclass engine_class = (*env)->GetObjectClass(env, thiz);
+    CancelContext cancel = {env, thiz, (*env)->GetMethodID(env, engine_class, "isNativeCancelled", "()Z")};
+    if (!cancel.method) return NULL; /* pending JNI exception propagates */
     char error[512] = {0};
     int ret = 0;
     SourceContext source;
-    OutputContext output = { .fd = output_fd, .pos = 0 };
+    OutputContext output = { .fd = output_fd, .cancel = &cancel, .pos = 0 };
     AVIOContext *input_io = NULL, *output_io = NULL;
     AVFormatContext *input = NULL, *out = NULL;
     AVPacket *packet = NULL;
     int *stream_map = NULL;
-    int wrote_header = 0;
 
-    ret = init_source(env, fd_array, starts_array, ends_array, &source, error, sizeof(error));
+
+    ret = init_source(env, fd_array, starts_array, ends_array, &source, (DvdUdfSource *)(intptr_t)iso_handle, title_set, &cancel, error, sizeof(error));
     if (ret < 0) goto cleanup;
+    if (is_cancelled(&cancel)) { ret = AVERROR_EXIT; goto cleanup; }
     if (ftruncate(output_fd, 0) != 0) {
         snprintf(error, sizeof(error), "Could not truncate output document: %s", strerror(errno));
         ret = AVERROR(errno); goto cleanup;
@@ -337,6 +438,9 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
     input = avformat_alloc_context();
     if (!input) { ret = AVERROR(ENOMEM); goto cleanup; }
     input->pb = input_io;
+    input->probesize = 100000000;
+    input->max_analyze_duration = 100000000;
+    input->interrupt_callback = (AVIOInterruptCB){is_cancelled, &cancel};
     input->flags |= AVFMT_FLAG_CUSTOM_IO;
     ret = avformat_open_input(&input, NULL, NULL, NULL);
     if (ret < 0) { ff_error(error, sizeof(error), "Could not open selected DVD program stream", ret); goto cleanup; }
@@ -378,7 +482,7 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
 
     ret = avformat_write_header(out, NULL);
     if (ret < 0) { ff_error(error, sizeof(error), "Could not write Matroska header", ret); goto cleanup; }
-    wrote_header = 1;
+
 
     packet = av_packet_alloc();
     if (!packet) { ret = AVERROR(ENOMEM); goto cleanup; }
@@ -388,7 +492,7 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
     int last_percent = -1;
 
     while ((ret = av_read_frame(input, packet)) >= 0) {
-        if (atomic_load(&g_cancel_requested)) { ret = AVERROR_EXIT; break; }
+        if (is_cancelled(&cancel)) { ret = AVERROR_EXIT; break; }
         int in_index = packet->stream_index;
         int out_index = (in_index >= 0 && (unsigned)in_index < input->nb_streams) ? stream_map[in_index] : -1;
         if (out_index >= 0) {
@@ -406,7 +510,7 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
         if (percent != last_percent) { report_progress(env, thiz, progress_method, percent); last_percent = percent; }
     }
     if (ret == AVERROR_EOF) ret = 0;
-    if (ret == AVERROR_EXIT || atomic_load(&g_cancel_requested)) {
+    if (ret == AVERROR_EXIT || is_cancelled(&cancel)) {
         snprintf(error, sizeof(error), "Remux cancelled");
         ret = AVERROR_EXIT;
     } else if (ret < 0 && error[0] == '\0') {
@@ -416,7 +520,14 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
     if (ret >= 0) {
         ret = av_write_trailer(out);
         if (ret < 0) ff_error(error, sizeof(error), "Could not finalize Matroska file", ret);
-        else report_progress(env, thiz, progress_method, 100);
+        else {
+            avio_flush(output_io);
+            if (output_io->error < 0) ret = output_io->error;
+            else if (fsync(output_fd) < 0) ret = AVERROR(errno);
+            if (is_cancelled(&cancel)) ret = AVERROR_EXIT;
+            if (ret < 0) ff_error(error, sizeof(error), "Could not flush output document", ret);
+            else report_progress(env, thiz, progress_method, 100);
+        }
     }
 
 cleanup:
@@ -426,15 +537,16 @@ cleanup:
         out->pb = NULL;
         avformat_free_context(out);
     }
-    if (output_io) avio_context_free(&output_io);
+    if (output_io) { av_freep(&output_io->buffer); avio_context_free(&output_io); }
     if (input) {
         if (input->iformat) avformat_close_input(&input);
         else avformat_free_context(input);
     }
-    if (input_io) avio_context_free(&input_io);
+    if (input_io) { av_freep(&input_io->buffer); avio_context_free(&input_io); }
     free_source(&source);
 
     if (ret >= 0) return NULL;
+    if (ret == AVERROR_EXIT) snprintf(error, sizeof(error), "Remux cancelled");
     if (error[0] == '\0') ff_error(error, sizeof(error), "Native remux failed", ret);
     return (*env)->NewStringUTF(env, error);
 }

@@ -7,7 +7,7 @@ import org.junit.Test
 class DvdIfoParserTest {
     @Test
     fun decodesNtscAndPalTimes() {
-        assertEquals(5_500L, DvdIfoParser.decodeDvdTimeMs(byteArrayOf(0, 0, 5, 0xCF.toByte())))
+        assertEquals(5_500L, DvdIfoParser.decodeDvdTimeMs(byteArrayOf(0, 0, 5, 0xD5.toByte())))
         assertEquals(40L, DvdIfoParser.decodeDvdTimeMs(byteArrayOf(0, 0, 0, 0x41)))
     }
 
@@ -50,8 +50,8 @@ class DvdIfoParserTest {
         put16(vts, pgc + 0xE8, 0xF0)
         vts[pgc + 0xEC] = 1
         vts[pgc + 0xED] = 3
-        setCell(vts, pgc + 0xF0, category = 0x40, seconds = 5, firstSector = 10, lastSector = 19)
-        setCell(vts, pgc + 0xF0 + 24, category = 0xC0, seconds = 7, firstSector = 20, lastSector = 29)
+        setCell(vts, pgc + 0xF0, category = 0x50, seconds = 5, firstSector = 10, lastSector = 19)
+        setCell(vts, pgc + 0xF0 + 24, category = 0xD0, seconds = 7, firstSector = 20, lastSector = 29)
         setCell(vts, pgc + 0xF0 + 48, category = 0, seconds = 10, firstSector = 30, lastSector = 49)
 
         val plan = DvdIfoParser.selectLongestTitle(vmg) { if (it == 1) vts else null }
@@ -63,11 +63,22 @@ class DvdIfoParserTest {
         assertEquals(listOf(DvdCellRange(10, 20), DvdCellRange(30, 50)), plan.cells)
     }
 
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsInvalidFrameBcd() {
+        DvdIfoParser.decodeDvdTimeMs(byteArrayOf(0, 0, 0, 0xCF.toByte()))
+    }
+
+    @Test
+    fun diagnosticPlanIsStable() {
+        val plan = DvdTitlePlan(2, 1, 1000, listOf(DvdCellRange(3, 5)), longArrayOf(0), longArrayOf(1000))
+        assertEquals("""{"global_title":2,"title_set":1,"duration_ms":1000,"cells":[{"start_sector":3,"end_sector_exclusive":5}],"chapters":[{"start_ms":0,"end_ms":1000}]}""", plan.diagnosticJson())
+    }
+
     private fun setCell(data: ByteArray, off: Int, category: Int, seconds: Int, firstSector: Long, lastSector: Long) {
         data[off] = category.toByte()
         data[off + 4] = 0
         data[off + 5] = 0
-        data[off + 6] = seconds.toByte()
+        data[off + 6] = (((seconds / 10) shl 4) or (seconds % 10)).toByte()
         data[off + 7] = 0xC0.toByte()
         put32(data, off + 8, firstSector)
         put32(data, off + 20, lastSector)
