@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -57,7 +58,23 @@ func probeStreams(ctx context.Context, ffprobe, src string, title int) (ffprobeR
 }
 
 func runHidden(ctx context.Context, path string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, path, args...); cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow:true}; out, err := cmd.CombinedOutput(); if err != nil { if ctx.Err()!=nil { return out, ctx.Err() }; return out, fmt.Errorf("%v: %s", err, strings.TrimSpace(tail(string(out),2000))) }; return out,nil
+	cmd := exec.CommandContext(ctx, path, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow:true}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		if ctx.Err() != nil { return stdout.Bytes(), ctx.Err() }
+		detail := strings.TrimSpace(tail(stderr.String(), 2000))
+		if detail == "" { detail = err.Error() }
+		log.Printf("%s failed: %v; stderr=%s", filepath.Base(path), err, strings.TrimSpace(tail(stderr.String(), 4000)))
+		return stdout.Bytes(), fmt.Errorf("%v: %s", err, detail)
+	}
+	if detail := strings.TrimSpace(stderr.String()); detail != "" {
+		log.Printf("%s stderr: %s", filepath.Base(path), strings.TrimSpace(tail(detail, 4000)))
+	}
+	return stdout.Bytes(), nil
 }
 
 func normalizeSource(p string) (string, error) {
