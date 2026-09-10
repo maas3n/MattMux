@@ -62,7 +62,7 @@ class AndroidNativeRemuxEngine : RemuxEngine {
                 val fds = IntArray(title.vobs.size) { title.vobs[it].fd }
                 val starts = LongArray(title.plan.cells.size) { title.plan.cells[it].startSector }
                 val ends = LongArray(title.plan.cells.size) { title.plan.cells[it].endSectorExclusive }
-                val error = nativeRemux(
+                val nativeError = nativeRemux(
                     fds,
                     starts,
                     ends,
@@ -70,7 +70,9 @@ class AndroidNativeRemuxEngine : RemuxEngine {
                     title.plan.chapterStartsMs,
                     title.plan.chapterEndsMs,
                 )
-                if (error != null) error(error)
+                if (nativeError != null) {
+                    throw IllegalStateException(nativeError)
+                }
                 val finalUri = output.commit(pending)
                 return RemuxResult(finalUri, title.plan.globalTitle, title.plan.durationMs)
             } catch (t: Throwable) {
