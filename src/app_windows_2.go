@@ -30,7 +30,7 @@ func startAsync(label string, fn func(context.Context) error) {
 	ctx, cancel := context.WithCancel(context.Background()); app.cancelMu.Lock(); app.cancel = cancel; app.cancelMu.Unlock(); setBusyUI(true); setStatus(label); log.Printf("operation start: %s", label)
 	go func() { err := fn(ctx); cancelled := errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled); if err != nil && !cancelled { log.Printf("operation failed: %v", err); setStatus("Failed: "+firstLine(err.Error())); messageBox(app.hwnd, "MattMux", err.Error(), MB_OK|MB_ICONERROR) } else if cancelled { log.Printf("operation cancelled"); setStatus("Operation cancelled."); setProgress(0) }; app.cancelMu.Lock(); app.cancel = nil; app.cancelMu.Unlock(); app.busy.Store(false); setBusyUI(false) }()
 }
-func (a *application) cancelCurrent() { a.cancelMu.Lock(); c := a.cancel; app.cancelMu.Unlock(); if c != nil { setStatus("Cancelling…"); c() } }
+func (a *application) cancelCurrent() { a.cancelMu.Lock(); c := a.cancel; a.cancelMu.Unlock(); if c != nil { setStatus("Cancelling…"); c() } }
 func setBusyUI(busy bool) { enabled := uintptr(1); if busy { enabled = 0 }; procEnableWindow.Call(app.scanBtn, enabled); procEnableWindow.Call(app.metaBtn, enabled); procEnableWindow.Call(app.remuxBtn, enabled); procEnableWindow.Call(app.sourceEdit, enabled); procEnableWindow.Call(app.sourceDVDButton, enabled); procEnableWindow.Call(app.sourceISOButton, enabled); procEnableWindow.Call(app.outputEdit, enabled); procEnableWindow.Call(app.outputButton, enabled); procEnableWindow.Call(app.titleCombo, enabled); procEnableWindow.Call(app.preserveChapters, enabled); procEnableWindow.Call(app.cancelBtn, 1-enabled) }
 
 func scanTitles(ctx context.Context) error {
