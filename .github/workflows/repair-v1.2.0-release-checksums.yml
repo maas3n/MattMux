@@ -1,0 +1,66 @@
+name: Repair v1.2.0 release checksums
+
+on:
+  push:
+    branches:
+      - repair-v1.2.0-release-checksums
+    paths:
+      - '.github/workflows/repair-v1.2.0-release-checksums.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rebuild checksum manifest from live release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cd dist
+
+          gh release download v1.2.0 --repo "$REPO" --pattern 'MattMux-1.2.0-Setup.exe'
+          gh release download v1.2.0 --repo "$REPO" --pattern 'MattMux-1.2.0-All-in-One.exe'
+          gh release download v1.2.0 --repo "$REPO" --pattern 'MattMux-1.2.0-Portable.zip'
+
+          printf '%s  %s\n' \
+            'f85a14f197d18df4296dc1f26ad7ccd69bb405647a0381aff0c369fb1621ef0c' \
+            'MattMux-1.2.0-Setup.exe' \
+            'e0f0749830966ca5c13a25013758f3af53fd7f7fd6be11df754852441b3c98b4' \
+            'MattMux-1.2.0-All-in-One.exe' \
+            '70078fad8f8af7d71b9280bc840fd1c2d56d2351034d2733b8d94f28fd8dbeff' \
+            'MattMux-1.2.0-Portable.zip' \
+            > expected.sha256
+
+          sha256sum --check --strict expected.sha256
+
+          sha256sum \
+            MattMux-1.2.0-Setup.exe \
+            MattMux-1.2.0-All-in-One.exe \
+            MattMux-1.2.0-Portable.zip \
+            > SHA256SUMS.txt
+
+          ! grep -q 'Offline-Builder' SHA256SUMS.txt
+          test "$(wc -l < SHA256SUMS.txt)" -eq 3
+          cat SHA256SUMS.txt
+
+          gh release upload v1.2.0 SHA256SUMS.txt --clobber --repo "$REPO"
+
+      - name: Verify published checksum asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          published="$(
+            gh api "repos/${REPO}/releases/tags/v1.2.0" \
+              --jq '.assets[] | select(.name == "SHA256SUMS.txt") | .digest'
+          )"
+          local_digest="sha256:$(sha256sum dist/SHA256SUMS.txt | awk '{print $1}')"
+          test "$published" = "$local_digest"
+          echo "Published checksum manifest verified: $published"
