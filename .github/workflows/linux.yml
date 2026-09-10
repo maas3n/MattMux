@@ -61,7 +61,7 @@ jobs:
           test ! -e "$tmp/usr/bin/mediainfo"
 
           "$tmp/usr/lib/mattmux/ffmpeg-bin/ffmpeg" -hide_banner -demuxers 2>/dev/null | grep dvdvideo
-          "$tmp/usr/lib/mattmux/ffprobe" -version | head -n 1
+          "$tmp/usr/lib/mattmux/ffmpeg-bin/ffprobe" -version | head -n 1
           "$tmp/usr/lib/mattmux/mediainfo-bin/mediainfo" --Version | head -n 4
           ldd "$tmp/usr/lib/mattmux/mediainfo-bin/mediainfo" || true
 
@@ -88,7 +88,7 @@ jobs:
             dist/linux-release/MattMux-1.3.0-dev3-Source.tar.gz
             dist/linux-release/SHA256SUMS.txt
           )
-          notes='Linux preview for Debian/Ubuntu amd64. Fixes FFprobe/MediaInfo output handling, pins MediaInfo to an exact commit, and contains private bundled FFmpeg, FFprobe and MediaInfo fallbacks under /usr/lib/mattmux. Existing /usr/bin multimedia tools are not replaced. Compatible system FFmpeg/FFprobe and system MediaInfo remain preferred.'
+          notes='Linux preview for Debian/Ubuntu amd64. Fixes FFprobe/MediaInfo output handling, fully pins the MediaInfo source set, and contains private bundled FFmpeg, FFprobe and MediaInfo fallbacks under /usr/lib/mattmux. Existing /usr/bin multimedia tools are not replaced. Compatible system FFmpeg/FFprobe and system MediaInfo remain preferred.'
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha')"
             if [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
