@@ -10,7 +10,7 @@ android {
         applicationId = "io.github.maas3n.mattmux"
         minSdk = 26
         targetSdk = 36
-        versionCode = 101
+        versionCode = 102
         versionName = "1.2.0-chromeos-alpha2"
 
         ndk {
