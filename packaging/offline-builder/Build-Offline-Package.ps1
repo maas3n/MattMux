@@ -8,7 +8,7 @@ Set-StrictMode -Version 2.0
 $AppVersion = '1.2.0'
 $FfmpegReleaseTag = 'autobuild-2026-09-08-23-15'
 $FfmpegAssetName = 'ffmpeg-N-126479-g08cd8df29d-win64-gpl-shared.zip'
-$FfmpegManifestSha256 = 'd0bc1f689725bead0681dbcc0bfbf6eb12582d3100e6973d32837c6571b2e1dc'
+$FfmpegManifestSha256 = 'f64be162403094773397bfcc299a4a059507028afa7563591fd05c17d56b3214'
 $MediaInfoVersion = '26.05'
 $MediaInfoAssetName = 'MediaInfo_CLI_26.05_Windows_x64.zip'
 $MediaInfoSha256 = 'f7f80620ce6d14f4995f0de6f98e3ef18ad29496db01899571152ee3311229f9'
