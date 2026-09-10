@@ -1,0 +1,26 @@
+name: Delete obsolete ChromeOS Alpha 1 release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  delete-alpha1:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete Alpha 1 release and tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release delete v1.2.0-chromeos-alpha1 --cleanup-tag --yes --repo "$REPO"
+          if gh release view v1.2.0-chromeos-alpha1 --repo "$REPO" >/dev/null 2>&1; then
+            echo "Alpha 1 release still exists" >&2
+            exit 1
+          fi
+          echo "Deleted v1.2.0-chromeos-alpha1 release and tag."
