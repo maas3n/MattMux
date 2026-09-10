@@ -13,7 +13,7 @@ import (
 
 func TestRunHiddenKeepsStdoutAndStderrSeparate(t *testing.T) {
 	script := filepath.Join(t.TempDir(), "mixed-output.cmd")
-	body := "@echo off\r\necho {\"streams\":[]}\r\necho dvdnav diagnostic 1^>^&2\r\n"
+	body := "@echo off\r\necho {\"streams\":[]}\r\necho dvdnav diagnostic 1>&2\r\n"
 	if err := os.WriteFile(script, []byte(body), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestRunHiddenKeepsStdoutAndStderrSeparate(t *testing.T) {
 
 func TestRunHiddenReportsStderrOnFailure(t *testing.T) {
 	script := filepath.Join(t.TempDir(), "failed-output.cmd")
-	body := "@echo off\r\necho partial-stdout\r\necho mediainfo failure 1^>^&2\r\nexit /b 7\r\n"
+	body := "@echo off\r\necho partial-stdout\r\necho mediainfo failure 1>&2\r\nexit /b 7\r\n"
 	if err := os.WriteFile(script, []byte(body), 0600); err != nil {
 		t.Fatal(err)
 	}
