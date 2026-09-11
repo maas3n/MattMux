@@ -496,7 +496,11 @@ jobs:
           mkdir -p dist/android-release
           APK="$(find android/app/build/outputs/apk/release -name '*.apk' -print -quit)"
 
+          cp "$APK" "dist/android-release/MattMux-$version-Android.apk"
           cp "$APK" "dist/android-release/MattMux-$version-ChromeOS.apk"
+          test -s "dist/android-release/MattMux-$version-Android.apk"
+          test -s "dist/android-release/MattMux-$version-ChromeOS.apk"
+          cmp --silent "dist/android-release/MattMux-$version-Android.apk" "dist/android-release/MattMux-$version-ChromeOS.apk"
           cp "android/native/.work/ffmpeg-${FFMPEG_VERSION}.tar.xz" "dist/android-release/FFmpeg-${FFMPEG_VERSION}-source.tar.xz"
           cp android/native/.work/libudfread-1.1.2-source.tar.gz dist/android-release/
           cp android/app/src/main/assets/ffmpeg/LIBUDFREAD_COPYING.txt dist/android-release/
