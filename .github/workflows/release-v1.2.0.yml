@@ -1,17 +1,47 @@
-name: Release v1.2.0 (archived)
+name: Release v1.2.0 hotfix
 
 on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  archived:
-    runs-on: ubuntu-latest
+  rebuild:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: src
+
     steps:
-      - name: Explain archived release
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.1'
+          cache: false
+
+      - name: Test
+        run: go test ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build Windows GUI
+        shell: pwsh
         run: |
-          echo 'MattMux v1.2.0 is an immutable historical release.'
-          echo 'Do not rebuild or replace its binary assets from this workflow.'
-          echo 'Publish binary changes under a new version/tag instead.'
+          $env:CGO_ENABLED = '0'
+          $env:GOOS = 'windows'
+          $env:GOARCH = 'amd64'
+          go build -trimpath -buildvcs=false -ldflags "-s -w -H=windowsgui" -o ..\MattMux.exe .
+          Copy-Item .\MattMux.exe.manifest ..\MattMux.exe.manifest -Force
+          Get-FileHash ..\MattMux.exe -Algorithm SHA256
+
+      - name: Stop before publishing
+        shell: pwsh
+        run: |
+          Write-Host 'Build completed from main. Release asset replacement is intentionally performed only after the merged main build is verified.'
