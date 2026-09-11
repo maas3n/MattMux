@@ -1,14 +1,18 @@
 # MattMux
 
-**MattMux** remuxes DVD-Video titles to MKV **without transcoding**. Windows and Linux builds are functional, with an experimental Android/ChromeOS app preview. All platform source now lives on the single `main` branch; releases are identified by tags and GitHub Releases rather than long-lived platform branches.
+**MattMux** remuxes DVD-Video titles to MKV **without transcoding**. Windows and Linux builds are functional, with an experimental Android/ChromeOS app preview. All platform source lives on the single `main` branch.
 
 ## Downloads
 
-| Platform | Status | Recommended download |
+The releases below are historical platform-specific releases from before MattMux adopted a unified product-release model:
+
+| Platform | Historical release | Recommended download |
 | --- | --- | --- |
 | Windows x64 | **Stable — 1.2.0** | [MattMux 1.2.0](https://github.com/maas3n/MattMux/releases/tag/v1.2.0) — All-in-One EXE, installer, or portable ZIP |
 | Linux amd64 | **Preview — 1.3.0-dev5** | [MattMux 1.3.0-dev5](https://github.com/maas3n/MattMux/releases/tag/v1.3.0-dev5) — standalone executable or self-contained `.deb` |
 | Android / ChromeOS | **Experimental — 1.2.0 Alpha 4** | [ChromeOS Alpha 4](https://github.com/maas3n/MattMux/releases/tag/v1.2.0-chromeos-alpha4) — APK plus native-runtime source/provenance assets |
+
+**Future releases are unified.** One product tag such as `v1.4.0` creates one GitHub Release containing Windows, Linux, and Android/ChromeOS assets built from the same tagged commit. Shared previews use tags such as `v1.4.0-alpha.1`. See [`RELEASING.md`](RELEASING.md).
 
 ## Highlights
 
@@ -48,7 +52,7 @@ Use unencrypted DVD-Video sources or media you are authorized to process. MattMu
 ## Quick start
 
 ### Windows
-Download the All-in-One EXE, Setup EXE, or Portable ZIP from the [1.2.0 release](https://github.com/maas3n/MattMux/releases/tag/v1.2.0).
+Download the All-in-One EXE, Setup EXE, or Portable ZIP from the historical [1.2.0 release](https://github.com/maas3n/MattMux/releases/tag/v1.2.0).
 
 ### Linux standalone
 ```bash
@@ -82,7 +86,7 @@ bash packaging/linux/build-linux-standalone.sh 1.3.0-dev5
 gradle -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
 
-The Android native FFmpeg runtime is built by the GitHub Actions workflow; see [`android/native/README.md`](android/native/README.md) for the full native build process.
+The Android native FFmpeg runtime is built by GitHub Actions; see [`android/native/README.md`](android/native/README.md) for the full native build process.
 
 ## CI and releases
 
@@ -91,9 +95,15 @@ The Android native FFmpeg runtime is built by the GitHub Actions workflow; see [
 - `.github/workflows/build.yml` validates the Windows/Go path.
 - `.github/workflows/linux.yml` builds and validates the Linux packages.
 - `.github/workflows/android.yml` runs Android/native tests and package validation.
-- Release workflows live beside the source on `main`; published releases remain anchored by immutable version tags rather than release branches.
+- `.github/workflows/release.yml` is the single GitHub Release publisher for all future product versions.
+- `.github/workflows/android-play.yml` builds a signed Play bundle when production signing inputs are supplied; it does not create a GitHub Release.
 
-Historical release tags are retained even when old platform/release branches are retired.
+New public versions use one shared tag:
+
+- stable: `vMAJOR.MINOR.PATCH`
+- preview: `vMAJOR.MINOR.PATCH-alpha.N`, `-beta.N`, or `-rc.N`
+
+That one tag produces one cross-platform GitHub Release. Historical platform-specific tags/releases are retained for provenance and are never rewritten.
 
 ## Third-party runtime tools
 

@@ -2,6 +2,14 @@ plugins {
     id("com.android.application")
 }
 
+val mattMuxVersionName = providers.gradleProperty("MATTMUX_VERSION_NAME")
+    .orElse("0.0.0-dev")
+    .get()
+val mattMuxVersionCode = providers.gradleProperty("MATTMUX_VERSION_CODE")
+    .orElse("1")
+    .get()
+    .toInt()
+
 val playStoreFile = providers.gradleProperty("MATTMUX_UPLOAD_STORE_FILE").orNull
 val playStorePassword = providers.gradleProperty("MATTMUX_UPLOAD_STORE_PASSWORD").orNull
 val playKeyAlias = providers.gradleProperty("MATTMUX_UPLOAD_KEY_ALIAS").orNull
@@ -21,14 +29,15 @@ android {
         applicationId = "io.github.maas3n.mattmux"
         minSdk = 26
         targetSdk = 36
-        versionCode = 104
-        versionName = "1.2.0-chromeos-alpha4"
+        versionCode = mattMuxVersionCode
+        versionName = mattMuxVersionName
 
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
 
-        // Keep purchases disabled until the Android-native remux engine is shipped.
+        // Purchases stay disabled until production device validation, signing,
+        // and purchase-verification readiness are complete.
         buildConfigField("boolean", "ENABLE_BILLING_PURCHASES", "false")
     }
 
