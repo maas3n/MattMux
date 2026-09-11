@@ -101,8 +101,6 @@ jobs:
           cp android/native/.work/libudfread-1.1.2-source.tar.gz dist/
           cp android/app/src/main/assets/ffmpeg/LIBUDFREAD_COPYING.txt dist/
           cp android/app/src/main/assets/ffmpeg/ffmpeg-build-info.txt \
-            dist/libudfread-1.1.2-source.tar.gz
-            dist/LIBUDFREAD_COPYING.txt
             dist/FFmpeg-build-info.txt
           cp android/app/src/main/assets/ffmpeg/COPYING.LGPLv2.1 \
             dist/COPYING.LGPLv2.1.txt
