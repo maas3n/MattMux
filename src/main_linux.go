@@ -33,7 +33,7 @@ type linuxGUI struct {
 	titleSelect                                                      *widget.Select
 	preserve                                                         *widget.Check
 	progress                                                         *widget.ProgressBar
-	status                                                           *widget.Label
+	status, trackSummary                                             *widget.Label
 	scanBtn, metaBtn, remuxBtn, cancelBtn, dvdBtn, isoBtn, outputBtn *widget.Button
 	mu                                                               sync.Mutex
 	busy                                                             bool
@@ -69,6 +69,8 @@ func (g *linuxGUI) build() {
 	g.outputEntry.SetText(s.OutputDir)
 	g.titleSelect = widget.NewSelect(nil, func(string) { g.clearTrackSelection() })
 	g.titleSelect.PlaceHolder = "Scan titles first"
+	g.trackSummary = widget.NewLabel("Tracks: all streams (default)")
+	g.trackSummary.Wrapping = fyne.TextWrapWord
 	g.preserve = widget.NewCheck("Preserve chapters in the output MKV", func(bool) { g.saveSettings() })
 	g.preserve.SetChecked(s.PreserveChapters)
 	g.progress = widget.NewProgressBar()
@@ -91,7 +93,7 @@ func (g *linuxGUI) build() {
 	outputRow := container.NewBorder(nil, nil, nil, g.outputBtn, g.outputEntry)
 	titleRow := container.NewBorder(nil, nil, nil, container.NewHBox(g.scanBtn, g.metaBtn, aboutBtn), g.titleSelect)
 	actions := container.NewHBox(layout.NewSpacer(), g.remuxBtn, g.cancelBtn)
-	g.window.SetContent(container.NewPadded(container.NewVBox(header, widget.NewSeparator(), widget.NewLabelWithStyle("Source", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), sourceRow, widget.NewLabel("Choose a DVD folder / VIDEO_TS structure or an ISO image."), widget.NewSeparator(), widget.NewLabelWithStyle("Destination", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), outputRow, widget.NewSeparator(), widget.NewLabelWithStyle("DVD Title", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), titleRow, g.preserve, widget.NewSeparator(), g.progress, g.status, layout.NewSpacer(), actions)))
+	g.window.SetContent(container.NewPadded(container.NewVBox(header, widget.NewSeparator(), widget.NewLabelWithStyle("Source", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), sourceRow, widget.NewLabel("Choose a DVD folder / VIDEO_TS structure or an ISO image."), widget.NewSeparator(), widget.NewLabelWithStyle("Destination", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), outputRow, widget.NewSeparator(), widget.NewLabelWithStyle("DVD Title", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), titleRow, g.trackSummary, g.preserve, widget.NewSeparator(), g.progress, g.status, layout.NewSpacer(), actions)))
 }
 
 func (g *linuxGUI) chooseDVDFolder() {
@@ -291,7 +293,8 @@ func (g *linuxGUI) showMetadata(ctx context.Context) error {
 	}
 	g.setTrackOptions(src, title.Number, options)
 	fyne.Do(func() {
-		g.showTrackWindow(src, title, options, text)
+		g.updateTrackSummary(src, title.Number)
+		g.showTrackDialog(src, title, options, text)
 		g.progress.SetValue(1)
 		g.status.SetText(fmt.Sprintf("Metadata loaded for title %d. Choose the tracks to include in the next remux.", title.Number))
 	})
@@ -328,14 +331,21 @@ func (g *linuxGUI) clearTrackSelection() {
 	g.tracks = nil
 	g.selectedTracks = nil
 	g.mu.Unlock()
+	if g.trackSummary != nil {
+		g.trackSummary.SetText("Tracks: all streams (default)")
+	}
 }
 
 func (g *linuxGUI) setTrackChecked(src string, title, index int, checked bool) {
 	g.mu.Lock()
-	if g.trackSource == src && g.trackTitle == title && g.selectedTracks != nil {
+	valid := g.trackSource == src && g.trackTitle == title && g.selectedTracks != nil
+	if valid {
 		g.selectedTracks[index] = checked
 	}
 	g.mu.Unlock()
+	if valid {
+		g.updateTrackSummary(src, title)
+	}
 }
 
 func (g *linuxGUI) trackSelectionSnapshot(src string, title int) map[int]bool {
@@ -366,9 +376,24 @@ func (g *linuxGUI) selectedTrackIndexes(src string, title int) ([]int, bool) {
 	return indexes, true
 }
 
-func (g *linuxGUI) showTrackWindow(src string, title titleInfo, options []trackOption, detailsText string) {
+func (g *linuxGUI) updateTrackSummary(src string, title int) {
+	if g.trackSummary == nil {
+		return
+	}
+	indexes, hasSelection := g.selectedTrackIndexes(src, title)
+	if !hasSelection {
+		g.trackSummary.SetText("Tracks: all streams (default)")
+		return
+	}
+	if len(indexes) == 0 {
+		g.trackSummary.SetText(fmt.Sprintf("Tracks: none selected for title %d", title))
+		return
+	}
+	g.trackSummary.SetText(fmt.Sprintf("Tracks: %d selected for title %d", len(indexes), title))
+}
+
+func (g *linuxGUI) showTrackDialog(src string, title titleInfo, options []trackOption, detailsText string) {
 	selected := g.trackSelectionSnapshot(src, title.Number)
-	w := fyne.CurrentApp().NewWindow(fmt.Sprintf("MattMux — Title %d Tracks / Metadata", title.Number))
 	instruction := widget.NewLabel("Choose the video, audio, and subtitle tracks to include in the next remux. All tracks are selected by default.")
 	instruction.Wrapping = fyne.TextWrapWord
 	checks := make([]*widget.Check, len(options))
@@ -396,19 +421,23 @@ func (g *linuxGUI) showTrackWindow(src string, title titleInfo, options []trackO
 			check.SetChecked(false)
 		}
 	})
+	var trackDialog *dialog.CustomDialog
 	closeBtn := widget.NewButton("Close & use selection", func() {
 		indexes, _ := g.selectedTrackIndexes(src, title.Number)
 		if len(indexes) == 0 {
 			g.status.SetText("No tracks selected. Choose at least one track before starting the remux.")
-		} else {
-			g.status.SetText(fmt.Sprintf("Track selection updated: %d track(s) will be included in the next remux.", len(indexes)))
+			dialog.ShowInformation("Choose at least one track", "Select at least one video, audio, or subtitle track before closing the track selector.", g.window)
+			return
 		}
-		w.Close()
+		g.updateTrackSummary(src, title.Number)
+		g.status.SetText(fmt.Sprintf("Track selection updated: %d track(s) will be included in the next remux.", len(indexes)))
+		trackDialog.Dismiss()
 	})
 	buttons := container.NewHBox(selectAll, selectNone, layout.NewSpacer(), closeBtn)
-	w.SetContent(container.NewBorder(instruction, buttons, nil, nil, split))
-	w.Resize(fyne.NewSize(800, 680))
-	w.Show()
+	content := container.NewBorder(instruction, buttons, nil, nil, split)
+	trackDialog = dialog.NewCustomWithoutButtons(fmt.Sprintf("MattMux — Title %d Tracks / Metadata", title.Number), content, g.window)
+	trackDialog.Show()
+	trackDialog.Resize(fyne.NewSize(800, 680))
 }
 
 func (g *linuxGUI) remux(ctx context.Context) error {
@@ -469,6 +498,9 @@ func (g *linuxGUI) invalidateTitles() {
 	g.tracks = nil
 	g.selectedTracks = nil
 	g.mu.Unlock()
+	if g.trackSummary != nil {
+		g.trackSummary.SetText("Tracks: all streams (default)")
+	}
 	g.titleSelect.ClearSelected()
 	g.titleSelect.Options = nil
 	g.titleSelect.Refresh()
