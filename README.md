@@ -156,15 +156,13 @@ One tag produces one release containing all applicable platform packages from th
 
 See [`RELEASING.md`](RELEASING.md) for the full release policy.
 
-## Historical releases
+## Release history
 
-Before the unified release model, MattMux used separate platform release lines. Those releases are retained for provenance and should not be rewritten:
+MattMux previously used separate platform-specific development release lines. Those obsolete release entries and tags have been retired now that the unified release model is active.
 
-- Windows: [`v1.2.0`](https://github.com/maas3n/MattMux/releases/tag/v1.2.0)
-- Linux: [`v1.3.0-dev5`](https://github.com/maas3n/MattMux/releases/tag/v1.3.0-dev5)
-- Android / ChromeOS: [`v1.2.0-chromeos-alpha4`](https://github.com/maas3n/MattMux/releases/tag/v1.2.0-chromeos-alpha4)
+Their development remains preserved in the Git history. The repository also retains the `archive/pre-single-trunk-history` archive tag for earlier history.
 
-New users should use the unified **MattMux 1.4.0** release instead.
+For current downloads, use the unified **MattMux 1.4.0** release. Future public releases will continue to use one shared version and one GitHub Release for all supported platforms.
 
 ## Third-party runtime tools
 
