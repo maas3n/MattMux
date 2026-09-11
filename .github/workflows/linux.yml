@@ -31,9 +31,11 @@ jobs:
             gcc g++ cmake ninja-build curl xz-utils file \
             libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
 
-      - name: Resolve Go modules
+      - name: Verify Go module metadata
         working-directory: src
-        run: go mod tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
 
       - name: Build GUI, CLI, self-contained DEB, tarballs and standalone
         run: |

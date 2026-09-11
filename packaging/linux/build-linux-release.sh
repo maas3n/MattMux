@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_VERSION="${1:-1.3.0-dev4}"
+APP_VERSION="${1:-1.3.0-dev5}"
 DEB_VERSION="${APP_VERSION/-dev/~dev}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SRC="$ROOT/src"

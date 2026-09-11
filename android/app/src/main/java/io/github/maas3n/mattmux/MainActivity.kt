@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
@@ -25,7 +26,7 @@ class MainActivity : Activity(), BillingManager.Listener {
     }
 
     private val engine: RemuxEngine = AndroidNativeRemuxEngine()
-    private lateinit var billing: BillingManager
+    private var billing: BillingManager? = null
 
     private lateinit var sourceValue: TextView
     private lateinit var outputValue: TextView
@@ -49,8 +50,13 @@ class MainActivity : Activity(), BillingManager.Listener {
         engine.setProgressListener { percent ->
             runOnUiThread { remuxStatus.text = "Remuxing… $percent%" }
         }
-        billing = BillingManager(this, this)
-        billing.start()
+        if (BuildConfig.ENABLE_BILLING_PURCHASES) {
+            billing = BillingManager(this, this).also { it.start() }
+        } else {
+            proValue.text = "MattMux Pro: purchases disabled in this alpha"
+            billingValue.text = "Billing is off until production device validation and release readiness are complete."
+            buyButton.visibility = View.GONE
+        }
         updateRemuxButton()
     }
 
@@ -63,7 +69,7 @@ class MainActivity : Activity(), BillingManager.Listener {
     override fun onDestroy() {
         if (remuxRunning) engine.cancel()
         engine.setProgressListener(null)
-        billing.close()
+        billing?.close()
         super.onDestroy()
     }
 
@@ -154,7 +160,7 @@ class MainActivity : Activity(), BillingManager.Listener {
         billingValue = value("Connecting to Google Play…")
         root.addView(proValue)
         root.addView(billingValue)
-        buyButton = button("Buy MattMux Pro") { billing.launchProPurchase(this) }
+        buyButton = button("Buy MattMux Pro") { billing?.launchProPurchase(this) }
         root.addView(buyButton)
 
         root.addView(section("Remux"))
@@ -183,7 +189,7 @@ class MainActivity : Activity(), BillingManager.Listener {
             return
         }
         if (BuildConfig.ENABLE_BILLING_PURCHASES && !proOwned) {
-            billing.launchProPurchase(this)
+            billing?.launchProPurchase(this)
             return
         }
         if (remuxRunning) return

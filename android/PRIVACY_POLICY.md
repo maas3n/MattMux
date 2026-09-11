@@ -2,7 +2,9 @@
 
 MattMux processes DVD folders, VIDEO_TS structures, ISO images, and MKV output locally on the user's device. MattMux does not upload media files to the developer.
 
-The Google Play version uses Google Play Billing to offer a one-time MattMux Pro purchase. Purchase processing is provided by Google Play. MattMux receives purchase status and purchase tokens needed to determine entitlement and acknowledge purchases.
+The current Alpha 4 build keeps paid purchases disabled and does not start a Google Play Billing connection. The codebase contains Google Play Billing support for a future production MattMux Pro purchase, but that path remains gated off until production device validation, signing, and purchase-verification readiness are complete.
+
+If purchases are enabled in a future Google Play build, purchase processing will be provided by Google Play. MattMux may receive purchase status and purchase tokens needed to determine entitlement and acknowledge purchases.
 
 The current application does not contain advertising SDKs, analytics SDKs, or developer-operated user tracking.
 
