@@ -188,9 +188,9 @@ jobs:
           $verify = Join-Path $env:RUNNER_TEMP 'mattmux-portable-verify'
           Remove-Item $verify -Recurse -Force -ErrorAction SilentlyContinue
           Expand-Archive -LiteralPath .\dist\MattMux-1.2.0-Portable.zip -DestinationPath $verify -Force
-          foreach ($name in @('MattMux-Portable.exe','MattMuxData\tools\ffmpeg-2026-09-08\ffmpeg.exe','MattMuxData\tools\ffmpeg-2026-09-08\ffprobe.exe','MattMuxData\tools\mediainfo-26.05\MediaInfo.exe')) {
-            $match = Get-ChildItem -LiteralPath $verify -Recurse -File | Where-Object { $_.FullName.EndsWith($name, [StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1
-            if ($null -eq $match -or $match.Length -le 0) { throw "Portable verification failed: $name" }
+          foreach ($leaf in @('MattMux-Portable.exe','ffmpeg.exe','ffprobe.exe','MediaInfo.exe')) {
+            $match = Get-ChildItem -LiteralPath $verify -Recurse -File -Filter $leaf | Select-Object -First 1
+            if ($null -eq $match -or $match.Length -le 0) { throw "Portable verification failed: $leaf" }
           }
 
       - name: Refresh v1.2.0 tag to verified hotfix source
