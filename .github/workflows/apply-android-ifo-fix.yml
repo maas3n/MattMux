@@ -1,0 +1,58 @@
+name: Apply Android IFO metadata fix
+
+on:
+  push:
+    branches: [fix/release-audit-2026-09-11]
+
+permissions:
+  contents: write
+
+env:
+  ANDROID_NDK_VERSION: '30.0.16248370'
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/release-audit-2026-09-11
+          fetch-depth: 0
+      - name: Apply patch
+        run: python3 tools/apply_android_ifo_fix.py
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install native test toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y binutils curl patchelf xz-utils autoconf automake libtool pkg-config ffmpeg genisoimage libavformat-dev libavcodec-dev libavutil-dev
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' "ndk;${ANDROID_NDK_VERSION}"
+      - name: Set up Gradle 9.6
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+      - name: Build bundled native runtime
+        run: ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" bash android/native/build-ffmpeg-android.sh
+      - name: Test parser and production JNI path
+        run: |
+          set -euo pipefail
+          python3 -m pip install pycdlib==1.14.0
+          bash android/native/tests/test-udf-source.sh "$PWD/android/native/.work/libudfread"
+          bash android/native/tests/test-host-remux.sh "$PWD/android/native/.work/libudfread" "$RUNNER_TEMP/remux-parity"
+          gradle -p android :app:testDebugUnitTest :app:lintDebug
+          git diff --check
+      - name: Commit and push tested Android changes
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add android/app/src/main/java/io/github/maas3n/mattmux/DvdIfoParser.kt android/app/src/main/java/io/github/maas3n/mattmux/RemuxEngine.kt android/native/mattmux_jni.c android/app/src/test/java/io/github/maas3n/mattmux/DvdIfoParserTest.kt android/native/tests/java/io/github/maas3n/mattmux/AndroidNativeRemuxEngine.java
+          git diff --cached --check
+          git commit -m 'Map Android DVD IFO languages and subtitle palette'
+          git push origin HEAD:fix/release-audit-2026-09-11
