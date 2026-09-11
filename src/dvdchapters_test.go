@@ -39,7 +39,7 @@ func TestReadDVDChaptersSimple(t *testing.T) {
 	binary.BigEndian.PutUint32(vmg[0xC4:], 1)
 	tt := dvdSectorSize
 	binary.BigEndian.PutUint16(vmg[tt:], 1)
-	binary.BigEndian.PutUint32(vmg[tt+4:], 19) // 8-byte header + one 12-byte title entry
+	binary.BigEndian.PutUint32(vmg[tt+4:], 19)
 	entry := tt + 8
 	binary.BigEndian.PutUint16(vmg[entry+2:], 3)
 	vmg[entry+6] = 1
@@ -50,12 +50,12 @@ func TestReadDVDChaptersSimple(t *testing.T) {
 
 	vts := make([]byte, 3*dvdSectorSize)
 	copy(vts, []byte("DVDVIDEO-VTS"))
-	binary.BigEndian.PutUint32(vts[0xC8:], 1) // PTT table sector
-	binary.BigEndian.PutUint32(vts[0xCC:], 2) // PGCI sector
+	binary.BigEndian.PutUint32(vts[0xC8:], 1)
+	binary.BigEndian.PutUint32(vts[0xCC:], 2)
 
 	ptt := dvdSectorSize
 	binary.BigEndian.PutUint16(vts[ptt:], 1)
-	binary.BigEndian.PutUint32(vts[ptt+4:], 23) // 8 + 4 offset + 12 PTT bytes
+	binary.BigEndian.PutUint32(vts[ptt+4:], 23)
 	binary.BigEndian.PutUint32(vts[ptt+8:], 12)
 	for i := 0; i < 3; i++ {
 		off := ptt + 12 + i*4
@@ -107,10 +107,9 @@ func TestAngleOneDoesNotDoubleCount(t *testing.T) {
 		programMap: []byte{1, 3},
 		cellData:   make([]byte, 3*24),
 	}
-	// Two copies of the same logical angle block: include first (angle 1),
-	// skip last (angle 2), then include the normal second program.
-	setCellTime(pgc.cellData[0*24:], 0x05, 0x40) // first of angle block
-	setCellTime(pgc.cellData[1*24:], 0x07, 0xC0) // last of angle block
+	// Valid angle block flags include block type 1 (0x10) plus the mode bits.
+	setCellTime(pgc.cellData[0*24:], 0x05, 0x50) // first of angle block
+	setCellTime(pgc.cellData[1*24:], 0x07, 0xD0) // last of angle block
 	setCellTime(pgc.cellData[2*24:], 0x10, 0x00) // normal
 
 	starts, total, err := pgcProgramTimeline(pgc)
@@ -122,10 +121,37 @@ func TestAngleOneDoesNotDoubleCount(t *testing.T) {
 	}
 }
 
+func TestOrphanMiddleAngleCellRejected(t *testing.T) {
+	pgc := dvdPGC{
+		programs:   1,
+		cells:      2,
+		programMap: []byte{1},
+		cellData:   make([]byte, 2*24),
+	}
+	setCellTime(pgc.cellData[0*24:], 0x05, 0x90) // block type 1, middle mode without a start
+	setCellTime(pgc.cellData[1*24:], 0x10, 0x00)
+	if _, _, err := pgcProgramTimeline(pgc); err == nil {
+		t.Fatal("orphan middle angle cell was accepted")
+	}
+}
+
+func TestUnterminatedAngleBlockRejected(t *testing.T) {
+	pgc := dvdPGC{
+		programs:   1,
+		cells:      1,
+		programMap: []byte{1},
+		cellData:   make([]byte, 24),
+	}
+	setCellTime(pgc.cellData, 0x05, 0x50)
+	if _, _, err := pgcProgramTimeline(pgc); err == nil {
+		t.Fatal("unterminated angle block was accepted")
+	}
+}
+
 func setCellTime(cell []byte, secondsBCD, category byte) {
 	cell[0] = category
 	cell[4] = 0x00
 	cell[5] = 0x00
 	cell[6] = secondsBCD
-	cell[7] = 0xC0 // 30 fps, frame 0
+	cell[7] = 0xC0
 }

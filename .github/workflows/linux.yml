@@ -112,6 +112,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/linux-support'
         env:
           GH_TOKEN: ${{ github.token }}
+          ALLOW_HISTORICAL_REFRESH: ${{ contains(github.event.head_commit.message, '[refresh-v1.3.0-dev5]') }}
         run: |
           set -euo pipefail
           tag='v1.3.0-dev5'
@@ -122,15 +123,41 @@ jobs:
             dist/linux-release/MattMux-1.3.0-dev5-Source.tar.gz
             dist/linux-release/SHA256SUMS.txt
           )
-          notes='Linux amd64 preview with two self-contained options. The .deb installs MattMux and private pinned FFmpeg/FFprobe/MediaInfo under /usr/lib/mattmux without touching system multimedia tools. The new MattMux-1.3.0-dev5-Linux-amd64Standalone is one directly runnable ELF file containing MattMux plus the same pinned tools; on first run it extracts only into the invoking user cache and changes PATH only for its own process. Existing /usr/bin/ffmpeg, /usr/bin/ffprobe, /usr/bin/mediainfo, alternatives, shell profiles, /etc/environment, and the system PATH remain untouched. Includes the FFprobe/MediaInfo stderr separation fixes and fully pinned MediaInfo source set.'
+          notes="$(cat <<'EOF'
+          Linux amd64 preview with two self-contained options.
+
+          September 11, 2026 audit hotfix rebuild:
+          - each remux now uses a unique operation-owned temporary MKV
+          - empty/non-regular completed outputs are rejected
+          - output finalization checks sync/close errors and never overwrites a destination created by another writer
+          - failure/cancellation cleanup only removes the current operation's temporary output
+          - native DVD chapter parsing rejects malformed angle-block structures while preserving FFprobe fallback
+
+          The NTSC frame-timing formula is intentionally unchanged pending a separately verified timing contract.
+
+          The .deb installs MattMux and private pinned FFmpeg/FFprobe/MediaInfo under /usr/lib/mattmux without touching system multimedia tools. MattMux-1.3.0-dev5-Linux-amd64Standalone is one directly runnable ELF file containing MattMux plus the same pinned tools; on first run it extracts only into the invoking user cache and changes PATH only for its own process. Existing /usr/bin/ffmpeg, /usr/bin/ffprobe, /usr/bin/mediainfo, alternatives, shell profiles, /etc/environment, and the system PATH remain untouched.
+          EOF
+          )"
+
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha')"
             if [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
-              echo "Refusing to replace $tag assets: tag points to $tag_sha but this build is $GITHUB_SHA." >&2
-              echo "Bump the prerelease version instead of publishing different source under the same tag." >&2
-              exit 1
+              if [[ "$ALLOW_HISTORICAL_REFRESH" != "true" ]]; then
+                echo "$tag points to $tag_sha; this push is $GITHUB_SHA. Historical release left unchanged."
+                exit 0
+              fi
+              echo "Refreshing $tag from $tag_sha to verified hotfix source $GITHUB_SHA"
+              gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$tag" \
+                -f sha="$GITHUB_SHA" -F force=true >/dev/null
+              refreshed_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha')"
+              test "$refreshed_sha" = "$GITHUB_SHA"
             fi
             gh release upload "$tag" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$tag" \
+              --title 'MattMux 1.3.0-dev5 Linux standalone preview' \
+              --prerelease \
+              --notes "$notes" \
+              --repo "$GITHUB_REPOSITORY"
           else
             gh release create "$tag" "${assets[@]}" \
               --target "$GITHUB_SHA" \
