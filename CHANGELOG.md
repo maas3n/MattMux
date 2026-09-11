@@ -1,15 +1,13 @@
 # Changelog
 
-## Unreleased
-
-## 1.4.1 — 2026-09-11
+## Unreleased — target 1.4.1
 
 - Preserve completed desktop and Android remuxes when final publication fails, and add Linux no-overwrite publication fallbacks for filesystems without hard links.
 - Use consistent 100M probe/analyze limits for desktop metadata probing and remuxing.
 - Clean Linux CLI partial outputs on Ctrl+C/SIGTERM and add a process-level interrupt regression test.
 - Correct Debian preview ordering and declare the measured `libc6 (>= 2.38)` runtime floor.
 - Give additional DVD titles distinct `-title-NN` desktop output filenames.
-- Sign GitHub Android APKs with persistent distribution credentials and reject debug certificates.
+- Sign future GitHub Android APKs with persistent distribution credentials and reject debug certificates.
 - Carry DVD IFO language mappings and the selected PGC subtitle palette into Android native stream metadata.
 - Align Android/release documentation and remove tracked Python bytecode.
 
