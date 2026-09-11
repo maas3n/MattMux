@@ -1,0 +1,118 @@
+name: Post-release v1.4.1 sync
+
+on:
+  push:
+    branches:
+      - fix/release-audit-2026-09-11
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Update release-facing documentation
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one {label} match, found {count}")
+              return text.replace(old, new, 1)
+
+          readme = Path('README.md')
+          text = readme.read_text()
+          text = replace_once(text, '## Download MattMux 1.4.0', '## Download MattMux 1.4.1', 'README heading')
+          old = '''**MattMux 1.4.0** is the current published unified release. Windows, Linux, and ChromeOS/Android packages were built from the same tagged source commit and published together in one GitHub Release.\n\nThe release-audit fixes are already merged on `main` and are targeted for **MattMux 1.4.1**. Publication is intentionally blocked until persistent Android distribution-signing credentials are configured; MattMux will not fall back to a debug-signed APK.\n\n[**Download MattMux 1.4.0**](https://github.com/maas3n/MattMux/releases/tag/v1.4.0)'''
+          new = '''**MattMux 1.4.1** is the current published unified release. Windows, Linux, and ChromeOS/Android packages were built from the same tagged source commit and published together in one GitHub Release.\n\nMattMux 1.4.1 contains the release-audit fixes, stronger output recovery and interruption handling, corrected Linux package metadata, and persistent Android distribution signing.\n\n[**Download MattMux 1.4.1**](https://github.com/maas3n/MattMux/releases/tag/v1.4.1)'''
+          text = replace_once(text, old, new, 'README release intro')
+          text = text.replace('`MattMux-1.4.0-Windows-All-in-One.exe`', '`MattMux-1.4.1-Windows-All-in-One.exe`')
+          text = text.replace('`MattMux-1.4.0-Linux-amd64Standalone`', '`MattMux-1.4.1-Linux-amd64Standalone`')
+          text = text.replace('`MattMux-1.4.0-ChromeOS.apk`', '`MattMux-1.4.1-ChromeOS.apk`')
+          text = replace_once(text,
+              '- The v1.4.0 GitHub APK is debug-signed; the next GitHub APK is designed to use persistent distribution signing and may require uninstalling v1.4.0 before installation',
+              '- The v1.4.0 GitHub APK was debug-signed; v1.4.1 and later GitHub APKs use persistent distribution signing, so upgrading from v1.4.0 may require uninstalling v1.4.0 first',
+              'README Android migration')
+          text = text.replace('[MattMux 1.4.0 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.0)', '[MattMux 1.4.1 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.1)')
+          text = text.replace('MattMux-1.4.0-Windows-Setup.exe', 'MattMux-1.4.1-Windows-Setup.exe')
+          text = text.replace('MattMux-1.4.0-Windows-Portable.zip', 'MattMux-1.4.1-Windows-Portable.zip')
+          text = text.replace('chmod +x MattMux-1.4.0-Linux-amd64Standalone\n./MattMux-1.4.0-Linux-amd64Standalone', 'chmod +x MattMux-1.4.1-Linux-amd64Standalone\n./MattMux-1.4.1-Linux-amd64Standalone')
+          text = text.replace('sudo apt install ./MattMux-1.4.0-Linux-amd64.deb', 'sudo apt install ./MattMux-1.4.1-Linux-amd64.deb')
+          text = text.replace('Download `MattMux-1.4.0-ChromeOS.apk` from the [MattMux 1.4.0 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.0)', 'Download `MattMux-1.4.1-ChromeOS.apk` from the [MattMux 1.4.1 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.1)')
+          text = replace_once(text,
+              'MattMux **1.4.0** is the first and current published unified release. The **1.4.1** fixes are merged on `main` and remain unreleased until persistent Android signing is configured.',
+              'MattMux **1.4.0** was the first unified release. MattMux **1.4.1** is the current published unified release and introduces persistent Android distribution signing plus the release-audit fixes.',
+              'README release history')
+          text = replace_once(text,
+              'For current downloads, use the unified **MattMux 1.4.0** release.',
+              'For current downloads, use the unified **MattMux 1.4.1** release.',
+              'README current downloads')
+          readme.write_text(text)
+
+          android = Path('android/README.md')
+          text = android.read_text()
+          text = replace_once(text,
+              'This directory contains the experimental Android/ChromeOS frontend for MattMux. Android/ChromeOS follows the unified MattMux release line; the current published unified release is **1.4.0** (`v1.4.0`). The post-1.4.0 release-audit fixes are merged on `main` and are targeted for **1.4.1** once persistent Android distribution signing is configured.',
+              'This directory contains the experimental Android/ChromeOS frontend for MattMux. Android/ChromeOS follows the unified MattMux release line; the current published unified release is **1.4.1** (`v1.4.1`). MattMux 1.4.1 is the first GitHub APK release using the persistent MattMux distribution-signing key.',
+              'Android README intro')
+          text = replace_once(text,
+              '- v1.4.0 was debug-signed; the next GitHub APK is designed to use persistent distribution signing, so upgrading from v1.4.0 may require uninstalling the old APK first',
+              '- v1.4.0 was debug-signed; v1.4.1 and later GitHub APKs use persistent distribution signing, so upgrading from v1.4.0 may require uninstalling the old APK first',
+              'Android README migration')
+          android.write_text(text)
+
+          changelog = Path('CHANGELOG.md')
+          text = changelog.read_text()
+          text = replace_once(text, '## Unreleased — target 1.4.1', '## 1.4.1 — 2026-09-11', 'changelog heading')
+          text = replace_once(text,
+              '- Sign future GitHub Android APKs with persistent distribution credentials and reject debug certificates.',
+              '- Sign GitHub Android APKs with persistent distribution credentials starting with 1.4.1 and reject debug certificates; users coming from debug-signed v1.4.0 may need to uninstall/reinstall.',
+              'changelog signing bullet')
+          changelog.write_text(text)
+
+      - name: Commit documentation sync to main
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add README.md android/README.md CHANGELOG.md
+          git diff --cached --check
+          git commit -m 'Document MattMux 1.4.1 release [skip ci]'
+          git push origin HEAD:main
+
+      - name: Add Android signing migration to release notes
+        run: |
+          cat > "$RUNNER_TEMP/release-notes.md" <<'EOF'
+          ## MattMux 1.4.1
+
+          MattMux 1.4.1 is a unified Windows, Linux, and Android/ChromeOS maintenance release containing the release-audit fixes.
+
+          ### Highlights
+          - Preserve completed desktop and Android remuxes when final publication fails, with safer Linux no-overwrite fallbacks.
+          - Use consistent 100M probe/analyze limits for desktop probing and remuxing.
+          - Clean Linux CLI partial outputs on Ctrl+C/SIGTERM.
+          - Correct Debian preview ordering and declare the `libc6 (>= 2.38)` runtime floor.
+          - Give additional DVD titles distinct `-title-NN` output filenames.
+          - Carry DVD IFO audio/subtitle languages and the selected PGC subtitle palette into Android native metadata.
+          - Publish Android APKs with the persistent MattMux distribution key and reject debug certificates.
+
+          ### Android signing migration
+          The v1.4.0 GitHub APK was debug-signed. **v1.4.1 is signed with the persistent MattMux distribution key.** Because the signing certificate changed, Android/ChromeOS may refuse an in-place upgrade from v1.4.0. If that happens, uninstall v1.4.0 and then install the v1.4.1 APK. Future GitHub APK releases should keep using this same persistent signing key.
+
+          ### Verification
+          The unified release workflow built and validated the Windows, Linux, and Android/ChromeOS packages from the same `v1.4.1` tag. Platform-specific and combined SHA-256 manifests are included in the release assets.
+
+          **Full Changelog:** https://github.com/maas3n/MattMux/compare/v1.4.0...v1.4.1
+          EOF
+          gh release edit v1.4.1 --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/release-notes.md"
