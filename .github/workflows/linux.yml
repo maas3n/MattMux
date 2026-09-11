@@ -40,6 +40,13 @@ jobs:
           go mod tidy
           git diff --exit-code -- go.mod go.sum
 
+      - name: Validate Debian preview version ordering
+        run: |
+          dpkg --compare-versions '1.4.1~alpha.1' lt '1.4.1~beta.1'
+          dpkg --compare-versions '1.4.1~beta.1' lt '1.4.1~rc.1'
+          dpkg --compare-versions '1.4.1~rc.1' lt '1.4.1'
+          dpkg --compare-versions '1.4.1' lt '1.4.2~alpha.1'
+
       - name: Build GUI, CLI, self-contained DEB, tarballs and standalone
         run: |
           set -euo pipefail
@@ -51,6 +58,7 @@ jobs:
           set -euo pipefail
           deb="dist/linux-release/MattMux-$MATTMUX_CI_VERSION-Linux-amd64.deb"
           dpkg-deb --info "$deb"
+          dpkg-deb -f "$deb" Depends | grep -F 'libc6 (>= 2.38)'
           dpkg-deb --contents "$deb"
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
