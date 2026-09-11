@@ -20,4 +20,4 @@ python3 "${ROOT}/android/native/tests/make_remux_iso.py" "${TEST_WORK}"
 javac -d "${TEST_WORK}/classes" "${ROOT}/android/native/tests/java/io/github/maas3n/mattmux/AndroidNativeRemuxEngine.java"
 java -cp "${TEST_WORK}/classes" io.github.maas3n.mattmux.AndroidNativeRemuxEngine \
   "${TEST_WORK}/libmattmux_host_test.so" "${TEST_WORK}"
-python3 "${ROOT}/android/native/tests/remux_fingerprint.py" "${TEST_WORK}/folder.mkv" "${TEST_WORK}/iso.mkv"
+python3 "${ROOT}/android/native/tests/remux_fingerprint.py" "${TEST_WORK}/folder.mkv" "${TEST_WORK}/iso.mkv" "${TEST_WORK}/input.vob"

@@ -29,7 +29,7 @@ jobs:
       - name: Install Android platform and native toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl patchelf xz-utils autoconf automake libtool pkg-config
+          sudo apt-get install -y binutils curl patchelf xz-utils autoconf automake libtool pkg-config
           sdkmanager \
             'platforms;android-36' \
             'build-tools;36.0.0' \
@@ -80,6 +80,7 @@ jobs:
           set -euo pipefail
           AAB="$(find android/app/build/outputs/bundle/release -name '*.aab' -print -quit)"
           test -n "$AAB"
+          python3 android/native/verify-package.py "$AAB"
           jarsigner -verify -certs "$AAB" 2>&1 | tee /tmp/jarsigner.txt
           grep -Fq 'jar verified.' /tmp/jarsigner.txt
           unzip -l "$AAB" 'base/lib/arm64-v8a/libmattmux_jni.so' | grep -q libmattmux_jni.so

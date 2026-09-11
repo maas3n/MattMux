@@ -68,6 +68,12 @@ int main(int argc, char **argv)
     fd = open("/dev/null", O_RDONLY);
     assert(!dvd_udf_open(fd, error, sizeof(error)));
     close(fd);
+    char corrupt[] = "/tmp/mattmux-udf-corrupt-XXXXXX";
+    fd = mkstemp(corrupt);
+    assert(fd >= 0);
+    assert(ftruncate(fd, 1024 * 1024) == 0);
+    assert(!dvd_udf_open(fd, error, sizeof(error)));
+    close(fd); unlink(corrupt);
     puts("UDF source parity: sequential bytes, unaligned/backward seeks, missing files, fd ownership, bounds, cancellation and pipes PASS");
     return 0;
 }

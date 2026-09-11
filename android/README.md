@@ -1,3 +1,24 @@
+# Alpha 4 development status
+
+The Android branch now implements folder and read-only UDF ISO input using one
+IFO/title/cell planner and native stream-copy loop. ISO access uses a separate
+LGPL libudfread shared library through a seekable SAF descriptor; no root, mount,
+FUSE or VOB extraction is used. Source files are opened read-only.
+
+Output stays under a temporary `.partial` name until the native muxer has
+finished and flushed successfully. Cancellation/errors abort the output. A
+provider must support random-access output and rename for this path.
+
+Run and release status must be checked in CI; source implementation alone is
+not proof of a tested APK. Generated-source and host-JNI checks are described in
+[native/tests/README.md](native/tests/README.md). Full Windows/Linux output parity,
+real Android execution and physical Chromebook tests remain separate gates.
+Interleaved multi-angle discs, still/shuffle/multi-PGC semantics, CSS decryption,
+ISO9660-only images and streaming-only providers are unsupported. Billing stays
+disabled. Alpha 3's published tag and assets remain unchanged.
+
+---
+
 # MattMux for Android / Chromebook
 
 This directory contains the Google Play / ChromeOS frontend for MattMux.

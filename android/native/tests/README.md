@@ -3,7 +3,8 @@
 `test-udf-source.sh <pinned-libudfread-source>` compares complete file bytes and
 unaligned/backward reads against generated originals under ASan/UBSan. It checks
 fd duplication, missing files, input bounds, cancellation and non-seekable input.
-The pycdlib fixture is UDF 2.60, not a DVD-Video authoring/IFO fixture.
+The same originals are wrapped in UDF 2.60 (pycdlib) and UDF 1.02 (genisoimage).
+These are filesystem fixtures, not DVD-Video authoring/IFO fixtures.
 
 `test-host-remux.sh <pinned-libudfread-source> <diagnostic-directory>` compiles the
 **production JNI source** on Linux with the host libav libraries and invokes it

@@ -21,6 +21,8 @@ def fingerprint(path):
     origin = min(Decimal(p['pts_time']) for p in packets if 'pts_time' in p)
     streams = []
     for stream in raw['streams']:
+        if stream['codec_type'] not in ('video', 'audio', 'subtitle'):
+            continue
         props = {key: stream.get(key) for key in (
             'codec_type', 'codec_name', 'width', 'height', 'sample_rate', 'channels',
             'channel_layout', 'sample_aspect_ratio', 'extradata_hash',
@@ -39,7 +41,7 @@ def fingerprint(path):
         props['packets'] = items
         streams.append(props)
     streams.sort(key=lambda item: json.dumps(item, sort_keys=True))
-    return {'streams': streams, 'chapters': [
+    return {'timeline_origin': str(origin), 'streams': streams, 'chapters': [
         {key: chapter[key] for key in ('start_time', 'end_time')}
         for chapter in raw.get('chapters', [])
     ]}
@@ -69,14 +71,23 @@ def first_difference(a, b, path='$'):
 
 if __name__ == '__main__':
     paths = [Path(arg) for arg in sys.argv[1:]]
-    if len(paths) != 2:
-        raise SystemExit('usage: remux_fingerprint.py folder.mkv iso.mkv')
+    if len(paths) not in (2, 3):
+        raise SystemExit('usage: remux_fingerprint.py folder.mkv iso.mkv [source.vob]')
     results = [fingerprint(path) for path in paths]
     for path, result in zip(paths, results):
         path.with_suffix('.fingerprint.json').write_text(json.dumps(result, indent=2) + '\n')
-    difference = first_difference(*results)
+    difference = first_difference(results[0], results[1])
     if difference:
         raise SystemExit(difference)
+    if abs(Decimal(results[0]['timeline_origin'])) > Decimal('0.001'):
+        raise SystemExit('Output timestamps are not aligned with zero-based chapters')
     if len(results[0]['chapters']) != 2:
         raise SystemExit('Expected two chapters in generated remux fixture')
+    if len(results) == 3:
+        def payloads(result):
+            return sorted((s['codec_type'], s['codec_name'],
+                [(p['data_hash'], p['size']) for p in s['packets']]) for s in result['streams'])
+        difference = first_difference(payloads(results[0]), payloads(results[2]))
+        if difference:
+            raise SystemExit('Source compressed payload mismatch: ' + difference)
     print('Folder/ISO stream, packet payload, common-clock timestamp and chapter parity PASS')

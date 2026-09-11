@@ -13,6 +13,65 @@ class DvdIfoParserTest {
 
     @Test
     fun selectsLongestTitleAndAngleOneCells() {
+        val (vmg, vts) = fixture()
+        val plan = DvdIfoParser.selectLongestTitle(vmg) { if (it == 1) vts else null }
+        assertEquals(1, plan.globalTitle)
+        assertEquals(1, plan.titleSet)
+        assertEquals(15_000L, plan.durationMs)
+        assertArrayEquals(longArrayOf(0, 5_000), plan.chapterStartsMs)
+        assertArrayEquals(longArrayOf(5_000, 15_000), plan.chapterEndsMs)
+        assertEquals(listOf(DvdCellRange(10, 20), DvdCellRange(30, 50)), plan.cells)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsInvalidFrameBcd() {
+        DvdIfoParser.decodeDvdTimeMs(byteArrayOf(0, 0, 0, 0xCF.toByte()))
+    }
+
+    @Test
+    fun diagnosticPlanIsStable() {
+        val plan = DvdTitlePlan(2, 1, 1000, listOf(DvdCellRange(3, 5)), longArrayOf(0), longArrayOf(1000))
+        assertEquals("""{"global_title":2,"title_set":1,"duration_ms":1000,"cells":[{"start_sector":3,"end_sector_exclusive":5}],"chapters":[{"start_ms":0,"end_ms":1000}]}""", plan.diagnosticJson())
+    }
+
+    @Test
+    fun selectsSecondTitleWhenLonger() {
+        val (vmg, vts) = fixture()
+        put16(vmg, 2048, 2)
+        put32(vmg, 2052, 31)
+        put16(vmg, 2048 + 20 + 2, 2)
+        vmg[2048 + 20 + 6] = 2
+        vmg[2048 + 20 + 7] = 1
+        val longer = vts.copyOf()
+        longer[4096 + 16 + 0xF0 + 6] = 0x08
+        longer[4096 + 16 + 0xF0 + 48 + 6] = 0x12
+        val plan = DvdIfoParser.selectLongestTitle(vmg) { if (it == 1) vts else longer }
+        assertEquals(2, plan.globalTitle)
+        assertEquals(2, plan.titleSet)
+        assertEquals(20_000L, plan.durationMs)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsInterleavedAnglesInsteadOfCopyingWrongVobus() {
+        val (vmg, vts) = fixture()
+        vts[4096 + 16 + 0xF0] = 0x54
+        DvdIfoParser.selectLongestTitle(vmg) { vts }
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsOrphanAngleCell() {
+        val (vmg, vts) = fixture()
+        vts[4096 + 16 + 0xF0] = 0x90.toByte()
+        DvdIfoParser.selectLongestTitle(vmg) { vts }
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsTruncatedIfo() {
+        val (vmg, vts) = fixture()
+        DvdIfoParser.selectLongestTitle(vmg) { vts.copyOf(128) }
+    }
+
+    private fun fixture(): Pair<ByteArray, ByteArray> {
         val vmg = ByteArray(4096)
         "DVDVIDEO-VMG".toByteArray().copyInto(vmg)
         put32(vmg, 0xC4, 1)
@@ -54,24 +113,7 @@ class DvdIfoParserTest {
         setCell(vts, pgc + 0xF0 + 24, category = 0xD0, seconds = 7, firstSector = 20, lastSector = 29)
         setCell(vts, pgc + 0xF0 + 48, category = 0, seconds = 10, firstSector = 30, lastSector = 49)
 
-        val plan = DvdIfoParser.selectLongestTitle(vmg) { if (it == 1) vts else null }
-        assertEquals(1, plan.globalTitle)
-        assertEquals(1, plan.titleSet)
-        assertEquals(15_000L, plan.durationMs)
-        assertArrayEquals(longArrayOf(0, 5_000), plan.chapterStartsMs)
-        assertArrayEquals(longArrayOf(5_000, 15_000), plan.chapterEndsMs)
-        assertEquals(listOf(DvdCellRange(10, 20), DvdCellRange(30, 50)), plan.cells)
-    }
-
-    @Test(expected = IllegalArgumentException::class)
-    fun rejectsInvalidFrameBcd() {
-        DvdIfoParser.decodeDvdTimeMs(byteArrayOf(0, 0, 0, 0xCF.toByte()))
-    }
-
-    @Test
-    fun diagnosticPlanIsStable() {
-        val plan = DvdTitlePlan(2, 1, 1000, listOf(DvdCellRange(3, 5)), longArrayOf(0), longArrayOf(1000))
-        assertEquals("""{"global_title":2,"title_set":1,"duration_ms":1000,"cells":[{"start_sector":3,"end_sector_exclusive":5}],"chapters":[{"start_ms":0,"end_ms":1000}]}""", plan.diagnosticJson())
+        return vmg to vts
     }
 
     private fun setCell(data: ByteArray, off: Int, category: Int, seconds: Int, firstSector: Long, lastSector: Long) {

@@ -159,7 +159,7 @@ class MainActivity : Activity(), BillingManager.Listener {
 
         root.addView(section("Remux"))
         val runtimeMessage = engine.runtimeInfo?.let {
-            "Bundled native runtime: $it\n\nVIDEO_TS folders use MattMux's native IFO/cell planner and LGPL FFmpeg stream-copy muxer. ISO/UDF input is the next source-reader milestone."
+            "Bundled native runtime: $it\n\nVIDEO_TS folders and UDF ISO images use the same DVD title/cell planner. Select an unencrypted DVD; ISO files must be on storage that supports seeking. Interleaved multi-angle discs are not supported in this alpha."
         } ?: "The bundled native FFmpeg runtime could not be loaded in this build."
         root.addView(value(runtimeMessage))
         remuxStatus = value("Ready")

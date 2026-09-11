@@ -41,7 +41,7 @@ jobs:
       - name: Install Android platform and native toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y binutils curl patchelf xz-utils autoconf automake libtool pkg-config ffmpeg libavformat-dev libavcodec-dev libavutil-dev
+          sudo apt-get install -y binutils curl patchelf xz-utils autoconf automake libtool pkg-config ffmpeg genisoimage libavformat-dev libavcodec-dev libavutil-dev
           sdkmanager \
             'platforms;android-36' \
             'build-tools;36.0.0' \
@@ -88,36 +88,7 @@ jobs:
           grep -Fq "versionCode='104'" <<<"${BADGING}"
           grep -Fq "versionName='1.2.0-chromeos-alpha4'" <<<"${BADGING}"
 
-          tmp="$(mktemp -d)"
-          trap 'rm -rf "$tmp"' EXIT
-
-          for abi in arm64-v8a x86_64; do
-            for lib in libavutil.so libavcodec.so libavformat.so libudfread.so libmattmux_jni.so; do
-              unpacked="${tmp}/${abi}-${lib}"
-              unzip -p "${APK}" "lib/${abi}/${lib}" > "${unpacked}"
-              unzip -l "${AAB}" "base/lib/${abi}/${lib}" | grep -q "${lib}"
-
-              mapfile -t load_alignments < <(
-                readelf -lW "${unpacked}" | awk '$1 == "LOAD" { print $NF }'
-              )
-              (( ${#load_alignments[@]} > 0 )) || {
-                echo "No ELF LOAD segments found in ${abi}/${lib}" >&2
-                exit 1
-              }
-              for alignment in "${load_alignments[@]}"; do
-                (( alignment >= 0x4000 )) || {
-                  echo "ELF LOAD alignment below 16 KB in ${abi}/${lib}: ${alignment}" >&2
-                  exit 1
-                }
-              done
-
-              if readelf -dW "${unpacked}" \
-                | grep -Eiq 'NEEDED.*(dvdnav|dvdread|dvdcss|x264|x265|xvid)'; then
-                echo "Forbidden dependency in packaged ${abi}/${lib}" >&2
-                exit 1
-              fi
-            done
-          done
+          python3 android/native/verify-package.py "${APK}" "${AAB}"
 
           unzip -p "${APK}" assets/ffmpeg/ffmpeg-build-info.txt \
             | grep -q 'FFmpeg version: 9.0.1'

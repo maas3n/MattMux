@@ -428,6 +428,7 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
     AVFormatContext *input = NULL, *out = NULL;
     AVPacket *packet = NULL;
     int *stream_map = NULL;
+    int64_t timestamp_origin_us = 0;
 
 
     ret = init_source(env, fd_array, starts_array, ends_array, &source, (DvdUdfSource *)(intptr_t)iso_handle, title_set, &cancel, error, sizeof(error));
@@ -455,8 +456,14 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
     ret = avformat_find_stream_info(input, NULL);
     if (ret < 0) { ff_error(error, sizeof(error), "Could not probe DVD streams", ret); goto cleanup; }
 
+    /* One clock origin for every stream preserves A/V offsets and aligns chapters.
+       Per-stream zeroing would silently erase synchronization differences. */
+    if (input->start_time != AV_NOPTS_VALUE) timestamp_origin_us = input->start_time;
+
     ret = avformat_alloc_output_context2(&out, NULL, "matroska", NULL);
     if (ret < 0 || !out) { if (ret >= 0) ret = AVERROR_UNKNOWN; ff_error(error, sizeof(error), "Could not create Matroska muxer", ret); goto cleanup; }
+
+    out->avoid_negative_ts = AVFMT_AVOID_NEG_TS_DISABLED;
 
     stream_map = av_malloc_array(input->nb_streams, sizeof(*stream_map));
     if (!stream_map) { ret = AVERROR(ENOMEM); goto cleanup; }
@@ -506,6 +513,9 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
         if (out_index >= 0) {
             AVStream *in_stream = input->streams[in_index];
             AVStream *out_stream = out->streams[out_index];
+            int64_t origin = av_rescale_q(timestamp_origin_us, AV_TIME_BASE_Q, in_stream->time_base);
+            if (packet->pts != AV_NOPTS_VALUE) packet->pts -= origin;
+            if (packet->dts != AV_NOPTS_VALUE) packet->dts -= origin;
             packet->stream_index = out_index;
             av_packet_rescale_ts(packet, in_stream->time_base, out_stream->time_base);
             packet->pos = -1;
@@ -518,7 +528,9 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
         if (percent < last_percent) percent = last_percent;
         if (percent != last_percent) { report_progress(env, thiz, progress_method, percent); last_percent = percent; }
     }
-    if (ret == AVERROR_EOF) ret = 0;
+    if (ret == AVERROR_EOF) {
+        ret = (input_io->error < 0 && input_io->error != AVERROR_EOF) ? input_io->error : 0;
+    }
     if (ret == AVERROR_EXIT || is_cancelled(&cancel)) {
         snprintf(error, sizeof(error), "Remux cancelled");
         ret = AVERROR_EXIT;
