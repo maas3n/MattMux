@@ -1,17 +1,229 @@
-name: Release v1.2.0 (archived)
+name: Release v1.2.0 hotfix
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v1.2.0.yml'
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  archived:
-    runs-on: ubuntu-latest
+  release:
+    runs-on: windows-latest
+
     steps:
-      - name: Explain archived release
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go 1.27.1
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.1'
+          cache: false
+
+      - name: Test and build MattMux
+        shell: pwsh
+        working-directory: src
         run: |
-          echo 'MattMux v1.2.0 is an immutable historical release.'
-          echo 'Do not rebuild or replace its binary assets from this workflow.'
-          echo 'Publish binary changes under a new version/tag instead.'
+          $ErrorActionPreference = 'Stop'
+          go version
+          go test ./...
+          go vet ./...
+          .\build.ps1
+
+      - name: Prepare bundled runtime tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ffTag = 'autobuild-2026-09-08-23-15'
+          $ffAsset = 'ffmpeg-N-126479-g08cd8df29d-win64-gpl-shared.zip'
+          $ffManifestSha = 'f64be162403094773397bfcc299a4a059507028afa7563591fd05c17d56b3214'
+          $miVersion = '26.05'
+          $miAsset = 'MediaInfo_CLI_26.05_Windows_x64.zip'
+          $miSha = 'f7f80620ce6d14f4995f0de6f98e3ef18ad29496db01899571152ee3311229f9'
+          $work = Join-Path $env:RUNNER_TEMP 'mattmux-bundled-tools'
+          $stage = Join-Path $PWD 'packaging\installer\bundled-tools'
+          Remove-Item $work,$stage -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $work,$stage | Out-Null
+
+          function Assert-Sha([string]$Path,[string]$Expected) {
+            $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+            if ($got -ne $Expected.ToLowerInvariant()) { throw "SHA-256 mismatch for $Path`nExpected: $Expected`nActual:   $got" }
+          }
+
+          $ffBase = "https://github.com/BtbN/FFmpeg-Builds/releases/download/$ffTag"
+          $manifest = Join-Path $work 'checksums.sha256'
+          Invoke-WebRequest -UseBasicParsing -Uri "$ffBase/checksums.sha256" -OutFile $manifest
+          Assert-Sha $manifest $ffManifestSha
+          $manifestText = Get-Content -LiteralPath $manifest -Raw
+          $escaped = [regex]::Escape($ffAsset)
+          $match = [regex]::Match($manifestText, "(?im)^([0-9a-f]{64})\s+\*?$escaped\s*$")
+          if (-not $match.Success) { throw "Verified FFmpeg manifest does not contain $ffAsset" }
+          $ffArchiveSha = $match.Groups[1].Value.ToLowerInvariant()
+          $ffArchive = Join-Path $work $ffAsset
+          Invoke-WebRequest -UseBasicParsing -Uri "$ffBase/$ffAsset" -OutFile $ffArchive
+          Assert-Sha $ffArchive $ffArchiveSha
+          $ffExtract = Join-Path $work 'ffmpeg'
+          Expand-Archive -LiteralPath $ffArchive -DestinationPath $ffExtract -Force
+          $ffmpeg = Get-ChildItem $ffExtract -Filter ffmpeg.exe -File -Recurse | Select-Object -First 1
+          if ($null -eq $ffmpeg) { throw 'ffmpeg.exe missing from verified archive' }
+          $ffBin = $ffmpeg.Directory.FullName
+          if (-not (Test-Path (Join-Path $ffBin 'ffprobe.exe'))) { throw 'ffprobe.exe missing from verified archive' }
+          $ffDest = Join-Path $stage 'ffmpeg-2026-09-08'
+          New-Item -ItemType Directory -Force -Path $ffDest | Out-Null
+          Copy-Item (Join-Path $ffBin '*') $ffDest -Force
+
+          $miArchive = Join-Path $work $miAsset
+          Invoke-WebRequest -UseBasicParsing -Uri "https://mediaarea.net/download/binary/mediainfo/$miVersion/$miAsset" -OutFile $miArchive
+          Assert-Sha $miArchive $miSha
+          $miExtract = Join-Path $work 'mediainfo'
+          Expand-Archive -LiteralPath $miArchive -DestinationPath $miExtract -Force
+          $miExe = Get-ChildItem $miExtract -Filter MediaInfo.exe -File -Recurse | Select-Object -First 1
+          if ($null -eq $miExe) { throw 'MediaInfo.exe missing from verified archive' }
+          $miDest = Join-Path $stage 'mediainfo-26.05'
+          New-Item -ItemType Directory -Force -Path $miDest | Out-Null
+          Copy-Item $miExe.FullName (Join-Path $miDest 'MediaInfo.exe') -Force
+
+          & (Join-Path $ffDest 'ffmpeg.exe') -hide_banner -demuxers | Select-String dvdvideo
+          if ($LASTEXITCODE -ne 0) { throw 'Bundled FFmpeg self-check failed' }
+
+      - name: Build ready-to-run portable ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path .\dist | Out-Null
+          $stage = Join-Path $PWD 'dist\MattMux-1.2.0-Portable'
+          $zip = Join-Path $PWD 'dist\MattMux-1.2.0-Portable.zip'
+          Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item $zip -Force -ErrorAction SilentlyContinue
+
+          $ffDest = Join-Path $stage 'MattMuxData\tools\ffmpeg-2026-09-08'
+          $miDest = Join-Path $stage 'MattMuxData\tools\mediainfo-26.05'
+          New-Item -ItemType Directory -Force -Path $ffDest,$miDest | Out-Null
+
+          Copy-Item .\MattMux.exe (Join-Path $stage 'MattMux-Portable.exe') -Force
+          Copy-Item .\src\MattMux.exe.manifest (Join-Path $stage 'MattMux-Portable.exe.manifest') -Force
+          Copy-Item .\src\MattMux.ico (Join-Path $stage 'MattMux.ico') -Force
+          Copy-Item .\THIRD_PARTY.md (Join-Path $stage 'THIRD_PARTY.md') -Force
+          Copy-Item .\packaging\installer\bundled-tools\ffmpeg-2026-09-08\* $ffDest -Force
+          Copy-Item .\packaging\installer\bundled-tools\mediainfo-26.05\MediaInfo.exe $miDest -Force
+
+          @'
+          MattMux 1.2.0 Portable
+          ======================
+
+          Extract this entire folder and run MattMux-Portable.exe.
+          No installer is required and no FFmpeg, FFprobe, or MediaInfo download is required.
+
+          Keep the folder together. Portable settings, logs, and bundled tools are stored under:
+            MattMuxData\
+          '@ | ForEach-Object { $_ -replace '^          ', '' } | Set-Content -LiteralPath (Join-Path $stage 'README-PORTABLE.txt') -Encoding UTF8
+
+          foreach ($required in @(
+            (Join-Path $stage 'MattMux-Portable.exe'),
+            (Join-Path $ffDest 'ffmpeg.exe'),
+            (Join-Path $ffDest 'ffprobe.exe'),
+            (Join-Path $miDest 'MediaInfo.exe')
+          )) {
+            if (-not (Test-Path -LiteralPath $required)) { throw "Portable package missing required file: $required" }
+          }
+
+          $checksumPath = Join-Path $stage 'CHECKSUMS.txt'
+          $lines = Get-ChildItem -LiteralPath $stage -File -Recurse |
+            Where-Object { $_.FullName -ne $checksumPath } |
+            Sort-Object FullName |
+            ForEach-Object {
+              $rel = $_.FullName.Substring($stage.Length + 1).Replace('\','/')
+              $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant()
+              "$hash  $rel"
+            }
+          $lines | Set-Content -LiteralPath $checksumPath -Encoding ASCII
+          Compress-Archive -LiteralPath $stage -DestinationPath $zip -CompressionLevel Optimal
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path -LiteralPath $iscc)) {
+            $cmd = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+            if ($null -eq $cmd) { throw 'Inno Setup compiler (ISCC.exe) was not found.' }
+            $iscc = $cmd.Source
+          }
+          & $iscc '/DMyAppVersion=1.2.0' '.\packaging\installer\MattMux.iss'
+          if ($LASTEXITCODE -ne 0) { throw "Installer build failed with exit code $LASTEXITCODE" }
+
+      - name: Build all-in-one executable
+        shell: pwsh
+        run: .\packaging\all-in-one\Build-AllInOne.ps1
+
+      - name: Create and verify release checksums
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assets = @(
+            '.\dist\MattMux-1.2.0-Setup.exe',
+            '.\dist\MattMux-1.2.0-All-in-One.exe',
+            '.\dist\MattMux-1.2.0-Portable.zip'
+          )
+          $lines = foreach ($asset in $assets) {
+            if (-not (Test-Path -LiteralPath $asset)) { throw "Missing release asset: $asset" }
+            $item = Get-Item -LiteralPath $asset
+            if ($item.Length -le 0) { throw "Empty release asset: $asset" }
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $asset).Hash.ToLowerInvariant()
+            "$hash  $($item.Name)"
+          }
+          $lines | Set-Content -LiteralPath .\dist\SHA256SUMS.txt -Encoding ASCII
+          Get-Content .\dist\SHA256SUMS.txt
+
+          $verify = Join-Path $env:RUNNER_TEMP 'mattmux-portable-verify'
+          Remove-Item $verify -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive -LiteralPath .\dist\MattMux-1.2.0-Portable.zip -DestinationPath $verify -Force
+          foreach ($leaf in @('MattMux-Portable.exe','ffmpeg.exe','ffprobe.exe','MediaInfo.exe')) {
+            $match = Get-ChildItem -LiteralPath $verify -Recurse -File -Filter $leaf | Select-Object -First 1
+            if ($null -eq $match -or $match.Length -le 0) { throw "Portable verification failed: $leaf" }
+          }
+
+      - name: Refresh v1.2.0 tag to verified hotfix source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -f v1.2.0 $env:GITHUB_SHA
+          git push origin refs/tags/v1.2.0 --force
+
+      - name: Publish refreshed v1.2.0 assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = 'v1.2.0'
+          $assets = @(
+            '.\dist\MattMux-1.2.0-Setup.exe',
+            '.\dist\MattMux-1.2.0-All-in-One.exe',
+            '.\dist\MattMux-1.2.0-Portable.zip',
+            '.\dist\SHA256SUMS.txt'
+          )
+          gh release upload $tag @assets --clobber --repo $env:GITHUB_REPOSITORY
+          gh release edit $tag --title 'MattMux 1.2.0' --notes-file '.\.github\RELEASE_NOTES_1.2.0.md' --repo $env:GITHUB_REPOSITORY
+
+      - name: Upload verified release payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: MattMux-1.2.0-hotfix-release
+          path: |
+            dist/MattMux-1.2.0-Setup.exe
+            dist/MattMux-1.2.0-All-in-One.exe
+            dist/MattMux-1.2.0-Portable.zip
+            dist/SHA256SUMS.txt

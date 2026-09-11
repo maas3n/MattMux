@@ -15,7 +15,11 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 OutputDir=..\..\dist
+#ifdef ThinSetup
+OutputBaseFilename=MattMux-{#MyAppVersion}-Thin-Setup
+#else
 OutputBaseFilename=MattMux-{#MyAppVersion}-Setup
+#endif
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -31,6 +35,11 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Source: "..\..\MattMux.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\src\MattMux.exe.manifest"; DestDir: "{app}"; DestName: "MattMux.exe.manifest"; Flags: ignoreversion
 Source: "..\..\src\MattMux.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\THIRD_PARTY.md"; DestDir: "{app}"; Flags: ignoreversion
+#ifndef ThinSetup
+Source: "bundled-tools\ffmpeg-2026-09-08\*"; DestDir: "{localappdata}\MattMux\tools\ffmpeg-2026-09-08"; Flags: ignoreversion
+Source: "bundled-tools\mediainfo-26.05\MediaInfo.exe"; DestDir: "{localappdata}\MattMux\tools\mediainfo-26.05"; Flags: ignoreversion
+#endif
 
 [Icons]
 Name: "{autoprograms}\MattMux"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
