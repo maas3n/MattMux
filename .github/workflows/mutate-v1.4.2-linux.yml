@@ -1,0 +1,125 @@
+name: Mutate v1.4.2 Linux release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  mutate-linux-release:
+    if: github.event.head_commit.message == 'Rebuild v1.4.2 Linux release'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out fixed source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go 1.27.1
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.1'
+          cache: false
+
+      - name: Install Linux build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc g++ cmake ninja-build curl xz-utils file \
+            libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
+
+      - name: Verify module metadata
+        working-directory: src
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Build fixed v1.4.2 Linux payload
+        run: |
+          set -euo pipefail
+          bash packaging/linux/build-linux-release.sh 1.4.2
+          bash packaging/linux/build-linux-standalone.sh 1.4.2
+
+      - name: Validate fixed Linux payload
+        run: |
+          set -euo pipefail
+          deb='dist/linux-release/MattMux-1.4.2-Linux-amd64.deb'
+          portable='dist/linux-release/MattMux-1.4.2-Linux-amd64.tar.gz'
+          standalone='dist/linux-release/MattMux-1.4.2-Linux-amd64Standalone'
+          source='dist/linux-release/MattMux-1.4.2-Source.tar.gz'
+          test -s "$deb"
+          test -s "$portable"
+          test -x "$standalone"
+          test -s "$source"
+          file "$standalone" | grep -E 'ELF 64-bit.*x86-64'
+          tmp="$(mktemp -d)"
+          dpkg-deb --extract "$deb" "$tmp/deb"
+          test -x "$tmp/deb/usr/lib/mattmux/app/mattmux-bin"
+          mkdir -p "$tmp/source"
+          tar -xzf "$source" -C "$tmp/source"
+          grep -Fq 'dialog.NewCustomWithoutButtons' "$tmp/source/MattMux-1.4.2-Source/src/main_linux.go"
+          grep -Fq 'widget.NewButton("Show Metadata"' "$tmp/source/MattMux-1.4.2-Source/src/main_linux.go"
+          ! grep -Fq 'fyne.CurrentApp().NewWindow(fmt.Sprintf("MattMux — Title' "$tmp/source/MattMux-1.4.2-Source/src/main_linux.go"
+          XDG_CACHE_HOME="$tmp/cache" "$standalone" --standalone-self-test
+
+      - name: Download existing release assets and replace Linux payload locally
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          gh release download v1.4.2 --repo "$GITHUB_REPOSITORY" --dir release-assets
+          cp -f dist/linux-release/MattMux-1.4.2-Linux-amd64.deb release-assets/
+          cp -f dist/linux-release/MattMux-1.4.2-Linux-amd64.tar.gz release-assets/
+          cp -f dist/linux-release/MattMux-1.4.2-Linux-amd64Standalone release-assets/
+          cp -f dist/linux-release/MattMux-1.4.2-Source.tar.gz release-assets/
+          (
+            cd dist/linux-release
+            sha256sum \
+              MattMux-1.4.2-Linux-amd64.deb \
+              MattMux-1.4.2-Linux-amd64.tar.gz \
+              MattMux-1.4.2-Linux-amd64Standalone \
+              MattMux-1.4.2-Source.tar.gz > SHA256SUMS-Linux.txt
+          )
+          cp -f dist/linux-release/SHA256SUMS-Linux.txt release-assets/
+          rm -f release-assets/SHA256SUMS.txt
+          (
+            cd release-assets
+            find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' -print0 \
+              | sort -z \
+              | xargs -0 sha256sum > SHA256SUMS.txt
+          )
+
+      - name: Force-move existing v1.4.2 tag to fixed source
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -fa v1.4.2 "$GITHUB_SHA" -m 'MattMux 1.4.2'
+          git push --force origin refs/tags/v1.4.2
+
+      - name: Clobber Linux assets on existing v1.4.2 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload v1.4.2 \
+            release-assets/MattMux-1.4.2-Linux-amd64.deb \
+            release-assets/MattMux-1.4.2-Linux-amd64.tar.gz \
+            release-assets/MattMux-1.4.2-Linux-amd64Standalone \
+            release-assets/MattMux-1.4.2-Source.tar.gz \
+            release-assets/SHA256SUMS-Linux.txt \
+            release-assets/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
+      - name: Verify release tag and assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse v1.4.2^{commit})" = "$GITHUB_SHA"
+          gh release view v1.4.2 --repo "$GITHUB_REPOSITORY" --json tagName,assets
