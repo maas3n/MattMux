@@ -1,0 +1,93 @@
+name: Prepare v1.4.2 Android packaging
+
+on:
+  push:
+    branches:
+      - release/android-apk-v1.4.2
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Apply v1.4.2 Android packaging helper'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/android-apk-v1.4.2
+          fetch-depth: 0
+
+      - name: Patch release packaging and documentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          # Release workflow: publish one signed universal APK under explicit
+          # Android-phone/tablet and ChromeOS names. Keep them byte-identical.
+          p = Path('.github/workflows/release.yml')
+          s = p.read_text()
+          old = '''          cp "$APK" "dist/android-release/MattMux-$version-ChromeOS.apk"\n'''
+          new = '''          cp "$APK" "dist/android-release/MattMux-$version-Android.apk"\n          cp "$APK" "dist/android-release/MattMux-$version-ChromeOS.apk"\n          test -s "dist/android-release/MattMux-$version-Android.apk"\n          test -s "dist/android-release/MattMux-$version-ChromeOS.apk"\n          cmp --silent "dist/android-release/MattMux-$version-Android.apk" "dist/android-release/MattMux-$version-ChromeOS.apk"\n'''
+          assert s.count(old) == 1, 'expected ChromeOS APK copy line exactly once'
+          p.write_text(s.replace(old, new))
+
+          # Release policy documentation.
+          p = Path('RELEASING.md')
+          s = p.read_text()
+          old = '- `MattMux-<version>-Source.tar.gz`\n- `MattMux-<version>-ChromeOS.apk`\n'
+          new = '- `MattMux-<version>-Source.tar.gz`\n- `MattMux-<version>-Android.apk`\n- `MattMux-<version>-ChromeOS.apk`\n'
+          assert old in s, 'release asset list anchor missing'
+          s = s.replace(old, new, 1)
+          old = '5. builds the Android/ChromeOS APK;\n'
+          new = '5. builds one signed universal Android APK and publishes byte-identical Android/ChromeOS filename aliases;\n'
+          assert old in s, 'release workflow step anchor missing'
+          p.write_text(s.replace(old, new, 1))
+
+          # Changelog entry for 1.4.2.
+          p = Path('CHANGELOG.md')
+          s = p.read_text()
+          marker = '# Changelog\n\n'
+          assert s.startswith(marker), 'changelog header changed'
+          entry = '''## 1.4.2 — 2026-09-11\n\n- Publish the signed universal APK under both `MattMux-1.4.2-Android.apk` for Android phones/tablets and `MattMux-1.4.2-ChromeOS.apk` for Chromebooks. The two APK assets are byte-for-byte identical and are both covered by the Android and combined SHA-256 manifests.\n\n'''
+          assert '## 1.4.2 — 2026-09-11' not in s, '1.4.2 changelog entry already exists'
+          p.write_text(marker + entry + s[len(marker):])
+
+          # Root README: make 1.4.2 current and make phone APK naming explicit.
+          p = Path('README.md')
+          s = p.read_text()
+          s = s.replace('MattMux 1.4.1', 'MattMux 1.4.2')
+          s = s.replace('/releases/tag/v1.4.1', '/releases/tag/v1.4.2')
+          s = s.replace('MattMux-1.4.1-', 'MattMux-1.4.2-')
+          old = '| Android / ChromeOS | `MattMux-1.4.2-ChromeOS.apk` | Experimental APK |'
+          new = '| Android phone / tablet | `MattMux-1.4.2-Android.apk` | Signed universal APK |\n| ChromeOS | `MattMux-1.4.2-ChromeOS.apk` | Byte-identical alias of the Android APK |'
+          assert old in s, 'README platform table anchor missing'
+          s = s.replace(old, new, 1)
+          old = 'Download `MattMux-1.4.2-ChromeOS.apk` from the [MattMux 1.4.2 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.2) and install it on a compatible Android/ChromeOS device.'
+          new = 'For Android phones/tablets, download `MattMux-1.4.2-Android.apk`. For Chromebooks, download `MattMux-1.4.2-ChromeOS.apk`. They are the same persistently signed universal APK published under device-friendly filenames.'
+          assert old in s, 'README Android quick-start anchor missing'
+          s = s.replace(old, new, 1)
+          old = 'MattMux 1.4.2 contains the release-audit fixes, stronger output recovery and interruption handling, corrected Linux package metadata, and persistent Android distribution signing.'
+          new = 'MattMux 1.4.2 keeps the 1.4.1 release-audit fixes and persistent Android distribution signing, and adds an explicit Android phone/tablet APK filename alongside the ChromeOS alias.'
+          assert old in s, 'README release summary anchor missing'
+          p.write_text(s.replace(old, new, 1))
+
+          # Android README: 1.4.2 is current, while 1.4.1 remains the first
+          # persistently signed GitHub APK release.
+          p = Path('android/README.md')
+          s = p.read_text()
+          old = 'Android/ChromeOS follows the unified MattMux release line; the current published unified release is **1.4.1** (`v1.4.1`). MattMux 1.4.1 is the first GitHub APK release using the persistent MattMux distribution-signing key.'
+          new = 'Android/ChromeOS follows the unified MattMux release line; the current published unified release is **1.4.2** (`v1.4.2`). MattMux 1.4.1 was the first GitHub APK release using the persistent MattMux distribution-signing key; 1.4.2 publishes that signed universal APK under explicit Android and ChromeOS filenames.'
+          assert old in s, 'Android README release-status anchor missing'
+          p.write_text(s.replace(old, new, 1))
+          PY
+
+          rm .github/workflows/prepare-v1.4.2.yml
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/release.yml RELEASING.md CHANGELOG.md README.md android/README.md .github/workflows/prepare-v1.4.2.yml
+          git commit -m 'Publish explicit Android APK asset for 1.4.2'
+          git push origin HEAD:release/android-apk-v1.4.2
