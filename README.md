@@ -110,6 +110,10 @@ mattmux
 
 Download `MattMux-1.4.0-ChromeOS.apk` from the [MattMux 1.4.0 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.0) and install it on a compatible Android/ChromeOS device.
 
+### Output location behavior
+
+The Windows and Linux desktop GUIs default to the user's Videos directory (or home) and remember the chosen output folder. `mattmux-cli remux` instead writes to the current working directory when `--output` is omitted. The Windows All-in-One launcher may use its extraction directory as the child working directory, so the GUI output field remains authoritative.
+
 ## Build from source
 
 Everything is built from `main`.

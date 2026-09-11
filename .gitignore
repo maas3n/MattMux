@@ -24,6 +24,10 @@ settings.json
 *.log
 *.partial.mkv
 
+# Python generated files
+__pycache__/
+*.pyc
+
 # OS / editor files
 .DS_Store
 Thumbs.db

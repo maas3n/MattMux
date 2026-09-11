@@ -288,7 +288,7 @@ func remuxSelected(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	final := outputPath(src, outDir)
+	final := outputPath(src, outDir, t.Number)
 	if _, err := os.Stat(final); err == nil {
 		return fmt.Errorf("Output already exists:\n%s\n\nChoose another output folder or move/rename the existing file.", final)
 	} else if !errors.Is(err, os.ErrNotExist) {

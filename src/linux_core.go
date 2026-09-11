@@ -583,7 +583,7 @@ func remuxTitle(ctx context.Context, src string, title titleInfo, outDir string,
 	if err := validateOutputDir(outDir); err != nil {
 		return "", err
 	}
-	final := outputPath(src, outDir)
+	final := outputPath(src, outDir, title.Number)
 	if _, err := os.Stat(final); err == nil {
 		return "", fmt.Errorf("output already exists: %s", final)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -712,7 +712,7 @@ func validateOutputDir(dir string) error {
 	_ = os.Remove(name)
 	return nil
 }
-func outputPath(src, outDir string) string {
+func outputPath(src, outDir string, title int) string {
 	base := filepath.Base(src)
 	if strings.EqualFold(filepath.Ext(base), ".iso") {
 		base = strings.TrimSuffix(base, filepath.Ext(base))
@@ -723,6 +723,9 @@ func outputPath(src, outDir string) string {
 	base = sanitizeFilename(base)
 	if base == "" {
 		base = "DVD"
+	}
+	if title > 1 {
+		base = fmt.Sprintf("%s-title-%02d", base, title)
 	}
 	return filepath.Join(outDir, base+".mkv")
 }
