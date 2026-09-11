@@ -128,7 +128,11 @@ internal class DvdDocumentOutput(
     fun commit(pending: Pending): Uri {
         pending.descriptor.close()
         return DocumentsContract.renameDocument(resolver, pending.uri, pending.finalName)
-            ?: error("Remux completed, but the output provider could not rename the temporary file")
+            ?: error("Remux completed, but the output provider could not rename the temporary file. Completed MKV kept at ${pending.uri}")
+    }
+
+    fun preserve(pending: Pending) {
+        runCatching { pending.descriptor.close() }
     }
 
     fun abort(pending: Pending) {

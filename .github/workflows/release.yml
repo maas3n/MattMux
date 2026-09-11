@@ -426,6 +426,27 @@ jobs:
         with:
           gradle-version: '9.6.0'
 
+      - name: Require Android distribution signing secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_B64" || { echo 'Missing ANDROID_UPLOAD_KEYSTORE_BASE64' >&2; exit 1; }
+          test -n "$STORE_PASSWORD" || { echo 'Missing ANDROID_UPLOAD_STORE_PASSWORD' >&2; exit 1; }
+          test -n "$KEY_ALIAS" || { echo 'Missing ANDROID_UPLOAD_KEY_ALIAS' >&2; exit 1; }
+          test -n "$KEY_PASSWORD" || { echo 'Missing ANDROID_UPLOAD_KEY_PASSWORD' >&2; exit 1; }
+
+      - name: Prepare Android distribution keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "${RUNNER_TEMP}/mattmux-upload.jks"
+          test -s "${RUNNER_TEMP}/mattmux-upload.jks"
+
       - name: Build bundled LGPL FFmpeg runtime
         run: |
           ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" \
@@ -437,12 +458,17 @@ jobs:
           bash android/native/tests/test-udf-source.sh "$PWD/android/native/.work/libudfread"
           bash android/native/tests/test-host-remux.sh "$PWD/android/native/.work/libudfread" "$RUNNER_TEMP/remux-parity"
 
-      - name: Test, lint and build versioned APK
+      - name: Test, lint and build signed versioned APK
+        env:
+          ORG_GRADLE_PROJECT_MATTMUX_UPLOAD_STORE_FILE: ${{ runner.temp }}/mattmux-upload.jks
+          ORG_GRADLE_PROJECT_MATTMUX_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_MATTMUX_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_MATTMUX_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
         run: |
           gradle -p android \
             -PMATTMUX_VERSION_NAME='${{ needs.metadata.outputs.version }}' \
             -PMATTMUX_VERSION_CODE='${{ needs.metadata.outputs.android_version_code }}' \
-            :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+            :app:testDebugUnitTest :app:lintRelease :app:assembleRelease
 
       - name: Verify version and bundled native libraries
         shell: bash
@@ -450,7 +476,7 @@ jobs:
           set -euo pipefail
           version='${{ needs.metadata.outputs.version }}'
           version_code='${{ needs.metadata.outputs.android_version_code }}'
-          APK="$(find android/app/build/outputs/apk/debug -name '*.apk' -print -quit)"
+          APK="$(find android/app/build/outputs/apk/release -name '*.apk' -print -quit)"
           test -n "$APK"
 
           BADGING="$("${ANDROID_HOME}/build-tools/36.0.0/aapt" dump badging "$APK")"
@@ -460,13 +486,15 @@ jobs:
           python3 android/native/verify-package.py "$APK"
           unzip -p "$APK" assets/ffmpeg/ffmpeg-build-info.txt | grep -q 'FFmpeg version: 9.0.1'
           "${ANDROID_HOME}/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "$APK"
+          "${ANDROID_HOME}/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/mattmux-apksigner.txt
+          ! grep -Fq "CN=Android Debug" /tmp/mattmux-apksigner.txt
 
       - name: Prepare Android / ChromeOS release payload
         run: |
           set -euo pipefail
           version='${{ needs.metadata.outputs.version }}'
           mkdir -p dist/android-release
-          APK="$(find android/app/build/outputs/apk/debug -name '*.apk' -print -quit)"
+          APK="$(find android/app/build/outputs/apk/release -name '*.apk' -print -quit)"
 
           cp "$APK" "dist/android-release/MattMux-$version-ChromeOS.apk"
           cp "android/native/.work/ffmpeg-${FFMPEG_VERSION}.tar.xz" "dist/android-release/FFmpeg-${FFMPEG_VERSION}-source.tar.xz"

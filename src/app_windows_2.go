@@ -306,7 +306,7 @@ func remuxSelected(ctx context.Context) error {
 		setStatus(fmt.Sprintf("Remuxing title %d to %s…", t.Number, filepath.Base(final)))
 	}
 	setProgress(0)
-	args := []string{"-hide_banner", "-nostdin", "-y", "-f", "dvdvideo", "-title", strconv.Itoa(t.Number)}
+	args := []string{"-hide_banner", "-nostdin", "-y", "-probesize", "100M", "-analyzeduration", "100M", "-f", "dvdvideo", "-title", strconv.Itoa(t.Number)}
 	if preserveChapters {
 		args = append(args, "-preindex", "1")
 	}

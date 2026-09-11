@@ -2,7 +2,13 @@
 set -euo pipefail
 
 APP_VERSION="${1:-1.3.0-dev5}"
-DEB_VERSION="${APP_VERSION/-dev/~dev}"
+DEB_VERSION="$APP_VERSION"
+case "$DEB_VERSION" in
+  *-alpha.*) DEB_VERSION="${DEB_VERSION/-alpha./~alpha.}" ;;
+  *-beta.*)  DEB_VERSION="${DEB_VERSION/-beta./~beta.}" ;;
+  *-rc.*)    DEB_VERSION="${DEB_VERSION/-rc./~rc.}" ;;
+  *-dev*)    DEB_VERSION="${DEB_VERSION/-dev/~dev}" ;;
+esac
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SRC="$ROOT/src"
 DIST="$ROOT/dist/linux-release"
@@ -174,7 +180,7 @@ Section: video
 Priority: optional
 Architecture: amd64
 Maintainer: MattMux project <noreply@github.com>
-Depends: libc6, libstdc++6, libgcc-s1, ca-certificates, libgl1, libx11-6, libxcursor1, libxrandr2, libxinerama1, libxi6, libxkbcommon0, libwayland-client0
+Depends: libc6 (>= 2.38), libstdc++6, libgcc-s1, ca-certificates, libgl1, libx11-6, libxcursor1, libxrandr2, libxinerama1, libxi6, libxkbcommon0, libwayland-client0
 Homepage: https://github.com/maas3n/MattMux
 Description: Self-contained lossless DVD title remuxer
  MattMux scans DVD-Video titles and remuxes the selected title to MKV without

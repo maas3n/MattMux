@@ -127,6 +127,7 @@ class AndroidNativeRemuxEngine : RemuxEngine {
             android.util.Log.i("MattMuxPlan", title.plan.diagnosticJson())
             val output = DvdDocumentOutput(resolver, outputTreeUri)
             val pending = output.create(title.plan.globalTitle)
+            var remuxCompleted = false
             try {
                 val fds = IntArray(title.vobs.size) { title.vobs[it].fd }
                 val starts = LongArray(title.plan.cells.size) { title.plan.cells[it].startSector }
@@ -145,11 +146,12 @@ class AndroidNativeRemuxEngine : RemuxEngine {
                 if (nativeError != null) {
                     throw IllegalStateException(nativeError)
                 }
+                remuxCompleted = true
                 check(!cancelled.get()) { "Remux cancelled" }
                 val finalUri = output.commit(pending)
                 return RemuxResult(finalUri, title.plan.globalTitle, title.plan.durationMs, title.plan.diagnosticJson())
             } catch (t: Throwable) {
-                output.abort(pending)
+                if (remuxCompleted) output.preserve(pending) else output.abort(pending)
                 throw t
             }
         }

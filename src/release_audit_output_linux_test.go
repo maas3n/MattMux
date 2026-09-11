@@ -51,6 +51,22 @@ func TestRemuxPreservesNewlyAppearingDestination(t *testing.T) {
 	if err == nil || string(b) != "other writer" {
 		t.Fatalf("destination collision: final=%s err=%v content=%q", f, err, b)
 	}
+	entries, readErr := os.ReadDir(out)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	var recovered []byte
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".partial.mkv") {
+			recovered, readErr = os.ReadFile(filepath.Join(out, entry.Name()))
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+		}
+	}
+	if string(recovered) != "new output" {
+		t.Fatalf("completed remux was not retained after publication collision: %q", recovered)
+	}
 }
 
 func TestRemuxFailureCleansOwnedPartial(t *testing.T) {
