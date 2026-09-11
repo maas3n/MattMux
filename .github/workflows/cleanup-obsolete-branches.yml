@@ -1,6 +1,9 @@
 name: Cleanup obsolete branches
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -19,7 +22,10 @@ jobs:
               'linux-support',
               'release-v1.2.0',
               'feature/linux-standalone-dev5',
-              'chore/unify-platforms-main'
+              'chore/unify-platforms-main',
+              'chore/archive-branch-history',
+              'chore/retire-redundant-branches',
+              'chore/run-branch-cleanup'
             ];
 
             for (const branch of branches) {
