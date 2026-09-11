@@ -21,6 +21,10 @@ class DvdIfoParserTest {
         assertArrayEquals(longArrayOf(0, 5_000), plan.chapterStartsMs)
         assertArrayEquals(longArrayOf(5_000, 15_000), plan.chapterEndsMs)
         assertEquals(listOf(DvdCellRange(10, 20), DvdCellRange(30, 50)), plan.cells)
+        assertEquals(listOf(DvdStreamLanguage(0x80, "eng"), DvdStreamLanguage(0x20, "nor"), DvdStreamLanguage(0x21, "nor"), DvdStreamLanguage(0x22, "nor"), DvdStreamLanguage(0x23, "nor")), plan.streamLanguages)
+        assertEquals(16, plan.subtitlePalette.size)
+        assertEquals(0x000000, plan.subtitlePalette[0])
+        assertEquals(0xffffff, plan.subtitlePalette[1])
     }
 
     @Test(expected = IllegalArgumentException::class)
@@ -86,6 +90,13 @@ class DvdIfoParserTest {
         "DVDVIDEO-VTS".toByteArray().copyInto(vts)
         put32(vts, 0xC8, 1)
         put32(vts, 0xCC, 2)
+        vts[0x203] = 1
+        vts[0x206] = 'e'.code.toByte()
+        vts[0x207] = 'n'.code.toByte()
+        vts[0x255] = 1
+        vts[0x256] = 1
+        vts[0x258] = 'n'.code.toByte()
+        vts[0x259] = 'o'.code.toByte()
 
         val ptt = 2048
         put16(vts, ptt, 1)
@@ -105,6 +116,10 @@ class DvdIfoParserTest {
         put32(vts, pgci + 12, pgcRel.toLong())
         vts[pgc + 2] = 2
         vts[pgc + 3] = 3
+        put16(vts, pgc + 12, 0x8000)
+        put32(vts, pgc + 28, 0x80010203L)
+        put32(vts, pgc + 164, 0x00108080L)
+        put32(vts, pgc + 168, 0x00EB8080L)
         put16(vts, pgc + 0xE6, 0xEC)
         put16(vts, pgc + 0xE8, 0xF0)
         vts[pgc + 0xEC] = 1

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Preserve completed desktop and Android remuxes when final publication fails, and add Linux no-overwrite publication fallbacks for filesystems without hard links.
+- Use consistent 100M probe/analyze limits for desktop metadata probing and remuxing.
+- Clean Linux CLI partial outputs on Ctrl+C/SIGTERM and add a process-level interrupt regression test.
+- Correct Debian preview ordering and declare the measured `libc6 (>= 2.38)` runtime floor.
+- Give additional DVD titles distinct `-title-NN` desktop output filenames.
+- Sign future GitHub Android APKs with persistent distribution credentials and reject debug certificates.
+- Carry DVD IFO language mappings and the selected PGC subtitle palette into Android native stream metadata.
+- Align Android/release documentation and remove tracked Python bytecode.
+
 MattMux uses one `main` source branch. Published builds are identified by immutable release tags; platform-specific release lines may have different version numbers while sharing the same trunk.
 
 ## Android / ChromeOS 1.2.0 Alpha 4 — `v1.2.0-chromeos-alpha4`

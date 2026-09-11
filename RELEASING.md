@@ -34,7 +34,7 @@ GitHub also exposes source ZIP/tar archives automatically for the release tag.
 3. **All platform payloads come from the same tag/commit.** Windows, Linux, and Android/ChromeOS must not publish different source commits under the same product version.
 4. **One tag creates one GitHub Release.** Platform workflows may build independently, but `.github/workflows/release.yml` is the only workflow that publishes GitHub Releases.
 5. Generate and verify SHA-256 checksums for release payloads and verify bundled runtime dependencies before publishing.
-6. Keep historical platform-specific releases available for provenance; the unified model applies to new releases.
+6. Keep historical development provenance in Git history; obsolete platform-specific public release entries may remain retired after the unified-release cleanup.
 
 ## Before tagging
 
@@ -89,9 +89,11 @@ The unified workflow derives a monotonically ordered Android versionCode from th
 
 Android/ChromeOS purchases remain disabled until production device validation, signing, and purchase-verification readiness are complete. The separate Play bundle workflow is distribution tooling; it does not create GitHub Releases.
 
+GitHub release APKs after v1.4.0 use the persistent Android upload-signing credentials. The v1.4.0 APK was debug-signed, so an in-place upgrade from that APK must not be promised unless its original debug key is proven compatible. Release notes for the first persistently signed APK must call out the migration requirement. Preserve the same distribution key for subsequent APK releases and verify its certificate before publishing.
+
 ## Historical releases
 
-The existing Windows `v1.2.0`, Linux `v1.3.0-dev5`, and ChromeOS alpha tags/releases are historical releases from before the unified release model. Leave those tags and assets intact. New releases use the unified version namespace only.
+Windows `v1.2.0`, Linux `v1.3.0-dev5`, and the old ChromeOS alpha line are historical development lines from before the unified release model. Their development remains in Git history; obsolete public release entries/tags were retired during the unified-release cleanup. Do not recreate platform-specific release lines. New releases use the unified version namespace only.
 
 ## Emergency fixes
 

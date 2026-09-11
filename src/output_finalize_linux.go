@@ -5,9 +5,18 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+
+	"golang.org/x/sys/unix"
 )
+
+var renameOutputNoReplace = func(partial, final string) error {
+	return unix.Renameat2(unix.AT_FDCWD, partial, unix.AT_FDCWD, final, unix.RENAME_NOREPLACE)
+}
+
+var linkOutputNoReplace = os.Link
 
 func reservePartialOutput(final string) (string, error) {
 	pattern := ".mattmux-" + filepath.Base(final) + ".*.partial.mkv"
@@ -60,19 +69,74 @@ func finalizeRemuxOutput(partial, final string) error {
 }
 
 func commitOutputNoReplace(partial, final string) error {
-	// A hard-link creation is atomic and fails if final already exists. Because
-	// both names live in the output directory, they are necessarily on the same
-	// filesystem. Removing the temporary name after linking leaves the inode at
-	// the final path without ever replacing another writer's file.
-	if err := os.Link(partial, final); err != nil {
+	if err := renameOutputNoReplace(partial, final); err == nil {
+		return nil
+	} else if errors.Is(err, unix.EEXIST) {
+		return fmt.Errorf("output already exists: %s", final)
+	} else if !noReplacePrimitiveUnsupported(err) {
+		return fmt.Errorf("remux finished but atomic no-overwrite rename failed: %w", err)
+	}
+
+	if err := linkOutputNoReplace(partial, final); err == nil {
+		_ = os.Remove(partial)
+		return nil
+	} else if errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("output already exists: %s", final)
+	} else if !noReplacePrimitiveUnsupported(err) {
+		return fmt.Errorf("remux finished but no-overwrite hard-link commit failed: %w", err)
+	}
+
+	// Some removable/provider-backed filesystems support neither renameat2
+	// RENAME_NOREPLACE nor hard links. O_EXCL still preserves the no-overwrite
+	// guarantee. If copying fails, the incomplete destination is removed and
+	// the caller keeps the completed partial for recovery.
+	if err := copyOutputExclusive(partial, final); err != nil {
+		return fmt.Errorf("remux finished but no-overwrite copy commit failed: %w", err)
+	}
+	_ = os.Remove(partial)
+	return nil
+}
+
+func noReplacePrimitiveUnsupported(err error) bool {
+	return errors.Is(err, unix.ENOSYS) ||
+		errors.Is(err, unix.EINVAL) ||
+		errors.Is(err, unix.EOPNOTSUPP) ||
+		errors.Is(err, unix.EPERM) ||
+		errors.Is(err, unix.EXDEV)
+}
+
+func copyOutputExclusive(src, dst string) (retErr error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
 		if errors.Is(err, os.ErrExist) {
-			return fmt.Errorf("output already exists: %s", final)
+			return fmt.Errorf("output already exists: %s", dst)
 		}
-		return fmt.Errorf("remux finished but atomic no-overwrite commit failed: %w", err)
+		return err
 	}
-	if err := os.Remove(partial); err != nil {
-		return fmt.Errorf("committed output but could not remove temporary name %s: %w", partial, err)
+	keep := false
+	defer func() {
+		_ = out.Close()
+		if !keep {
+			_ = os.Remove(dst)
+		}
+	}()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
 	}
+	if err := out.Sync(); err != nil {
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	keep = true
 	return nil
 }
 

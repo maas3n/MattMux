@@ -7,9 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 func main() {
@@ -21,7 +23,8 @@ func main() {
 		fmt.Printf("MattMux CLI %s\n", appVersion)
 		return
 	}
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	switch os.Args[1] {
 	case "tools", "doctor":
 		fmt.Println(toolSummary(ctx))

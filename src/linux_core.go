@@ -583,7 +583,7 @@ func remuxTitle(ctx context.Context, src string, title titleInfo, outDir string,
 	if err := validateOutputDir(outDir); err != nil {
 		return "", err
 	}
-	final := outputPath(src, outDir)
+	final := outputPath(src, outDir, title.Number)
 	if _, err := os.Stat(final); err == nil {
 		return "", fmt.Errorf("output already exists: %s", final)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -593,11 +593,16 @@ func remuxTitle(ctx context.Context, src string, title titleInfo, outDir string,
 	if err != nil {
 		return "", err
 	}
-	defer os.Remove(partial)
+	cleanupPartial := true
+	defer func() {
+		if cleanupPartial {
+			_ = os.Remove(partial)
+		}
+	}()
 	if progress == nil {
 		progress = noopProgress
 	}
-	args := []string{"-hide_banner", "-nostdin", "-y", "-f", "dvdvideo", "-title", strconv.Itoa(title.Number)}
+	args := []string{"-hide_banner", "-nostdin", "-y", "-probesize", "100M", "-analyzeduration", "100M", "-f", "dvdvideo", "-title", strconv.Itoa(title.Number)}
 	if preserve {
 		args = append(args, "-preindex", "1")
 	}
@@ -654,8 +659,15 @@ func remuxTitle(ctx context.Context, src string, title titleInfo, outDir string,
 	if waitErr != nil {
 		return "", fmt.Errorf("FFmpeg remux failed: %s", tail(errBuf.String(), 5000))
 	}
-	if err := finalizeRemuxOutput(partial, final); err != nil {
+	if err := validateAndSyncOutput(partial); err != nil {
 		return "", err
+	}
+	if err := commitOutputNoReplace(partial, final); err != nil {
+		cleanupPartial = false
+		return "", fmt.Errorf("%w; completed MKV retained at %s", err, partial)
+	}
+	if err := syncDirectory(filepath.Dir(final)); err != nil {
+		return "", fmt.Errorf("output committed to %s but directory sync failed: %w", final, err)
 	}
 	progress(1, "Completed: "+final)
 	return final, nil
@@ -700,7 +712,7 @@ func validateOutputDir(dir string) error {
 	_ = os.Remove(name)
 	return nil
 }
-func outputPath(src, outDir string) string {
+func outputPath(src, outDir string, title int) string {
 	base := filepath.Base(src)
 	if strings.EqualFold(filepath.Ext(base), ".iso") {
 		base = strings.TrimSuffix(base, filepath.Ext(base))
@@ -711,6 +723,9 @@ func outputPath(src, outDir string) string {
 	base = sanitizeFilename(base)
 	if base == "" {
 		base = "DVD"
+	}
+	if title > 1 {
+		base = fmt.Sprintf("%s-title-%02d", base, title)
 	}
 	return filepath.Join(outDir, base+".mkv")
 }

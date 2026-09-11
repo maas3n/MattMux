@@ -1,8 +1,8 @@
 # MattMux for Android / ChromeOS
 
-This directory contains the experimental Android/ChromeOS frontend for MattMux. The current public milestone is **1.2.0 Alpha 4** (`v1.2.0-chromeos-alpha4`).
+This directory contains the experimental Android/ChromeOS frontend for MattMux. Android/ChromeOS follows the unified MattMux release line; the latest published unified release at the time of writing is **1.4.0** (`v1.4.0`).
 
-## Alpha 4 status
+## Experimental status
 
 Implemented:
 
@@ -30,13 +30,14 @@ Current limitations / remaining gates:
 - output providers must support random-access writing and rename
 - ISO9660-only images and streaming-only providers are unsupported
 - real-device Android and physical Chromebook testing remain release gates
-- production Play purchase verification/signing/rollout remains separate from the Alpha 4 APK release
+- production Play purchase verification and rollout remain separate from the experimental GitHub APK
+- v1.4.0 was debug-signed; a later persistently signed APK must not be assumed to update that installation in place
 
 Run and release status should be checked in CI; source implementation alone is not proof of a tested APK. Native test details are in [`native/tests/README.md`](native/tests/README.md).
 
 ## Billing
 
-The project contains a Google Play Billing integration and the non-consumable product ID `mattmux_pro`, but purchases are deliberately disabled in the current Alpha 4 build through `BuildConfig.ENABLE_BILLING_PURCHASES = false`.
+The project contains a Google Play Billing integration and the non-consumable product ID `mattmux_pro`, but purchases are deliberately disabled in the current experimental build through `BuildConfig.ENABLE_BILLING_PURCHASES = false`.
 
 Do not enable charging merely because the native remux engine now exists. Enable production purchases only after the remux path has passed real Chromebook/device testing and the production purchase-verification/signing plan is ready. See [`PLAY_CONSOLE.md`](PLAY_CONSOLE.md).
 

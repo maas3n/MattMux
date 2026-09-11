@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 func auditRemux(t *testing.T, body string) (string, error, string) {
@@ -50,6 +52,60 @@ func TestRemuxPreservesNewlyAppearingDestination(t *testing.T) {
 	}
 	if err == nil || string(b) != "other writer" {
 		t.Fatalf("destination collision: final=%s err=%v content=%q", f, err, b)
+	}
+	entries, readErr := os.ReadDir(out)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	var recovered []byte
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".partial.mkv") {
+			recovered, readErr = os.ReadFile(filepath.Join(out, entry.Name()))
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+		}
+	}
+	if string(recovered) != "new output" {
+		t.Fatalf("completed remux was not retained after publication collision: %q", recovered)
+	}
+}
+
+func TestCommitFallsBackWhenRenameAndLinkAreUnsupported(t *testing.T) {
+	root := t.TempDir()
+	partial := filepath.Join(root, ".completed.partial.mkv")
+	final := filepath.Join(root, "completed.mkv")
+	if err := os.WriteFile(partial, []byte("completed output"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	oldRename, oldLink := renameOutputNoReplace, linkOutputNoReplace
+	renameOutputNoReplace = func(string, string) error { return unix.EOPNOTSUPP }
+	linkOutputNoReplace = func(string, string) error { return unix.EOPNOTSUPP }
+	t.Cleanup(func() { renameOutputNoReplace, linkOutputNoReplace = oldRename, oldLink })
+
+	if err := commitOutputNoReplace(partial, final); err != nil {
+		t.Fatalf("fallback commit failed: %v", err)
+	}
+	got, err := os.ReadFile(final)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "completed output" {
+		t.Fatalf("fallback output = %q", got)
+	}
+	if _, err := os.Stat(partial); !os.IsNotExist(err) {
+		t.Fatalf("partial still exists after successful fallback: %v", err)
+	}
+}
+
+func TestOutputPathDistinguishesAdditionalTitles(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "disc.iso")
+	if got := outputPath(src, root, 1); got != filepath.Join(root, "disc.mkv") {
+		t.Fatalf("title 1 path = %q", got)
+	}
+	if got := outputPath(src, root, 2); got != filepath.Join(root, "disc-title-02.mkv") {
+		t.Fatalf("title 2 path = %q", got)
 	}
 }
 

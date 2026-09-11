@@ -435,10 +435,65 @@ static void metadata_field(const AVDictionary *metadata, const char *key, char *
     out[j] = '\0';
 }
 
+static int apply_dvd_ifo_metadata(JNIEnv *env, AVFormatContext *input,
+                                  jobjectArray language_records, jintArray palette_array)
+{
+    if (language_records) {
+        jsize count = (*env)->GetArrayLength(env, language_records);
+        for (jsize i = 0; i < count; ++i) {
+            jstring record = (jstring)(*env)->GetObjectArrayElement(env, language_records, i);
+            if (!record) continue;
+            const char *value = (*env)->GetStringUTFChars(env, record, NULL);
+            if (!value) { (*env)->DeleteLocalRef(env, record); return AVERROR_EXTERNAL; }
+            char *end = NULL;
+            long stream_id = strtol(value, &end, 10);
+            if (end && *end == '\t' && end[1] && stream_id >= 0 && stream_id <= INT_MAX) {
+                for (unsigned s = 0; s < input->nb_streams; ++s) {
+                    if (input->streams[s]->id == stream_id) {
+                        av_dict_set(&input->streams[s]->metadata, "language", end + 1, 0);
+                        break;
+                    }
+                }
+            }
+            (*env)->ReleaseStringUTFChars(env, record, value);
+            (*env)->DeleteLocalRef(env, record);
+        }
+    }
+
+    if (palette_array && (*env)->GetArrayLength(env, palette_array) == 16) {
+        jint *colors = (*env)->GetIntArrayElements(env, palette_array, NULL);
+        if (!colors) return AVERROR(ENOMEM);
+        char palette[192];
+        size_t used = 0;
+        int n = snprintf(palette, sizeof(palette), "palette: ");
+        if (n < 0 || (size_t)n >= sizeof(palette)) { (*env)->ReleaseIntArrayElements(env, palette_array, colors, JNI_ABORT); return AVERROR(EINVAL); }
+        used = (size_t)n;
+        for (int i = 0; i < 16; ++i) {
+            n = snprintf(palette + used, sizeof(palette) - used, "%06x%s",
+                         ((unsigned)colors[i]) & 0xffffffU, i == 15 ? "\n" : ", ");
+            if (n < 0 || (size_t)n >= sizeof(palette) - used) { (*env)->ReleaseIntArrayElements(env, palette_array, colors, JNI_ABORT); return AVERROR(EINVAL); }
+            used += (size_t)n;
+        }
+        (*env)->ReleaseIntArrayElements(env, palette_array, colors, JNI_ABORT);
+
+        for (unsigned s = 0; s < input->nb_streams; ++s) {
+            AVStream *stream = input->streams[s];
+            if (stream->codecpar->codec_id != AV_CODEC_ID_DVD_SUBTITLE) continue;
+            uint8_t *extra = av_mallocz(used + AV_INPUT_BUFFER_PADDING_SIZE);
+            if (!extra) return AVERROR(ENOMEM);
+            memcpy(extra, palette, used);
+            av_freep(&stream->codecpar->extradata);
+            stream->codecpar->extradata = extra;
+            stream->codecpar->extradata_size = (int)used;
+        }
+    }
+    return 0;
+}
+
 JNIEXPORT jobjectArray JNICALL
 Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeProbeTracks(
     JNIEnv *env, jobject thiz, jintArray fd_array, jlongArray starts_array, jlongArray ends_array,
-    jlong iso_handle, jint title_set)
+    jlong iso_handle, jint title_set, jobjectArray language_records, jintArray palette_array)
 {
     jclass engine_class = (*env)->GetObjectClass(env, thiz);
     CancelContext cancel = {env, thiz, (*env)->GetMethodID(env, engine_class, "isNativeCancelled", "()Z")};
@@ -469,6 +524,9 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeProbeTracks(
     if (ret < 0) { ff_error(error, sizeof(error), "Could not open selected DVD program stream", ret); goto cleanup_probe; }
     ret = avformat_find_stream_info(input, NULL);
     if (ret < 0) { ff_error(error, sizeof(error), "Could not probe DVD streams", ret); goto cleanup_probe; }
+
+    ret = apply_dvd_ifo_metadata(env, input, language_records, palette_array);
+    if (ret < 0) { ff_error(error, sizeof(error), "Could not apply DVD IFO metadata", ret); goto cleanup_probe; }
 
     int count = 0;
     for (unsigned i = 0; i < input->nb_streams; ++i) {
@@ -524,7 +582,8 @@ cleanup_probe:
 JNIEXPORT jstring JNICALL
 Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
     JNIEnv *env, jobject thiz, jintArray fd_array, jlongArray starts_array, jlongArray ends_array,
-    jint output_fd, jlongArray chapter_starts, jlongArray chapter_ends, jintArray selected_streams, jlong iso_handle, jint title_set)
+    jint output_fd, jlongArray chapter_starts, jlongArray chapter_ends, jintArray selected_streams, jlong iso_handle, jint title_set,
+    jobjectArray language_records, jintArray palette_array)
 {
     jclass engine_class = (*env)->GetObjectClass(env, thiz);
     CancelContext cancel = {env, thiz, (*env)->GetMethodID(env, engine_class, "isNativeCancelled", "()Z")};
@@ -566,6 +625,9 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
     if (ret < 0) { ff_error(error, sizeof(error), "Could not open selected DVD program stream", ret); goto cleanup; }
     ret = avformat_find_stream_info(input, NULL);
     if (ret < 0) { ff_error(error, sizeof(error), "Could not probe DVD streams", ret); goto cleanup; }
+
+    ret = apply_dvd_ifo_metadata(env, input, language_records, palette_array);
+    if (ret < 0) { ff_error(error, sizeof(error), "Could not apply DVD IFO metadata", ret); goto cleanup; }
 
     /* One clock origin for every stream preserves A/V offsets and aligns chapters.
        Per-stream zeroing would silently erase synchronization differences. */
