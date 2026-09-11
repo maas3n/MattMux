@@ -10,6 +10,14 @@
 *.out
 coverage.out
 
+# Android build/generated native artifacts
+android/.gradle/
+android/**/build/
+android/.cxx/
+android/native/.work/
+android/app/src/main/jniLibs/
+android/app/src/main/assets/ffmpeg/
+
 # MattMux runtime data
 MattMuxData/
 settings.json

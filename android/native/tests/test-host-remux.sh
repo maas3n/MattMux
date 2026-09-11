@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+UDF_SOURCE="${1:?Pass pinned libudfread source directory}"
+TEST_WORK="${2:?Pass output diagnostic directory}"
+mkdir -p "$TEST_WORK"
+TEST_WORK="$(cd "$TEST_WORK" && pwd)"
+JDK="${JAVA_HOME:-/usr/lib/jvm/java-17-openjdk-amd64}"
+cc -shared -fPIC -std=c11 -D_POSIX_C_SOURCE=200809L -DHAVE_UNISTD_H=1 -DHAVE_FCNTL_H=1 \
+  -Wall -Wextra -Werror=implicit-function-declaration \
+  -I"${UDF_SOURCE}/src" -I"${ROOT}/android/native" -I"${JDK}/include" -I"${JDK}/include/linux" \
+  "${UDF_SOURCE}/src/udfread.c" "${UDF_SOURCE}/src/ecma167.c" "${UDF_SOURCE}/src/default_blockinput.c" \
+  "${ROOT}/android/native/mattmux_jni.c" "${ROOT}/android/native/udf_source.c" \
+  "${ROOT}/android/native/tests/host_fd.c" \
+  -lavformat -lavcodec -lavutil -o "${TEST_WORK}/libmattmux_host_test.so"
+ffmpeg -v error -f lavfi -i 'testsrc2=size=720x576:rate=25' \
+  -f lavfi -i 'sine=frequency=440:sample_rate=48000' -t 2 -target pal-dvd \
+  -y "${TEST_WORK}/input.vob"
+python3 "${ROOT}/android/native/tests/make_remux_iso.py" "${TEST_WORK}"
+javac -d "${TEST_WORK}/classes" "${ROOT}/android/native/tests/java/io/github/maas3n/mattmux/AndroidNativeRemuxEngine.java"
+java -cp "${TEST_WORK}/classes" io.github.maas3n.mattmux.AndroidNativeRemuxEngine \
+  "${TEST_WORK}/libmattmux_host_test.so" "${TEST_WORK}"
+python3 "${ROOT}/android/native/tests/remux_fingerprint.py" "${TEST_WORK}/folder.mkv" "${TEST_WORK}/iso.mkv" "${TEST_WORK}/input.vob"

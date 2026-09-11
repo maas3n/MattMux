@@ -46,15 +46,16 @@ Linux MediaInfo is built from an exact pinned source set rather than from moving
 
 The self-contained Linux packages keep the resulting MediaInfo binary private to MattMux and do not replace `/usr/bin/mediainfo`.
 
-## ChromeOS / Android Alpha 2
+## Android / ChromeOS Alpha 4
 
-The experimental Android/ChromeOS app uses native FFmpeg libraries rather than launching `ffprobe` or MediaInfo as subprocesses.
+The experimental Android/ChromeOS app uses native FFmpeg libraries and libudfread rather than launching desktop `ffprobe` or MediaInfo subprocesses.
 
 - FFmpeg version: `9.0.1`
 - FFmpeg source SHA-256: `cf38e0e28c7e5605942c4a77755349b0145804a397af37eb1fb4c77cb237f635`
+- libudfread version: `1.1.2`
 - Current target ABIs: `arm64-v8a`, `x86_64`
 
-The Android build is currently configured around an LGPL-only FFmpeg runtime and remains an experimental app/native-runtime preview while its remux engine is completed.
+The Android build is configured around an LGPL FFmpeg runtime and separately linked LGPL libudfread. Source/provenance and license assets accompany the Alpha 4 release.
 
 ## Licensing
 
@@ -62,4 +63,4 @@ MattMux itself is licensed under MIT. Third-party projects keep their own licens
 
 The Windows and Linux FFmpeg distributions currently used by MattMux are GPL-enabled builds because the desktop DVD workflow depends on FFmpeg's `dvdvideo` support with the relevant DVD libraries. The Android FFmpeg build is handled separately under its own build configuration and licensing requirements.
 
-Anyone redistributing MattMux together with third-party binaries should review and satisfy the corresponding FFmpeg, BtbN/FFmpeg-Builds, MediaInfo, MediaInfoLib, ZenLib, zlib, and other applicable license/source-distribution obligations.
+Anyone redistributing MattMux together with third-party binaries should review and satisfy the corresponding FFmpeg, BtbN/FFmpeg-Builds, MediaInfo, MediaInfoLib, ZenLib, zlib, libudfread, and other applicable license/source-distribution obligations.
