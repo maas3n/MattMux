@@ -1,0 +1,39 @@
+name: Create MattMux v1.4.2 tag
+
+on:
+  push:
+    branches:
+      - release/tag-v1.4.2
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    if: github.event.head_commit.message == 'Create MattMux v1.4.2 tag'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out helper branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create immutable v1.4.2 tag at main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --tags
+          if git rev-parse --verify --quiet refs/tags/v1.4.2; then
+            echo 'v1.4.2 already exists; refusing to move or replace it.' >&2
+            exit 1
+          fi
+          main_sha="$(git rev-parse origin/main)"
+          expected='1a2d74b71bbe3982490abe843ce9a62745c4534e'
+          test "$main_sha" = "$expected" || {
+            echo "main moved: expected $expected, got $main_sha" >&2
+            exit 1
+          }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -a v1.4.2 "$main_sha" -m 'MattMux 1.4.2'
+          git push origin refs/tags/v1.4.2
