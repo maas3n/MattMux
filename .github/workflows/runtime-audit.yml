@@ -1,0 +1,90 @@
+name: Published Windows and Android runtime audit
+on:
+  push:
+    branches: [audit/runtime-validation-20260911]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fixture:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg dvdauthor genisoimage
+          mkdir -p fixture
+          ffmpeg -v error -f lavfi -i testsrc2=size=720x576:rate=25 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 4 -target pal-dvd -y fixture/input.vob
+          printf '<dvdauthor dest="fixture/disc"><vmgm><menus><video format="pal"/></menus></vmgm><titleset><titles><video format="pal"/><pgc><vob file="fixture/input.vob" chapters="0,2"/></pgc></titles></titleset></dvdauthor>' > fixture/author.xml
+          dvdauthor -x fixture/author.xml
+          genisoimage -quiet -dvd-video -udf -o fixture/disc.iso fixture/disc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: authored-dvd-fixture
+          path: fixture
+  windows:
+    needs: fixture
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: aaa64838dd5a33b5686a41992a2ff1bc3bed2873
+          path: release-source
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - name: Run actual Windows source tests
+        working-directory: release-source/src
+        run: |
+          go test -v ./...
+          if ($LASTEXITCODE -ne 0) { throw 'Windows tests failed' }
+          go vet ./...
+          if ($LASTEXITCODE -ne 0) { throw 'Windows vet failed' }
+      - uses: actions/download-artifact@v4
+        with:
+          name: authored-dvd-fixture
+          path: fixture
+      - name: Test published Windows portable GUI and remux
+        shell: pwsh
+        run: ./audit/windows-runtime.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-runtime-evidence
+          path: evidence
+  android:
+    needs: fixture
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: authored-dvd-fixture
+          path: fixture
+      - name: Prepare published APK and emulator
+        run: |
+          mkdir -p evidence
+          curl -fsSL --retry 3 https://github.com/maas3n/MattMux/releases/download/v1.2.0-chromeos-alpha4/MattMux-1.2.0-ChromeOS-Alpha4.apk -o alpha4.apk
+          echo '7159bebaf72e24c196cd693b7aee1688ddb57d930aa37627fba6d3c09c483ec7  alpha4.apk' | sha256sum -c
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Test published APK on Android 35 x86_64
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: python3 audit/android-runtime.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-runtime-evidence
+          path: evidence
