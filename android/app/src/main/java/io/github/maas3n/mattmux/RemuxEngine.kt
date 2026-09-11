@@ -71,6 +71,7 @@ class AndroidNativeRemuxEngine : RemuxEngine {
         val resolver = context.contentResolver
         openTitle(context, sourceUri).use { title ->
             check(!cancelled.get()) { "Remux cancelled" }
+            android.util.Log.i("MattMuxPlan", title.plan.diagnosticJson())
             val output = DvdDocumentOutput(resolver, outputTreeUri)
             val pending = output.create(title.plan.globalTitle)
             try {

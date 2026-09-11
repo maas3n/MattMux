@@ -146,7 +146,11 @@ static int64_t source_seek(void *opaque, int64_t offset, int whence)
     return next;
 }
 
+#if LIBAVFORMAT_VERSION_MAJOR >= 61
 static int output_write(void *opaque, const uint8_t *buf, int buf_size)
+#else
+static int output_write(void *opaque, uint8_t *buf, int buf_size)
+#endif
 {
     OutputContext *ctx = (OutputContext *)opaque;
     if (is_cancelled(ctx->cancel)) return AVERROR_EXIT;
@@ -295,7 +299,11 @@ static int add_chapters(JNIEnv *env, AVFormatContext *out, jlongArray starts_arr
     if (count <= 0 || (*env)->GetArrayLength(env, ends_array) != count) return AVERROR(EINVAL);
     jlong *starts = (*env)->GetLongArrayElements(env, starts_array, NULL);
     jlong *ends = (*env)->GetLongArrayElements(env, ends_array, NULL);
-    if (!starts || !ends) return AVERROR(ENOMEM);
+    if (!starts || !ends) {
+        if (starts) (*env)->ReleaseLongArrayElements(env, starts_array, starts, JNI_ABORT);
+        if (ends) (*env)->ReleaseLongArrayElements(env, ends_array, ends, JNI_ABORT);
+        return AVERROR(ENOMEM);
+    }
 
     AVChapter **chapters = av_calloc((size_t)count, sizeof(*chapters));
     if (!chapters) {
@@ -506,7 +514,8 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
         }
         av_packet_unref(packet);
         int percent = source.stream_size > 0 ? (int)((source.pos * 100) / source.stream_size) : 0;
-        if (percent > 100) percent = 100;
+        if (percent > 99) percent = 99;
+        if (percent < last_percent) percent = last_percent;
         if (percent != last_percent) { report_progress(env, thiz, progress_method, percent); last_percent = percent; }
     }
     if (ret == AVERROR_EOF) ret = 0;
