@@ -1,6 +1,6 @@
 # MattMux for Android / ChromeOS
 
-This directory contains the experimental Android/ChromeOS frontend for MattMux. Android/ChromeOS follows the unified MattMux release line; the latest published unified release at the time of writing is **1.4.0** (`v1.4.0`).
+This directory contains the experimental Android/ChromeOS frontend for MattMux. Android/ChromeOS follows the unified MattMux release line; the current published unified release is **1.4.1** (`v1.4.1`).
 
 ## Experimental status
 
@@ -31,7 +31,7 @@ Current limitations / remaining gates:
 - ISO9660-only images and streaming-only providers are unsupported
 - real-device Android and physical Chromebook testing remain release gates
 - production Play purchase verification and rollout remain separate from the experimental GitHub APK
-- v1.4.0 was debug-signed; a later persistently signed APK must not be assumed to update that installation in place
+- v1.4.0 was debug-signed; v1.4.1 and later GitHub APKs use persistent distribution signing, so upgrading from v1.4.0 may require uninstalling the old APK first
 
 Run and release status should be checked in CI; source implementation alone is not proof of a tested APK. Native test details are in [`native/tests/README.md`](native/tests/README.md).
 
