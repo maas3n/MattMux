@@ -1,0 +1,25 @@
+name: Dispatch MattMux v1.4.2 release
+
+on:
+  push:
+    branches:
+      - release/tag-v1.4.2
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    if: github.event.head_commit.message == 'Dispatch MattMux v1.4.2 release'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch unified release for existing tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f tag=v1.4.2
