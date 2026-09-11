@@ -10,6 +10,9 @@ on:
 permissions:
   contents: read
 
+env:
+  MATTMUX_CI_VERSION: '0.0.0-dev'
+
 jobs:
   build-linux:
     runs-on: ubuntu-24.04
@@ -40,13 +43,13 @@ jobs:
       - name: Build GUI, CLI, self-contained DEB, tarballs and standalone
         run: |
           set -euo pipefail
-          bash packaging/linux/build-linux-release.sh 1.3.0-dev5
-          bash packaging/linux/build-linux-standalone.sh 1.3.0-dev5
+          bash packaging/linux/build-linux-release.sh "$MATTMUX_CI_VERSION"
+          bash packaging/linux/build-linux-standalone.sh "$MATTMUX_CI_VERSION"
 
       - name: Inspect and validate Debian package
         run: |
           set -euo pipefail
-          deb='dist/linux-release/MattMux-1.3.0-dev5-Linux-amd64.deb'
+          deb="dist/linux-release/MattMux-$MATTMUX_CI_VERSION-Linux-amd64.deb"
           dpkg-deb --info "$deb"
           dpkg-deb --contents "$deb"
           tmp="$(mktemp -d)"
@@ -73,7 +76,7 @@ jobs:
       - name: Validate single-file standalone executable
         run: |
           set -euo pipefail
-          standalone='dist/linux-release/MattMux-1.3.0-dev5-Linux-amd64Standalone'
+          standalone="dist/linux-release/MattMux-$MATTMUX_CI_VERSION-Linux-amd64Standalone"
           test -x "$standalone"
           file "$standalone" | grep -E 'ELF 64-bit.*x86-64'
           cache="$(mktemp -d)"
@@ -87,7 +90,7 @@ jobs:
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: MattMux-Linux-amd64-dev5
+          name: MattMux-Linux-amd64-dev
           path: |
             dist/linux-release/*.deb
             dist/linux-release/*.tar.gz
