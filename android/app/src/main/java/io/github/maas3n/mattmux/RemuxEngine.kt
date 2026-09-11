@@ -84,7 +84,8 @@ class AndroidNativeRemuxEngine : RemuxEngine {
                 val fds = IntArray(title.vobs.size) { title.vobs[it].fd }
                 val starts = LongArray(title.plan.cells.size) { title.plan.cells[it].startSector }
                 val ends = LongArray(title.plan.cells.size) { title.plan.cells[it].endSectorExclusive }
-                val records = nativeProbeTracks(fds, starts, ends, title.isoHandle, title.plan.titleSet)
+                val languageRecords = title.plan.streamLanguages.map { "${it.streamId}\t${it.language}" }.toTypedArray()
+                val records = nativeProbeTracks(fds, starts, ends, title.isoHandle, title.plan.titleSet, languageRecords, title.plan.subtitlePalette)
                     ?: error("Could not probe DVD streams")
                 return TrackProbeResult(title.plan.globalTitle, records.map(::parseTrackRecord))
             }
@@ -142,6 +143,8 @@ class AndroidNativeRemuxEngine : RemuxEngine {
                     selectedStreamIndexes,
                     title.isoHandle,
                     title.plan.titleSet,
+                    title.plan.streamLanguages.map { "${it.streamId}\t${it.language}" }.toTypedArray(),
+                    title.plan.subtitlePalette,
                 )
                 if (nativeError != null) {
                     throw IllegalStateException(nativeError)
@@ -200,7 +203,7 @@ class AndroidNativeRemuxEngine : RemuxEngine {
     private external fun nativeOpenIso(fd: Int): Long
     private external fun nativeReadIsoIfo(handle: Long, titleSet: Int): ByteArray?
     private external fun nativeCloseIso(handle: Long)
-    private external fun nativeProbeTracks(vobFds: IntArray, cellStartSectors: LongArray, cellEndSectors: LongArray, isoHandle: Long, titleSet: Int): Array<String>?
+    private external fun nativeProbeTracks(vobFds: IntArray, cellStartSectors: LongArray, cellEndSectors: LongArray, isoHandle: Long, titleSet: Int, streamLanguages: Array<String>, subtitlePalette: IntArray): Array<String>?
     private external fun nativeRemux(
         vobFds: IntArray,
         cellStartSectors: LongArray,
@@ -211,5 +214,7 @@ class AndroidNativeRemuxEngine : RemuxEngine {
         selectedStreamIndexes: IntArray?,
         isoHandle: Long,
         titleSet: Int,
+        streamLanguages: Array<String>,
+        subtitlePalette: IntArray,
     ): String?
 }

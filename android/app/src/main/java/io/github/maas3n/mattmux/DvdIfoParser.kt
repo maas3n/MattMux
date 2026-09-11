@@ -1,6 +1,9 @@
 package io.github.maas3n.mattmux
 
+import java.util.Locale
+
 internal data class DvdCellRange(val startSector: Long, val endSectorExclusive: Long)
+internal data class DvdStreamLanguage(val streamId: Int, val language: String)
 
 internal data class DvdTitlePlan(
     val globalTitle: Int,
@@ -9,6 +12,8 @@ internal data class DvdTitlePlan(
     val cells: List<DvdCellRange>,
     val chapterStartsMs: LongArray,
     val chapterEndsMs: LongArray,
+    val streamLanguages: List<DvdStreamLanguage> = emptyList(),
+    val subtitlePalette: IntArray = IntArray(0),
 ) {
     /** Stable source-independent diagnostic contract (sector ends are exclusive). */
     fun diagnosticJson(): String = "{\"global_title\":$globalTitle,\"title_set\":$titleSet,\"duration_ms\":$durationMs," +
@@ -30,6 +35,9 @@ internal object DvdIfoParser {
         val cells: Int,
         val playbackMode: Int,
         val stillTime: Int,
+        val audioControl: IntArray,
+        val subpControl: LongArray,
+        val palette: IntArray,
         val programMap: IntArray,
         val cellData: ByteArray,
     )
@@ -136,7 +144,9 @@ internal object DvdIfoParser {
         }
         require(cells.isNotEmpty()) { "Selected title contains no readable cells" }
 
-        return DvdTitlePlan(location.global, location.vts, titleEndMs - baseMs, cells, chapterStarts, chapterEnds)
+        val streamLanguages = parseStreamLanguages(vts, pgc)
+        val subtitlePalette = IntArray(16) { dvdClutYuvToRgb(pgc.palette[it]) }
+        return DvdTitlePlan(location.global, location.vts, titleEndMs - baseMs, cells, chapterStarts, chapterEnds, streamLanguages, subtitlePalette)
     }
 
     private fun parsePtts(vts: ByteArray): List<List<Ptt>> {
@@ -180,7 +190,75 @@ internal object DvdIfoParser {
             require(cell in 1..cells && cell > prev) { "PGC program map is invalid" }
             prev = cell
         }
-        return Pgc(programs, cells, u8(vts, pgcBase + 0xA3), u8(vts, pgcBase + 0xA2), map, vts.copyOfRange(cellStart, cellStart + cells * 24))
+        val audioControl = IntArray(8) { u16(vts, pgcBase + 12 + it * 2) }
+        val subpControl = LongArray(32) { u32(vts, pgcBase + 28 + it * 4) }
+        val palette = IntArray(16) { u32(vts, pgcBase + 164 + it * 4).toInt() }
+        return Pgc(programs, cells, u8(vts, pgcBase + 0xA3), u8(vts, pgcBase + 0xA2), audioControl, subpControl, palette, map, vts.copyOfRange(cellStart, cellStart + cells * 24))
+    }
+
+    private fun parseStreamLanguages(vts: ByteArray, pgc: Pgc): List<DvdStreamLanguage> {
+        require(vts.size > 0x256) { "VTSI_MAT is truncated" }
+        val languages = linkedMapOf<Int, String>()
+
+        val audioCount = u8(vts, 0x203)
+        require(audioCount <= 8 && 0x204 + audioCount * 8 <= vts.size) { "VTS audio attributes are invalid" }
+        for (i in 0 until audioCount) {
+            val control = pgc.audioControl[i]
+            if (control and 0x8000 == 0) continue
+            val attr = 0x204 + i * 8
+            val audioFormat = u8(vts, attr) ushr 5
+            val position = (control ushr 8) and 0x7f
+            val streamId = audioStreamId(audioFormat, position) ?: continue
+            dvdLanguage(vts, attr + 2)?.let { languages.putIfAbsent(streamId, it) }
+        }
+
+        val subpCount = u8(vts, 0x255)
+        require(subpCount <= 32 && 0x256 + subpCount * 6 <= vts.size) { "VTS subtitle attributes are invalid" }
+        for (i in 0 until subpCount) {
+            val control = pgc.subpControl[i]
+            if (control and 0x80000000L == 0L) continue
+            val language = dvdLanguage(vts, 0x256 + i * 6 + 2) ?: continue
+            val offsets = intArrayOf(
+                ((control ushr 24) and 0x1f).toInt(),
+                ((control ushr 16) and 0x1f).toInt(),
+                ((control ushr 8) and 0x1f).toInt(),
+                (control and 0x1f).toInt(),
+            )
+            offsets.forEach { languages.putIfAbsent(0x20 + it, language) }
+        }
+        return languages.map { DvdStreamLanguage(it.key, it.value) }
+    }
+
+    private fun audioStreamId(format: Int, position: Int): Int? = when (format) {
+        0 -> 0x80 + position
+        2, 3 -> 0x1c0 + position
+        4 -> 0xa0 + position
+        6 -> 0x88 + position
+        else -> null
+    }
+
+    private fun dvdLanguage(data: ByteArray, off: Int): String? {
+        if (off < 0 || off + 1 >= data.size) return null
+        val a = u8(data, off)
+        val b = u8(data, off + 1)
+        fun asciiLetter(v: Int) = v in 'A'.code..'Z'.code || v in 'a'.code..'z'.code
+        if (!asciiLetter(a) || !asciiLetter(b)) return null
+        val code = "${a.toChar()}${b.toChar()}".lowercase(Locale.ROOT)
+        return runCatching { Locale.forLanguageTag(code).getISO3Language().lowercase(Locale.ROOT) }
+            .getOrNull()?.takeIf { it.length == 3 }
+    }
+
+    private fun dvdClutYuvToRgb(raw: Int): Int {
+        val y = (raw ushr 16) and 0xff
+        val cr = (raw ushr 8) and 0xff
+        val cb = raw and 0xff
+        val c = y - 16
+        val d = cb - 128
+        val e = cr - 128
+        val r = ((298 * c + 409 * e + 128) shr 8).coerceIn(0, 255)
+        val g = ((298 * c - 100 * d - 208 * e + 128) shr 8).coerceIn(0, 255)
+        val b = ((298 * c + 516 * d + 128) shr 8).coerceIn(0, 255)
+        return (r shl 16) or (g shl 8) or b
     }
 
     private fun validateCells(pgc: Pgc) {
