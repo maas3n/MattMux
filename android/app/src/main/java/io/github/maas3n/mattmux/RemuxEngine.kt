@@ -33,7 +33,7 @@ interface RemuxEngine {
     val isAvailable: Boolean
     val unavailableReason: String?
     val runtimeInfo: String?
-fun probeTracks(context: Context, sourceUri: Uri): TrackProbeResult
+    fun probeTracks(context: Context, sourceUri: Uri): TrackProbeResult
     fun remux(context: Context, sourceUri: Uri, outputTreeUri: Uri, selectedStreamIndexes: IntArray? = null): RemuxResult
     fun cancel()
     fun setProgressListener(listener: ((Int) -> Unit)?)
