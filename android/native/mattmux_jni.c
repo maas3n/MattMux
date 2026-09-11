@@ -15,6 +15,7 @@
 #include <libavutil/dict.h>
 #include <libavutil/error.h>
 #include <libavutil/mathematics.h>
+#include <libavutil/channel_layout.h>
 #include <libavutil/mem.h>
 
 #define IO_BUFFER_SIZE (64 * 1024)
@@ -412,10 +413,118 @@ done:
     return result;
 }
 
+static const char *track_type_name(enum AVMediaType type)
+{
+    switch (type) {
+        case AVMEDIA_TYPE_VIDEO: return "video";
+        case AVMEDIA_TYPE_AUDIO: return "audio";
+        case AVMEDIA_TYPE_SUBTITLE: return "subtitle";
+        default: return "other";
+    }
+}
+
+static void metadata_field(const AVDictionary *metadata, const char *key, char *out, size_t out_size)
+{
+    AVDictionaryEntry *entry = av_dict_get(metadata, key, NULL, 0);
+    const char *source = (entry && entry->value && entry->value[0]) ? entry->value : "-";
+    size_t j = 0;
+    for (size_t i = 0; source[i] && j + 1 < out_size; ++i) {
+        unsigned char c = (unsigned char)source[i];
+        out[j++] = (c == '\t' || c == '\r' || c == '\n') ? ' ' : (char)c;
+    }
+    out[j] = '\0';
+}
+
+JNIEXPORT jobjectArray JNICALL
+Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeProbeTracks(
+    JNIEnv *env, jobject thiz, jintArray fd_array, jlongArray starts_array, jlongArray ends_array,
+    jlong iso_handle, jint title_set)
+{
+    jclass engine_class = (*env)->GetObjectClass(env, thiz);
+    CancelContext cancel = {env, thiz, (*env)->GetMethodID(env, engine_class, "isNativeCancelled", "()Z")};
+    if (!cancel.method) return NULL;
+    char error[512] = {0};
+    int ret = 0;
+    SourceContext source;
+    AVIOContext *input_io = NULL;
+    AVFormatContext *input = NULL;
+    jobjectArray result = NULL;
+
+    ret = init_source(env, fd_array, starts_array, ends_array, &source,
+        (DvdUdfSource *)(intptr_t)iso_handle, title_set, &cancel, error, sizeof(error));
+    if (ret < 0) goto cleanup_probe;
+
+    uint8_t *input_buffer = av_malloc(IO_BUFFER_SIZE);
+    if (!input_buffer) { ret = AVERROR(ENOMEM); goto cleanup_probe; }
+    input_io = avio_alloc_context(input_buffer, IO_BUFFER_SIZE, 0, &source, source_read, NULL, source_seek);
+    if (!input_io) { av_free(input_buffer); ret = AVERROR(ENOMEM); goto cleanup_probe; }
+    input = avformat_alloc_context();
+    if (!input) { ret = AVERROR(ENOMEM); goto cleanup_probe; }
+    input->pb = input_io;
+    input->probesize = 100000000;
+    input->max_analyze_duration = 100000000;
+    input->interrupt_callback = (AVIOInterruptCB){is_cancelled, &cancel};
+    input->flags |= AVFMT_FLAG_CUSTOM_IO;
+    ret = avformat_open_input(&input, NULL, NULL, NULL);
+    if (ret < 0) { ff_error(error, sizeof(error), "Could not open selected DVD program stream", ret); goto cleanup_probe; }
+    ret = avformat_find_stream_info(input, NULL);
+    if (ret < 0) { ff_error(error, sizeof(error), "Could not probe DVD streams", ret); goto cleanup_probe; }
+
+    int count = 0;
+    for (unsigned i = 0; i < input->nb_streams; ++i) {
+        enum AVMediaType type = input->streams[i]->codecpar->codec_type;
+        if (type == AVMEDIA_TYPE_VIDEO || type == AVMEDIA_TYPE_AUDIO || type == AVMEDIA_TYPE_SUBTITLE) count++;
+    }
+    jclass string_class = (*env)->FindClass(env, "java/lang/String");
+    if (!string_class) { ret = AVERROR_EXTERNAL; goto cleanup_probe; }
+    result = (*env)->NewObjectArray(env, count, string_class, NULL);
+    if (!result) { ret = AVERROR(ENOMEM); goto cleanup_probe; }
+
+    int row = 0;
+    for (unsigned i = 0; i < input->nb_streams; ++i) {
+        AVStream *stream = input->streams[i];
+        AVCodecParameters *par = stream->codecpar;
+        enum AVMediaType type = par->codec_type;
+        if (type != AVMEDIA_TYPE_VIDEO && type != AVMEDIA_TYPE_AUDIO && type != AVMEDIA_TYPE_SUBTITLE) continue;
+        char language[128], title[256], layout[128] = "-", record[1024];
+        metadata_field(stream->metadata, "language", language, sizeof(language));
+        metadata_field(stream->metadata, "title", title, sizeof(title));
+        int channels = 0;
+        if (type == AVMEDIA_TYPE_AUDIO) {
+            channels = par->ch_layout.nb_channels;
+            if (channels > 0 && av_channel_layout_describe(&par->ch_layout, layout, sizeof(layout)) < 0) strcpy(layout, "-");
+        }
+        snprintf(record, sizeof(record), "%u\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%s",
+            i, track_type_name(type), avcodec_get_name(par->codec_id), language, title,
+            par->width, par->height, channels, layout);
+        jstring value = (*env)->NewStringUTF(env, record);
+        if (!value) { ret = AVERROR(ENOMEM); goto cleanup_probe; }
+        (*env)->SetObjectArrayElement(env, result, row++, value);
+        (*env)->DeleteLocalRef(env, value);
+        if ((*env)->ExceptionCheck(env)) { ret = AVERROR_EXTERNAL; goto cleanup_probe; }
+    }
+
+cleanup_probe:
+    if (input) {
+        if (input->iformat) avformat_close_input(&input);
+        else avformat_free_context(input);
+    }
+    if (input_io) { av_freep(&input_io->buffer); avio_context_free(&input_io); }
+    free_source(&source);
+    if (ret < 0) {
+        if (!(*env)->ExceptionCheck(env)) {
+            if (error[0] == '\0') ff_error(error, sizeof(error), "Native metadata probe failed", ret);
+            throw_io(env, error);
+        }
+        return NULL;
+    }
+    return result;
+}
+
 JNIEXPORT jstring JNICALL
 Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
     JNIEnv *env, jobject thiz, jintArray fd_array, jlongArray starts_array, jlongArray ends_array,
-    jint output_fd, jlongArray chapter_starts, jlongArray chapter_ends, jlong iso_handle, jint title_set)
+    jint output_fd, jlongArray chapter_starts, jlongArray chapter_ends, jintArray selected_streams, jlong iso_handle, jint title_set)
 {
     jclass engine_class = (*env)->GetObjectClass(env, thiz);
     CancelContext cancel = {env, thiz, (*env)->GetMethodID(env, engine_class, "isNativeCancelled", "()Z")};
@@ -428,6 +537,8 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
     AVFormatContext *input = NULL, *out = NULL;
     AVPacket *packet = NULL;
     int *stream_map = NULL;
+    jint *selected_indexes = NULL;
+    jsize selected_count = -1;
     int64_t timestamp_origin_us = 0;
 
 
@@ -469,10 +580,22 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
     if (!stream_map) { ret = AVERROR(ENOMEM); goto cleanup; }
     for (unsigned i = 0; i < input->nb_streams; ++i) stream_map[i] = -1;
 
+    if (selected_streams) {
+        selected_count = (*env)->GetArrayLength(env, selected_streams);
+        if (selected_count <= 0) { snprintf(error, sizeof(error), "No streams selected"); ret = AVERROR(EINVAL); goto cleanup; }
+        selected_indexes = (*env)->GetIntArrayElements(env, selected_streams, NULL);
+        if (!selected_indexes) { ret = AVERROR(ENOMEM); goto cleanup; }
+    }
+
     for (unsigned i = 0; i < input->nb_streams; ++i) {
         AVStream *in_stream = input->streams[i];
         enum AVMediaType type = in_stream->codecpar->codec_type;
         if (type != AVMEDIA_TYPE_VIDEO && type != AVMEDIA_TYPE_AUDIO && type != AVMEDIA_TYPE_SUBTITLE) continue;
+        if (selected_indexes) {
+            int wanted = 0;
+            for (jsize j = 0; j < selected_count; ++j) if (selected_indexes[j] == (jint)i) { wanted = 1; break; }
+            if (!wanted) continue;
+        }
         AVStream *out_stream = avformat_new_stream(out, NULL);
         if (!out_stream) { ret = AVERROR(ENOMEM); goto cleanup; }
         stream_map[i] = out_stream->index;
@@ -553,6 +676,7 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
 
 cleanup:
     if (packet) av_packet_free(&packet);
+    if (selected_indexes) (*env)->ReleaseIntArrayElements(env, selected_streams, selected_indexes, JNI_ABORT);
     av_freep(&stream_map);
     if (out) {
         out->pb = NULL;

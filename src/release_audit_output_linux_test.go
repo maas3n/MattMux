@@ -28,7 +28,7 @@ func auditRemux(t *testing.T, body string) (string, error, string) {
 	if err := os.WriteFile(tool, []byte("#!/bin/sh\nfor arg do last=\"$arg\"; done\n"+body), 0700); err != nil {
 		t.Fatal(err)
 	}
-	f, err := remuxTitle(context.Background(), src, titleInfo{Number: 1, Duration: time.Second}, out, true, toolPaths{ffmpeg: tool}, nil)
+	f, err := remuxTitle(context.Background(), src, titleInfo{Number: 1, Duration: time.Second}, out, true, nil, toolPaths{ffmpeg: tool}, nil)
 	return f, err, out
 }
 
@@ -83,7 +83,7 @@ func TestRemuxCancellationCleansOwnedPartial(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	_, err := remuxTitle(ctx, src, titleInfo{Number: 1}, out, true, toolPaths{ffmpeg: tool}, nil)
+	_, err := remuxTitle(ctx, src, titleInfo{Number: 1}, out, true, nil, toolPaths{ffmpeg: tool}, nil)
 	if err != context.DeadlineExceeded {
 		t.Fatalf("expected deadline, got %v", err)
 	}

@@ -21,3 +21,4 @@ javac -d "${TEST_WORK}/classes" "${ROOT}/android/native/tests/java/io/github/maa
 java -cp "${TEST_WORK}/classes" io.github.maas3n.mattmux.AndroidNativeRemuxEngine \
   "${TEST_WORK}/libmattmux_host_test.so" "${TEST_WORK}"
 python3 "${ROOT}/android/native/tests/remux_fingerprint.py" "${TEST_WORK}/folder.mkv" "${TEST_WORK}/iso.mkv" "${TEST_WORK}/input.vob"
+ffprobe -v error -show_entries stream=codec_type -of json "${TEST_WORK}/selected.mkv" | python3 -c 'import json,sys; streams=json.load(sys.stdin)["streams"]; assert len(streams)==1 and streams[0]["codec_type"]=="video", streams'

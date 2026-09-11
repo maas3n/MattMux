@@ -25,7 +25,7 @@ func main() {
 	}
 	_, _, _ = procOleInitialize.Call(0)
 	defer procOleUninitialize.Call()
-	icc := INITCOMMONCONTROLSEX{DwSize: uint32(unsafe.Sizeof(INITCOMMONCONTROLSEX{})), DwICC: ICC_PROGRESS_CLASS}
+	icc := INITCOMMONCONTROLSEX{DwSize: uint32(unsafe.Sizeof(INITCOMMONCONTROLSEX{})), DwICC: ICC_PROGRESS_CLASS | ICC_LISTVIEW_CLASSES}
 	procInitCommonControlsEx.Call(uintptr(unsafe.Pointer(&icc)))
 	if err := createMainWindow(); err != nil {
 		messageBox(0, "MattMux could not start", err.Error(), MB_OK|MB_ICONERROR)
@@ -34,7 +34,9 @@ func main() {
 	var msg MSG
 	for {
 		r, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
-		if int32(r) <= 0 { break }
+		if int32(r) <= 0 {
+			break
+		}
 		procTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
 		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
 	}
@@ -44,12 +46,16 @@ func windowDPI(hwnd uintptr) int32 {
 	hdc, _, _ := procGetDC.Call(hwnd)
 	dpi, _, _ := procGetDeviceCaps.Call(hdc, LOGPIXELSY)
 	procReleaseDC.Call(hwnd, hdc)
-	if dpi == 0 { return 96 }
+	if dpi == 0 {
+		return 96
+	}
 	return int32(dpi)
 }
 
 func scale96(v, dpi int32) int32 {
-	if dpi <= 0 { dpi = 96 }
+	if dpi <= 0 {
+		dpi = 96
+	}
 	return (v*dpi + 48) / 96
 }
 
@@ -60,7 +66,9 @@ func createMainWindow() error {
 	icon := loadAppIcon()
 	bg, _, _ := procGetStockObject.Call(5)
 	wc := WNDCLASSEX{CbSize: uint32(unsafe.Sizeof(WNDCLASSEX{})), LpfnWndProc: syscall.NewCallback(windowProc), HInstance: hInstance, HIcon: icon, HCursor: cursor, HbrBackground: bg, HIconSm: icon, LpszClassName: className}
-	if r, _, err := procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc))); r == 0 { return fmt.Errorf("RegisterClassExW failed: %v", err) }
+	if r, _, err := procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc))); r == 0 {
+		return fmt.Errorf("RegisterClassExW failed: %v", err)
+	}
 
 	// The UI is authored on a 96-DPI design grid. Scale both the window and every
 	// child control to the monitor DPI; previously only the fonts were scaled,
@@ -69,7 +77,9 @@ func createMainWindow() error {
 	winW, winH := scale96(820, dpi), scale96(615, dpi)
 	style := uintptr(WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX)
 	hwnd, _, err := procCreateWindowExW.Call(WS_EX_CONTROLPARENT, uintptr(unsafe.Pointer(className)), uintptr(unsafe.Pointer(utf16Ptr(appName+" "+appVersion))), style, 0, 0, uintptr(winW), uintptr(winH), 0, 0, hInstance, 0)
-	if hwnd == 0 { return fmt.Errorf("CreateWindowExW failed: %v", err) }
+	if hwnd == 0 {
+		return fmt.Errorf("CreateWindowExW failed: %v", err)
+	}
 	app.hwnd = hwnd
 	createFonts(hwnd)
 	createControls(hwnd, hInstance)
@@ -78,7 +88,9 @@ func createMainWindow() error {
 	procShowWindow.Call(hwnd, SW_SHOW)
 	procUpdateWindow.Call(hwnd)
 	settings := loadSettings()
-	if settings.OutputDir == "" { settings.OutputDir = defaultOutputDir() }
+	if settings.OutputDir == "" {
+		settings.OutputDir = defaultOutputDir()
+	}
 	setText(app.outputEdit, settings.OutputDir)
 	setChecked(app.preserveChapters, settings.PreserveChapters)
 	setStatus("Choose a DVD folder or ISO file to begin.")
@@ -91,7 +103,9 @@ func loadAppIcon() uintptr {
 		iconPath := filepath.Join(filepath.Dir(exe), "MattMux.ico")
 		if fileExists(iconPath) {
 			r, _, _ := procLoadImageW.Call(0, uintptr(unsafe.Pointer(utf16Ptr(iconPath))), IMAGE_ICON, 0, 0, LR_LOADFROMFILE|LR_DEFAULTSIZE)
-			if r != 0 { return r }
+			if r != 0 {
+				return r
+			}
 		}
 	}
 	r, _, _ := procLoadIconW.Call(0, 32512)
@@ -116,7 +130,9 @@ func createControls(hwnd, hInstance uintptr) {
 	s := func(v int32) int32 { return scale96(v, dpi) }
 	add := func(ex uint32, class, text string, style uint32, x, y, w, h int32, id int, font uintptr) uintptr {
 		c, _, _ := procCreateWindowExW.Call(uintptr(ex), uintptr(unsafe.Pointer(utf16Ptr(class))), uintptr(unsafe.Pointer(utf16Ptr(text))), uintptr(style), uintptr(s(x)), uintptr(s(y)), uintptr(s(w)), uintptr(s(h)), hwnd, uintptr(id), hInstance, 0)
-		if font != 0 { procSendMessageW.Call(c, WM_SETFONT, font, 1) }
+		if font != 0 {
+			procSendMessageW.Call(c, WM_SETFONT, font, 1)
+		}
 		return c
 	}
 	add(0, "STATIC", "MattMux", WS_CHILD|WS_VISIBLE, 28, 22, 300, 42, 0, app.headerFont)
@@ -149,27 +165,94 @@ func createControls(hwnd, hInstance uintptr) {
 func windowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 	switch msg {
 	case WM_COMMAND:
-		id := int(wParam & 0xffff); notify := uint16((wParam >> 16) & 0xffff)
+		id := int(wParam & 0xffff)
+		notify := uint16((wParam >> 16) & 0xffff)
 		switch id {
-		case idSourceEdit: if notify == EN_CHANGE && !app.busy.Load() { app.invalidateTitles(); setStatus("Source changed. Scan titles again.") }
-		case idDVDButton: if !app.busy.Load() { if p := browseFolder(hwnd, "Choose the DVD folder (or its VIDEO_TS folder)"); p != "" { setSource(p) } }
-		case idISOButton: if !app.busy.Load() { if p := browseISO(hwnd); p != "" { setSource(p) } }
-		case idOutputBtn: if !app.busy.Load() { if p := browseFolder(hwnd, "Choose where MattMux should save the MKV"); p != "" { setText(app.outputEdit, p); saveCurrentSettings() } }
-		case idPreserveChapters: if !app.busy.Load() { saveCurrentSettings(); if isChecked(app.preserveChapters) { setStatus("Chapter preservation enabled. FFmpeg will write detected DVD chapters to the MKV.") } else { setStatus("Chapter preservation disabled. The output MKV will not contain chapter markers.") } }
-		case idScanBtn: startAsync("Scanning DVD titles…", scanTitles)
-		case idMetaBtn: startAsync("Reading title metadata…", showMetadata)
-		case idRemuxBtn: startAsync("Preparing remux…", remuxSelected)
-		case idCancelBtn: app.cancelCurrent()
-		case idAboutBtn: showAbout()
+		case idSourceEdit:
+			if notify == EN_CHANGE && !app.busy.Load() {
+				app.invalidateTitles()
+				setStatus("Source changed. Scan titles again.")
+			}
+		case idTitleCombo:
+			if notify == 1 && !app.busy.Load() {
+				clearWindowsTrackSelection()
+				setStatus("Title changed. Show Metadata to review track selection for this title.")
+			}
+		case idDVDButton:
+			if !app.busy.Load() {
+				if p := browseFolder(hwnd, "Choose the DVD folder (or its VIDEO_TS folder)"); p != "" {
+					setSource(p)
+				}
+			}
+		case idISOButton:
+			if !app.busy.Load() {
+				if p := browseISO(hwnd); p != "" {
+					setSource(p)
+				}
+			}
+		case idOutputBtn:
+			if !app.busy.Load() {
+				if p := browseFolder(hwnd, "Choose where MattMux should save the MKV"); p != "" {
+					setText(app.outputEdit, p)
+					saveCurrentSettings()
+				}
+			}
+		case idPreserveChapters:
+			if !app.busy.Load() {
+				saveCurrentSettings()
+				if isChecked(app.preserveChapters) {
+					setStatus("Chapter preservation enabled. FFmpeg will write detected DVD chapters to the MKV.")
+				} else {
+					setStatus("Chapter preservation disabled. The output MKV will not contain chapter markers.")
+				}
+			}
+		case idScanBtn:
+			startAsync("Scanning DVD titles…", scanTitles)
+		case idMetaBtn:
+			startAsync("Reading title metadata…", showMetadata)
+		case idRemuxBtn:
+			startAsync("Preparing remux…", remuxSelected)
+		case idCancelBtn:
+			app.cancelCurrent()
+		case idAboutBtn:
+			showAbout()
 		}
 		return 0
 	case WM_SHOWTEXT:
-		app.pendingTextMu.Lock(); title, text := app.pendingTitle, app.pendingText; app.pendingTitle, app.pendingText = "", ""; app.pendingTextMu.Unlock(); if text != "" { showTextWindow(title, text) }; return 0
+		app.pendingTextMu.Lock()
+		title, text := app.pendingTitle, app.pendingText
+		app.pendingTitle, app.pendingText = "", ""
+		app.pendingTextMu.Unlock()
+		if text != "" {
+			showTextWindow(title, text)
+		}
+		return 0
+	case WM_SHOWTRACKS:
+		if req, ok := takePendingWindowsTrackRequest(); ok {
+			showWindowsTrackWindow(req)
+		}
+		return 0
 	case WM_DROPFILES:
-		if !app.busy.Load() { if p := droppedPath(wParam); p != "" { setSource(p) } } else { procDragFinish.Call(wParam) }; return 0
+		if !app.busy.Load() {
+			if p := droppedPath(wParam); p != "" {
+				setSource(p)
+			}
+		} else {
+			procDragFinish.Call(wParam)
+		}
+		return 0
 	case WM_CLOSE:
-		if app.busy.Load() { if messageBox(hwnd, "Operation in progress", "Cancel the current operation and close MattMux?", MB_OKCANCEL|MB_ICONQUESTION) != IDOK { return 0 }; app.cancelCurrent() }; procDestroyWindow.Call(hwnd); return 0
-	case WM_DESTROY: procPostQuitMessage.Call(0); return 0
+		if app.busy.Load() {
+			if messageBox(hwnd, "Operation in progress", "Cancel the current operation and close MattMux?", MB_OKCANCEL|MB_ICONQUESTION) != IDOK {
+				return 0
+			}
+			app.cancelCurrent()
+		}
+		procDestroyWindow.Call(hwnd)
+		return 0
+	case WM_DESTROY:
+		procPostQuitMessage.Call(0)
+		return 0
 	}
 	r, _, _ := procDefWindowProcW.Call(hwnd, uintptr(msg), wParam, lParam)
 	return r

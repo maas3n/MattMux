@@ -9,11 +9,32 @@ import java.util.concurrent.locks.ReentrantLock
 
 data class RemuxResult(val outputUri: Uri, val title: Int, val durationMs: Long, val planJson: String)
 
+data class TrackInfo(
+    val index: Int, val kind: String, val codec: String, val language: String?, val title: String?,
+    val width: Int, val height: Int, val channels: Int, val channelLayout: String?,
+) {
+    fun displayLabel(): String {
+        val typeName = when (kind) { "video" -> "Video"; "audio" -> "Audio"; "subtitle" -> "Subtitle"; else -> kind }
+        val details = mutableListOf<String>()
+        if (width > 0 && height > 0) details += "${width}x${height}"
+        if (channels > 0) details += if (channelLayout.isNullOrBlank()) "$channels ch" else "$channels ch ($channelLayout)"
+        language?.takeIf { it.isNotBlank() }?.let { details += "[$it]" }
+        title?.takeIf { it.isNotBlank() }?.let { details += it }
+        return buildString {
+            append(typeName); append("  #"); append(index); append("  "); append(codec)
+            if (details.isNotEmpty()) { append("  "); append(details.joinToString("  ")) }
+        }
+    }
+}
+
+data class TrackProbeResult(val title: Int, val tracks: List<TrackInfo>)
+
 interface RemuxEngine {
     val isAvailable: Boolean
     val unavailableReason: String?
     val runtimeInfo: String?
-    fun remux(context: Context, sourceUri: Uri, outputTreeUri: Uri): RemuxResult
+fun probeTracks(context: Context, sourceUri: Uri): TrackProbeResult
+    fun remux(context: Context, sourceUri: Uri, outputTreeUri: Uri, selectedStreamIndexes: IntArray? = null): RemuxResult
     fun cancel()
     fun setProgressListener(listener: ((Int) -> Unit)?)
 }
@@ -54,20 +75,52 @@ class AndroidNativeRemuxEngine : RemuxEngine {
         cancelled.set(true)
     }
 
-    override fun remux(context: Context, sourceUri: Uri, outputTreeUri: Uri): RemuxResult {
+    override fun probeTracks(context: Context, sourceUri: Uri): TrackProbeResult {
         check(isAvailable) { unavailableReason ?: "Remux engine unavailable" }
-        require(DocumentsContract.isTreeUri(outputTreeUri)) { "Output must be a document-tree folder" }
-        check(remuxLock.tryLock()) { "Another remux is still stopping. Try again shortly." }
+        check(remuxLock.tryLock()) { "Another native operation is still stopping. Try again shortly." }
         try {
-            check(!cancelled.get()) { "Remux cancelled" }
-            return remuxLocked(context, sourceUri, outputTreeUri)
+            check(!cancelled.get()) { "Metadata read cancelled" }
+            openTitle(context, sourceUri).use { title ->
+                val fds = IntArray(title.vobs.size) { title.vobs[it].fd }
+                val starts = LongArray(title.plan.cells.size) { title.plan.cells[it].startSector }
+                val ends = LongArray(title.plan.cells.size) { title.plan.cells[it].endSectorExclusive }
+                val records = nativeProbeTracks(fds, starts, ends, title.isoHandle, title.plan.titleSet)
+                    ?: error("Could not probe DVD streams")
+                return TrackProbeResult(title.plan.globalTitle, records.map(::parseTrackRecord))
+            }
         } finally {
             cancelled.set(false)
             remuxLock.unlock()
         }
     }
 
-    private fun remuxLocked(context: Context, sourceUri: Uri, outputTreeUri: Uri): RemuxResult {
+    private fun parseTrackRecord(record: String): TrackInfo {
+        val fields = record.split('\t', limit = 9)
+        require(fields.size == 9) { "Invalid native track metadata" }
+        fun optional(value: String): String? = value.takeUnless { it == "-" || it.isBlank() }
+        return TrackInfo(
+            index = fields[0].toInt(), kind = fields[1], codec = fields[2],
+            language = optional(fields[3]), title = optional(fields[4]),
+            width = fields[5].toInt(), height = fields[6].toInt(), channels = fields[7].toInt(),
+            channelLayout = optional(fields[8]),
+        )
+    }
+
+    override fun remux(context: Context, sourceUri: Uri, outputTreeUri: Uri, selectedStreamIndexes: IntArray?): RemuxResult {
+        check(isAvailable) { unavailableReason ?: "Remux engine unavailable" }
+        require(DocumentsContract.isTreeUri(outputTreeUri)) { "Output must be a document-tree folder" }
+        require(selectedStreamIndexes == null || selectedStreamIndexes.isNotEmpty()) { "Select at least one video, audio, or subtitle track before remuxing" }
+        check(remuxLock.tryLock()) { "Another remux is still stopping. Try again shortly." }
+        try {
+            check(!cancelled.get()) { "Remux cancelled" }
+            return remuxLocked(context, sourceUri, outputTreeUri, selectedStreamIndexes)
+        } finally {
+            cancelled.set(false)
+            remuxLock.unlock()
+        }
+    }
+
+    private fun remuxLocked(context: Context, sourceUri: Uri, outputTreeUri: Uri, selectedStreamIndexes: IntArray?): RemuxResult {
         val resolver = context.contentResolver
         openTitle(context, sourceUri).use { title ->
             check(!cancelled.get()) { "Remux cancelled" }
@@ -85,6 +138,7 @@ class AndroidNativeRemuxEngine : RemuxEngine {
                     pending.descriptor.fd,
                     title.plan.chapterStartsMs,
                     title.plan.chapterEndsMs,
+                    selectedStreamIndexes,
                     title.isoHandle,
                     title.plan.titleSet,
                 )
@@ -144,6 +198,7 @@ class AndroidNativeRemuxEngine : RemuxEngine {
     private external fun nativeOpenIso(fd: Int): Long
     private external fun nativeReadIsoIfo(handle: Long, titleSet: Int): ByteArray?
     private external fun nativeCloseIso(handle: Long)
+    private external fun nativeProbeTracks(vobFds: IntArray, cellStartSectors: LongArray, cellEndSectors: LongArray, isoHandle: Long, titleSet: Int): Array<String>?
     private external fun nativeRemux(
         vobFds: IntArray,
         cellStartSectors: LongArray,
@@ -151,6 +206,7 @@ class AndroidNativeRemuxEngine : RemuxEngine {
         outputFd: Int,
         chapterStartsMs: LongArray,
         chapterEndsMs: LongArray,
+        selectedStreamIndexes: IntArray?,
         isoHandle: Long,
         titleSet: Int,
     ): String?

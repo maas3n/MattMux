@@ -1,6 +1,7 @@
 package io.github.maas3n.mattmux
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Typeface
 import android.net.Uri
@@ -23,6 +24,8 @@ class MainActivity : Activity(), BillingManager.Listener {
         private const val REQUEST_OUTPUT_FOLDER = 1003
         private const val STATE_SOURCE_URI = "source_uri"
         private const val STATE_OUTPUT_URI = "output_uri"
+        private const val STATE_TRACK_SELECTION_SET = "track_selection_set"
+        private const val STATE_SELECTED_TRACKS = "selected_tracks"
     }
 
     private val engine: RemuxEngine = AndroidNativeRemuxEngine()
@@ -36,11 +39,14 @@ class MainActivity : Activity(), BillingManager.Listener {
     private lateinit var buyButton: Button
     private lateinit var remuxButton: Button
     private lateinit var cancelButton: Button
+    private lateinit var tracksButton: Button
 
     private var sourceUri: Uri? = null
     private var outputUri: Uri? = null
+    private var selectedTrackIndexes: Set<Int>? = null
     private var proOwned = false
     @Volatile private var remuxRunning = false
+    @Volatile private var metadataBusy = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -63,6 +69,8 @@ class MainActivity : Activity(), BillingManager.Listener {
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString(STATE_SOURCE_URI, sourceUri?.toString())
         outState.putString(STATE_OUTPUT_URI, outputUri?.toString())
+        outState.putBoolean(STATE_TRACK_SELECTION_SET, selectedTrackIndexes != null)
+        selectedTrackIndexes?.let { outState.putIntArray(STATE_SELECTED_TRACKS, it.sorted().toIntArray()) }
         super.onSaveInstanceState(outState)
     }
 
@@ -97,6 +105,7 @@ class MainActivity : Activity(), BillingManager.Listener {
             REQUEST_SOURCE_ISO, REQUEST_SOURCE_FOLDER -> {
                 sourceUri = uri
                 sourceValue.text = describeUri(uri)
+                clearTrackSelection()
             }
             REQUEST_OUTPUT_FOLDER -> {
                 outputUri = uri
@@ -109,6 +118,7 @@ class MainActivity : Activity(), BillingManager.Listener {
     private fun restoreSelectionState(savedInstanceState: Bundle?) {
         sourceUri = savedInstanceState?.getString(STATE_SOURCE_URI)?.takeIf { it.isNotBlank() }?.let(Uri::parse)
         outputUri = savedInstanceState?.getString(STATE_OUTPUT_URI)?.takeIf { it.isNotBlank() }?.let(Uri::parse)
+        selectedTrackIndexes = if (savedInstanceState?.getBoolean(STATE_TRACK_SELECTION_SET) == true) savedInstanceState.getIntArray(STATE_SELECTED_TRACKS)?.toSet() ?: emptySet() else null
         sourceValue.text = sourceUri?.let(::describeUri) ?: "No source selected"
         outputValue.text = outputUri?.let(::describeUri) ?: "No output folder selected"
     }
@@ -168,6 +178,8 @@ class MainActivity : Activity(), BillingManager.Listener {
             "Bundled native runtime: $it\n\nVIDEO_TS folders and UDF ISO images use the same DVD title/cell planner. Select an unencrypted DVD; ISO files must be on storage that supports seeking. Interleaved multi-angle discs are not supported in this alpha."
         } ?: "The bundled native FFmpeg runtime could not be loaded in this build."
         root.addView(value(runtimeMessage))
+        tracksButton = button("Show Metadata") { showTrackMetadata() }
+        root.addView(tracksButton)
         remuxStatus = value("Ready")
         root.addView(remuxStatus)
         remuxButton = button("Remux to MKV") { startRemux() }
@@ -193,12 +205,17 @@ class MainActivity : Activity(), BillingManager.Listener {
             return
         }
         if (remuxRunning) return
+        val selectedStreams = selectedTrackIndexes?.sorted()?.toIntArray()
+        if (selectedStreams != null && selectedStreams.isEmpty()) {
+            toast("Select at least one video, audio, or subtitle track first")
+            return
+        }
 
         remuxRunning = true
         remuxStatus.text = "Preparing DVD title…"
         updateRemuxButton()
         Thread {
-            val result = runCatching { engine.remux(this, source, output) }
+            val result = runCatching { engine.remux(this, source, output, selectedStreams) }
             runOnUiThread {
                 remuxRunning = false
                 result.onSuccess {
@@ -211,6 +228,61 @@ class MainActivity : Activity(), BillingManager.Listener {
                 updateRemuxButton()
             }
         }.apply { name = "MattMux-remux" }.start()
+    }
+
+    private fun showTrackMetadata() {
+        val source = sourceUri ?: run { toast("Choose a DVD source first"); return }
+        if (!engine.isAvailable) { toast(engine.unavailableReason ?: "Remux engine unavailable"); return }
+        if (metadataBusy || remuxRunning) return
+        metadataBusy = true
+        remuxStatus.text = "Reading title metadata…"
+        updateRemuxButton()
+        Thread {
+            val result = runCatching { engine.probeTracks(this, source) }
+            runOnUiThread {
+                metadataBusy = false
+                result.onSuccess { probe ->
+                    if (probe.tracks.isEmpty()) {
+                        remuxStatus.text = "No selectable tracks were found"
+                        toast("This DVD title contains no selectable tracks")
+                    } else {
+                        showTrackDialog(probe)
+                        remuxStatus.text = "Metadata loaded for title ${probe.title}. Choose tracks to include."
+                    }
+                }.onFailure {
+                    remuxStatus.text = "Metadata failed: ${it.message ?: it.javaClass.simpleName}"
+                    toast(it.message ?: "Metadata read failed")
+                }
+                updateRemuxButton()
+            }
+        }.apply { name = "MattMux-metadata" }.start()
+    }
+
+    private fun showTrackDialog(probe: TrackProbeResult) {
+        val previous = selectedTrackIndexes
+        val checked = BooleanArray(probe.tracks.size) { index -> previous?.contains(probe.tracks[index].index) ?: true }
+        AlertDialog.Builder(this)
+            .setTitle("Title ${probe.title} — Tracks / Metadata")
+            .setMultiChoiceItems(probe.tracks.map { it.displayLabel() }.toTypedArray(), checked) { _, which, value -> checked[which] = value }
+            .setPositiveButton("Use selection") { _, _ ->
+                selectedTrackIndexes = probe.tracks.indices.filter { checked[it] }.map { probe.tracks[it].index }.toSet()
+                val count = selectedTrackIndexes?.size ?: 0
+                remuxStatus.text = if (count == 0) "No tracks selected. Select at least one track before remuxing." else "$count track(s) selected for the next remux."
+                updateRemuxButton()
+            }
+            .setNeutralButton("All tracks") { _, _ ->
+                selectedTrackIndexes = probe.tracks.map { it.index }.toSet()
+                remuxStatus.text = "All ${probe.tracks.size} track(s) selected for the next remux."
+                updateRemuxButton()
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun clearTrackSelection() {
+        selectedTrackIndexes = null
+        if (::remuxStatus.isInitialized) remuxStatus.text = "Source changed. Show Metadata to choose tracks, or remux all tracks by default."
+        if (::tracksButton.isInitialized) updateRemuxButton()
     }
 
     private fun chooseIso() {
@@ -237,11 +309,14 @@ class MainActivity : Activity(), BillingManager.Listener {
 
     private fun updateRemuxButton() {
         val hasPaths = sourceUri != null && outputUri != null
-        remuxButton.isEnabled = hasPaths && !remuxRunning && engine.isAvailable
+        val hasSelectedTracks = selectedTrackIndexes?.isNotEmpty() ?: true
+        remuxButton.isEnabled = hasPaths && hasSelectedTracks && !remuxRunning && !metadataBusy && engine.isAvailable
+        tracksButton.isEnabled = sourceUri != null && !remuxRunning && !metadataBusy && engine.isAvailable
         cancelButton.isEnabled = remuxRunning
         remuxButton.text = when {
             remuxRunning -> "Remuxing…"
             !engine.isAvailable -> "Remux engine unavailable"
+            selectedTrackIndexes != null && selectedTrackIndexes!!.isEmpty() -> "Select at least one track"
             BuildConfig.ENABLE_BILLING_PURCHASES && !proOwned -> "Unlock Pro to remux"
             else -> "Remux to MKV"
         }
