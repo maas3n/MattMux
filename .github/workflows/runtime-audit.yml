@@ -24,6 +24,7 @@ jobs:
           name: authored-dvd-fixture
           path: fixture
   windows:
+    if: ${{ !contains(github.event.head_commit.message, '[android-only]') }}
     needs: fixture
     runs-on: windows-latest
     timeout-minutes: 15

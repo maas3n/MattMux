@@ -13,7 +13,14 @@ def dump():
     adb('shell', 'uiautomator', 'dump', '/sdcard/window.xml')
     xml = adb('shell', 'cat', '/sdcard/window.xml')
     (OUT / 'last-ui.xml').write_text(xml)
-    return ET.fromstring(xml)
+    tree = ET.fromstring(xml)
+    if any(n.get('text') == "Pixel Launcher isn't responding" for n in tree.iter('node')):
+        print('Dismissing emulator Pixel Launcher ANR; preserving app errors', flush=True)
+        for n in tree.iter('node'):
+            if n.get('text') == 'Close app':
+                tap_node(n)
+                return dump()
+    return tree
 
 def tap_node(n):
     x1,y1,x2,y2 = map(int,re.findall(r'\d+',n.attrib['bounds']))
