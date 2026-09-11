@@ -69,7 +69,8 @@ Changing the DVD source or selected title clears the previous track selection so
 ### Linux
 
 - amd64 / x86_64
-- `.deb` targets Debian/Ubuntu-family systems
+- Published Linux binaries currently require **glibc 2.38 or newer**
+- `.deb` targets Debian/Ubuntu-family systems that meet that runtime requirement
 - Standalone build expects a normal 64-bit desktop Linux runtime
 - Bundled FFmpeg/FFprobe/MediaInfo remain private to MattMux and do not replace system tools
 
@@ -78,6 +79,7 @@ Changing the DVD source or selected title clears the previous track selection so
 - Experimental
 - Android 8.0 / API 26 or newer
 - arm64-v8a and x86_64 are targeted
+- The v1.4.0 GitHub APK is debug-signed; a later persistently signed APK may require uninstalling v1.4.0 before installation
 - See [`android/README.md`](android/README.md) for current native-remux details and limitations
 
 Use unencrypted DVD-Video sources or media you are authorized to process. MattMux does **not** bypass CSS or other DVD copy protection.
@@ -135,11 +137,15 @@ bash packaging/linux/build-linux-standalone.sh dev
 
 ### Android / ChromeOS
 
+Build the native runtime first, then run the Android tests/lint/package build:
+
 ```bash
+export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/30.0.16248370"
+bash android/native/build-ffmpeg-android.sh
 gradle -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
 
-The Android native FFmpeg runtime is built by GitHub Actions; see [`android/native/README.md`](android/native/README.md) for the full native build process.
+GitHub Actions uses the same native build step before Gradle; see [`android/native/README.md`](android/native/README.md) for the full native build process.
 
 ## Unified development and release model
 
