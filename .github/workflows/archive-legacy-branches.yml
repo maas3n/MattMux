@@ -1,0 +1,80 @@
+name: Archive and retire legacy branches
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/archive-legacy-branches.yml
+
+permissions:
+  contents: write
+
+jobs:
+  archive-and-delete:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Preserve legacy history behind archive tag and delete legacy branch refs
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const archiveTag = 'archive/pre-single-trunk-history';
+            const archiveSha = '392335c6e9b8cd7a3bebd638290458df4744aa1d';
+
+            try {
+              await github.rest.git.createRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `refs/tags/${archiveTag}`,
+                sha: archiveSha
+              });
+              core.info(`Created ${archiveTag} -> ${archiveSha}`);
+            } catch (error) {
+              if (error.status === 422) {
+                core.warning(`Archive tag already exists: ${error.message}`);
+              } else {
+                throw error;
+              }
+            }
+
+            const branches = [
+              'audit/runtime-validation-20260911',
+              'chore/archive-v1.2.0-workflow',
+              'chore/delete-chromeos-alpha1',
+              'chore/remove-alpha1-delete-workflow',
+              'chore/remove-branch-cleanup-workflow',
+              'chore/remove-offline-builder-release-reference',
+              'chore/remove-release-cleanup-workflow',
+              'docs/cross-platform-readme',
+              'docs/refresh-readme-linux',
+              'docs/refresh-readme-main',
+              'feat/android-native-remux-engine',
+              'fix/alpha4-release-assets',
+              'fix/android-alpha2-release',
+              'fix/linux-dev3-hardening',
+              'fix/linux-self-contained-deb',
+              'fix/metadata-output-capture',
+              'fix/release-audit-linux-hardening',
+              'fix/release-audit-windows-hardening',
+              'fix/v1.2.0-checksum-dpi',
+              'fix/v1.2.0-offline-checksum',
+              'repair-v1.2.0-release-checksums',
+              'chore/archive-and-retire-legacy-branches'
+            ];
+
+            for (const branch of branches) {
+              try {
+                await github.rest.git.deleteRef({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ref: `heads/${branch}`
+                });
+                core.info(`Deleted ${branch}`);
+              } catch (error) {
+                if (error.status === 404 || error.status === 422) {
+                  core.warning(`Could not delete ${branch}: ${error.message}`);
+                } else {
+                  throw error;
+                }
+              }
+            }
