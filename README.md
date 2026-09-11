@@ -2,19 +2,20 @@
 
 **MattMux** remuxes DVD-Video titles to MKV **without transcoding**. Windows, Linux, and Android/ChromeOS are developed together from the single `main` branch and released under one shared product version.
 
-## Download MattMux 1.4.1
+## Download MattMux 1.4.2
 
-**MattMux 1.4.1** is the current published unified release. Windows, Linux, and ChromeOS/Android packages were built from the same tagged source commit and published together in one GitHub Release.
+**MattMux 1.4.2** is the current published unified release. Windows, Linux, and Android/ChromeOS packages were built from the same tagged source commit and published together in one GitHub Release.
 
-MattMux 1.4.1 contains the release-audit fixes, stronger output recovery and interruption handling, corrected Linux package metadata, and persistent Android distribution signing.
+MattMux 1.4.2 keeps the 1.4.1 release-audit fixes and persistent Android distribution signing, and adds an explicit Android phone/tablet APK filename alongside the ChromeOS alias.
 
-[**Download MattMux 1.4.1**](https://github.com/maas3n/MattMux/releases/tag/v1.4.1)
+[**Download MattMux 1.4.2**](https://github.com/maas3n/MattMux/releases/tag/v1.4.2)
 
 | Platform | Recommended package | Other options |
 | --- | --- | --- |
-| Windows x64 | `MattMux-1.4.1-Windows-All-in-One.exe` | Setup EXE or Portable ZIP |
-| Linux amd64 | `MattMux-1.4.1-Linux-amd64Standalone` | Self-contained `.deb` or tarball |
-| Android / ChromeOS | `MattMux-1.4.1-ChromeOS.apk` | Experimental APK |
+| Windows x64 | `MattMux-1.4.2-Windows-All-in-One.exe` | Setup EXE or Portable ZIP |
+| Linux amd64 | `MattMux-1.4.2-Linux-amd64Standalone` | Self-contained `.deb` or tarball |
+| Android phone / tablet | `MattMux-1.4.2-Android.apk` | Signed universal APK |
+| ChromeOS | `MattMux-1.4.2-ChromeOS.apk` | Byte-identical alias of the Android APK |
 
 The release also includes source archives, third-party source/provenance files, per-platform SHA-256 manifests, and one combined `SHA256SUMS.txt`.
 
@@ -82,6 +83,7 @@ Changing the DVD source or selected title clears the previous track selection so
 - Android 8.0 / API 26 or newer
 - arm64-v8a and x86_64 are targeted
 - The v1.4.0 GitHub APK was debug-signed; v1.4.1 and later GitHub APKs use persistent distribution signing, so upgrading from v1.4.0 may require uninstalling v1.4.0 first
+- The `Android.apk` and `ChromeOS.apk` release assets are the same signed universal APK under device-friendly names
 - See [`android/README.md`](android/README.md) for current native-remux details and limitations
 
 Use unencrypted DVD-Video sources or media you are authorized to process. MattMux does **not** bypass CSS or other DVD copy protection.
@@ -90,29 +92,29 @@ Use unencrypted DVD-Video sources or media you are authorized to process. MattMu
 
 ### Windows
 
-Download one of these from the [MattMux 1.4.1 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.1):
+Download one of these from the [MattMux 1.4.2 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.2):
 
-- `MattMux-1.4.1-Windows-All-in-One.exe` — easiest single-file option
-- `MattMux-1.4.1-Windows-Setup.exe` — normal installer
-- `MattMux-1.4.1-Windows-Portable.zip` — portable package with bundled tools and portable data directory
+- `MattMux-1.4.2-Windows-All-in-One.exe` — easiest single-file option
+- `MattMux-1.4.2-Windows-Setup.exe` — normal installer
+- `MattMux-1.4.2-Windows-Portable.zip` — portable package with bundled tools and portable data directory
 
 ### Linux standalone
 
 ```bash
-chmod +x MattMux-1.4.1-Linux-amd64Standalone
-./MattMux-1.4.1-Linux-amd64Standalone
+chmod +x MattMux-1.4.2-Linux-amd64Standalone
+./MattMux-1.4.2-Linux-amd64Standalone
 ```
 
 ### Debian / Ubuntu
 
 ```bash
-sudo apt install ./MattMux-1.4.1-Linux-amd64.deb
+sudo apt install ./MattMux-1.4.2-Linux-amd64.deb
 mattmux
 ```
 
 ### Android / ChromeOS
 
-Download `MattMux-1.4.1-ChromeOS.apk` from the [MattMux 1.4.1 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.1) and install it on a compatible Android/ChromeOS device.
+For Android phones/tablets, download `MattMux-1.4.2-Android.apk`. For Chromebooks, download `MattMux-1.4.2-ChromeOS.apk` from the [MattMux 1.4.2 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.2). They are the same persistently signed universal APK published under device-friendly filenames.
 
 ### Output location behavior
 
@@ -170,13 +172,13 @@ See [`RELEASING.md`](RELEASING.md) for the full release policy.
 
 ## Release history
 
-MattMux **1.4.0** was the first unified release. MattMux **1.4.1** is the current published unified release and introduces persistent Android distribution signing plus the release-audit fixes.
+MattMux **1.4.0** was the first unified release. MattMux **1.4.1** introduced persistent Android distribution signing plus the release-audit fixes. MattMux **1.4.2** is the current published unified release and adds explicit Android phone/tablet and ChromeOS APK asset names for the same signed universal build.
 
 MattMux previously used separate platform-specific development release lines. Those obsolete release entries and tags have been retired now that the unified release model is active.
 
 Their development remains preserved in the Git history. The repository also retains the `archive/pre-single-trunk-history` archive tag for earlier history.
 
-For current downloads, use the unified **MattMux 1.4.1** release. Future public releases will continue to use one shared version and one GitHub Release for all supported platforms.
+For current downloads, use the unified **MattMux 1.4.2** release. Future public releases will continue to use one shared version and one GitHub Release for all supported platforms.
 
 ## Third-party runtime tools
 

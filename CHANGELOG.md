@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.2 — 2026-09-11
+
+- Publish the signed universal APK under both `MattMux-1.4.2-Android.apk` for Android phones/tablets and `MattMux-1.4.2-ChromeOS.apk` for Chromebooks.
+- Verify the two Android/ChromeOS APK assets are byte-for-byte identical before publishing.
+- Include both APK filenames in the Android and combined SHA-256 manifests.
+
 ## 1.4.1 — 2026-09-11
 
 - Preserve completed desktop and Android remuxes when final publication fails, and add Linux no-overwrite publication fallbacks for filesystems without hard links.
