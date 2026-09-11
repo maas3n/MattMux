@@ -1,59 +1,50 @@
-# Alpha 4 development status
+# MattMux for Android / ChromeOS
 
-The Android branch now implements folder and read-only UDF ISO input using one
-IFO/title/cell planner and native stream-copy loop. ISO access uses a separate
-LGPL libudfread shared library through a seekable SAF descriptor; no root, mount,
-FUSE or VOB extraction is used. Source files are opened read-only.
+This directory contains the experimental Android/ChromeOS frontend for MattMux. The current public milestone is **1.2.0 Alpha 4** (`v1.2.0-chromeos-alpha4`).
 
-Output stays under a temporary `.partial` name until the native muxer has
-finished and flushed successfully. Cancellation/errors abort the output. A
-provider must support random-access output and rename for this path.
-
-Run and release status must be checked in CI; source implementation alone is
-not proof of a tested APK. Generated-source and host-JNI checks are described in
-[native/tests/README.md](native/tests/README.md). Full Windows/Linux output parity,
-real Android execution and physical Chromebook tests remain separate gates.
-Interleaved multi-angle discs, still/shuffle/multi-PGC semantics, CSS decryption,
-ISO9660-only images and streaming-only providers are unsupported. Billing stays
-disabled. Alpha 3's published tag and assets remain unchanged.
-
----
-
-# MattMux for Android / Chromebook
-
-This directory contains the Google Play / ChromeOS frontend for MattMux.
-
-## Current milestone
+## Alpha 4 status
 
 Implemented:
 
-- ChromeOS-compatible Android manifest (`android.hardware.type.pc` and touchscreen both optional)
-- resizable desktop-style activity
-- Storage Access Framework pickers for ISO/DVD folders and output folders
-- Google Play Billing Library 9.1.0
-- non-consumable `mattmux_pro` entitlement flow
-- purchase restore/query and acknowledgement
-- API 36 target/compile SDK for current Google Play submission requirements
-- LGPL-only FFmpeg 9.0.1 shared runtime built from source for `arm64-v8a` and `x86_64`
-- JNI runtime/version bridge proving the bundled native libraries load
-- NDK r30 / modern AGP packaging for 16 KB page-size compatibility
-- CI build and verification for APK/AAB
+- ChromeOS-compatible, resizable Android activity
+- Storage Access Framework input/output pickers
+- DVD-folder / `VIDEO_TS` input through document-tree providers
+- read-only UDF ISO input through libudfread
+- one IFO/title/cell planner for folder and ISO sources
+- longest-title selection
+- native libavformat/libavcodec/libavutil stream-copy remuxing to MKV
+- chapter planning and MKV chapter output
+- temporary `.partial` output with commit/abort handling
+- cancellation and native progress callbacks
+- arm64-v8a and x86_64 native runtimes
+- LGPL-only FFmpeg 9.0.1 runtime built from pinned source
+- separately linked LGPL libudfread 1.1.2
+- Android unit tests, native host parity tests, APK/AAB package verification, and 16 KB page-size checks in CI
 
-Not yet implemented:
+Current limitations / remaining gates:
 
-- MattMux-owned DVD cell/navigation and ISO/UDF reading needed to avoid GPL DVD libraries
-- actual libav custom-I/O stream-copy remuxing
-- source scanning/title selection through Android content URIs
-- production purchase verification backend / Play Developer API validation
-- production signing and Play Console upload
+- CSS or other DVD copy protection is not bypassed
+- interleaved multi-angle discs are unsupported
+- still/shuffle/multi-PGC semantics are not fully supported
+- ISO input requires a seekable storage provider
+- output providers must support random-access writing and rename
+- ISO9660-only images and streaming-only providers are unsupported
+- real-device Android and physical Chromebook testing remain release gates
+- production Play purchase verification/signing/rollout remains separate from the Alpha 4 APK release
 
-Purchases are deliberately disabled in `BuildConfig` until the remux engine is functional. Do not enable charging users for an unfinished remux path.
+Run and release status should be checked in CI; source implementation alone is not proof of a tested APK. Native test details are in [`native/tests/README.md`](native/tests/README.md).
 
-The Android commercial build must not bundle `libdvdnav`, `libdvdread`, `libdvdcss`, GPL-enabled FFmpeg, or `--enable-nonfree` FFmpeg components. See `native/FFMPEG_LGPL_POLICY.md`.
+## Billing
 
-## Bundled FFmpeg runtime
+The project contains a Google Play Billing integration and the non-consumable product ID `mattmux_pro`, but purchases are deliberately disabled in the current Alpha 4 build through `BuildConfig.ENABLE_BILLING_PURCHASES = false`.
 
-CI runs `native/build-ffmpeg-android.sh` before Gradle. The script downloads the pinned official FFmpeg source archive, verifies its SHA-256, builds LGPL-only shared libraries for both supported ABIs, normalizes their Android SONAMEs, and generates:
+Do not enable charging merely because the native remux engine now exists. Enable production purchases only after the remux path has passed real Chromebook/device testing and the production purchase-verification/signing plan is ready. See [`PLAY_CONSOLE.md`](PLAY_CONSOLE.md).
+
+## Native runtime and licensing
+
+The Android commercial build must remain separate from the GPL-enabled desktop FFmpeg packages. `native/build-ffmpeg-android.sh` builds FFmpeg 9.0.1 as LGPL-only shared libraries and rejects GPL/nonfree configuration plus prohibited DVD-library dependencies. libudfread is linked separately as an LGPL shared library.
+
+Generated native libraries and FFmpeg provenance/license assets are build outputs and are intentionally not committed:
 
 ```text
 app/src/main/jniLibs/
@@ -61,36 +52,42 @@ app/src/main/jniLibs/
 │   ├── libavutil.so
 │   ├── libavcodec.so
 │   ├── libavformat.so
+│   ├── libudfread.so
 │   └── libmattmux_jni.so
 └── x86_64/
     ├── libavutil.so
     ├── libavcodec.so
     ├── libavformat.so
+    ├── libudfread.so
     └── libmattmux_jni.so
 ```
 
-These files are generated build artifacts and are intentionally not committed to Git. Gradle packages them into the APK/AAB, and Google Play serves the matching ABI to each device.
-
-FFmpeg license text and build provenance are also generated under `app/src/main/assets/ffmpeg/` and packaged with the app.
-
-## Google Play product
-
-Create a one-time, non-consumable product in Play Console with product ID:
-
-```text
-mattmux_pro
-```
-
-Set the price in Play Console. The app reads and displays the localized Play price; there is no price hardcoded into the APK.
+See [`native/FFMPEG_LGPL_POLICY.md`](native/FFMPEG_LGPL_POLICY.md) and the repository-level [`THIRD_PARTY.md`](../THIRD_PARTY.md) for provenance and licensing details.
 
 ## Build
 
-Requires JDK 17, Gradle 9.6.0, Android SDK platform/build-tools 36, Android NDK r30 (`30.0.16248370`), `curl`, `xz`, and `patchelf`.
+Requirements used by CI:
+
+- JDK 17
+- Gradle 9.6.0
+- Android SDK platform/build-tools 36
+- Android NDK `30.0.16248370`
+- `curl`, `xz`, `patchelf`, Autotools and the normal native build toolchain
 
 From the repository root:
 
 ```bash
 export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/30.0.16248370"
 bash android/native/build-ffmpeg-android.sh
-gradle -p android :app:assembleDebug :app:bundleRelease
+gradle -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:bundleRelease
 ```
+
+## Google Play
+
+The intended one-time product ID is:
+
+```text
+mattmux_pro
+```
+
+Price and availability belong in Play Console rather than in the APK. Follow [`PLAY_CONSOLE.md`](PLAY_CONSOLE.md) before enabling purchases or publishing a production Play build.

@@ -1,6 +1,24 @@
 # Changelog
 
-## 1.2.0
+MattMux uses one `main` source branch. Published builds are identified by immutable release tags; platform-specific release lines may have different version numbers while sharing the same trunk.
+
+## Android / ChromeOS 1.2.0 Alpha 4 — `v1.2.0-chromeos-alpha4`
+
+- Added the Android/ChromeOS native remux path for DVD folders and read-only UDF ISO input.
+- Added one IFO/title/cell planner for folder and ISO sources, longest-title selection, chapter planning, native stream-copy remuxing, cancellation, and progress reporting.
+- Added arm64-v8a and x86_64 LGPL FFmpeg 9.0.1 + libudfread 1.1.2 runtimes with package/provenance verification.
+- Added Android unit tests, host/native parity tests, APK/AAB validation, and 16 KB page-size checks.
+- Google Play Billing integration is present, but purchases remain disabled in this alpha.
+
+## Linux 1.3.0-dev5 — `v1.3.0-dev5`
+
+- Added Linux GUI and CLI builds from the shared desktop source.
+- Added portable amd64 tarball, self-contained `.deb`, source archive, and one-file standalone executable.
+- Bundled FFmpeg/FFprobe and MediaInfo privately for the self-contained packages without replacing system multimedia tools.
+- Pinned FFmpeg and MediaInfo-related sources/checksums for reproducible release construction.
+- Added release-audit tests and safe no-overwrite output finalization.
+
+## Windows 1.2.0 — `v1.2.0`
 
 - Added a **Preserve chapters in the output MKV** checkbox; enabled by default and persisted.
 - Added dependency-free native Go DVD IFO chapter detection for `VIDEO_TS` sources.
@@ -8,10 +26,10 @@
 - Metadata window now lists detected chapter number, start timestamp, and duration.
 - Chapter-preserving remuxes explicitly use FFmpeg `dvdvideo -preindex 1` and `-map_chapters 0`.
 - Disabling chapter preservation explicitly uses `-map_chapters -1`.
-- Kept FFmpeg as the only component that writes the final MKV chapter table.
-- No new runtime dependency: mkvmerge, ChapterGrabber, and .NET are not required.
+- Added verified self-contained Setup, Portable and All-in-One packages.
+- Added unique operation-owned temporary MKVs, validation/sync, and atomic no-overwrite finalization.
 
-## 1.1.0
+## Windows 1.1.0
 
 - Rebuilt the Windows UI with clearer source/destination/title sections.
 - Added DVD-folder and ISO-specific pickers plus drag-and-drop.
