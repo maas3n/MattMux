@@ -29,16 +29,6 @@ jobs:
         run: |
           $path = 'src/app_windows_1.go'
           $text = Get-Content -Raw $path
-          $imports = @'
-          )
-
-          var procRtlMoveMemory = kernel32.NewProc("RtlMoveMemory")
-
-          func main() {
-          '@
-          if (-not $text.Contains("var procRtlMoveMemory = kernel32.NewProc(`"RtlMoveMemory`")")) {
-            $text = $text.Replace("`n)`n`nfunc main() {", "`n" + $imports.TrimStart())
-          }
           $old = @'
           	case 0x004e:
           		header := (*mergerNotifyHeader)(unsafe.Pointer(lParam))
@@ -50,7 +40,7 @@ jobs:
           $new = @'
           	case 0x004e:
           		var header mergerNotifyHeader
-          		procRtlMoveMemory.Call(uintptr(unsafe.Pointer(&header)), lParam, unsafe.Sizeof(header))
+          		kernel32.NewProc("RtlMoveMemory").Call(uintptr(unsafe.Pointer(&header)), lParam, unsafe.Sizeof(header))
           		if header.From == mergerWindow.tab && header.Code == -551 {
           			showMergerWindowsTab()
           			return 0
