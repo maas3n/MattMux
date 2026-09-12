@@ -1,13 +1,16 @@
 # Changelog
 
-## Unreleased — Advanced Merger (Linux validation)
+## Unreleased — Advanced Merger (1.4.3 validation)
 
 - Add an Advanced Merger tab with multiple-file selection, category-filtered
   video/audio/subtitle tracks, optional FFMETADATA1 chapters, output folder
   and filename selection, and lossless muxing to MKV.
 - Use explicit stream maps, cancellable jobs, and no-overwrite output finalization.
 - Add real-FFmpeg integration tests and a Linux-only preview package workflow.
-- Windows and Android parity and validation remain release gates for 1.4.3.
+- Add native Windows tabs and Android stream-copy merging through JNI.
+- Android stages selected inputs and output in private temporary storage; select
+  both IDX and SUB when adding VobSub subtitles.
+- Windows and Android validation remain release gates for 1.4.3.
 
 ## 1.4.2 — 2026-09-11
 

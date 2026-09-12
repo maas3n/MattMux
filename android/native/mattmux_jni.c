@@ -771,3 +771,5 @@ cleanup:
     if (error[0] == '\0') ff_error(error, sizeof(error), "Native remux failed", ret);
     return (*env)->NewStringUTF(env, error);
 }
+
+#include "advanced_merger_jni.c"

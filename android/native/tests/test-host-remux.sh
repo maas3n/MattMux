@@ -39,3 +39,6 @@ python3 "${ROOT}/android/native/tests/remux_fingerprint.py" \
   "${SPARSE_WORK}/folder.mkv" "${SPARSE_WORK}/iso.mkv" "${SPARSE_WORK}/input.vob"
 python3 "${ROOT}/android/native/tests/sparse_timestamps.py" verify \
   "${SPARSE_WORK}/reference.vob" "${SPARSE_WORK}/folder.mkv"
+
+# Exercise the Advanced Merger through its production JNI surface.
+bash "${ROOT}/android/native/tests/test-advanced-merger.sh" "${TEST_WORK}"

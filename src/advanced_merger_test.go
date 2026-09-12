@@ -1,4 +1,4 @@
-//go:build linux
+//go:build windows || linux
 
 package main
 
@@ -50,7 +50,7 @@ func TestMergerFFmpegIntegration(t *testing.T) {
 	chap := filepath.Join(dir, "chapters.txt")
 	os.WriteFile(sub, []byte("1\n00:00:00,000 --> 00:00:00,900\nHello\n"), 0600)
 	os.WriteFile(chap, []byte(";FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=1000\ntitle=Opening\n"), 0600)
-	_, err = runCommand(ctx, ffmpeg, "-v", "error", "-f", "lavfi", "-i", "color=size=32x32:rate=25:duration=1", "-f", "lavfi", "-i", "sine=duration=1", "-i", sub, "-f", "ffmetadata", "-i", chap, "-map", "0:v", "-map", "0:v", "-map", "1:a", "-map", "1:a", "-map", "2:s", "-map_chapters", "3", "-c:v", "mpeg4", "-c:a", "pcm_s16le", "-c:s", "srt", source)
+	_, err = runMergerCommand(ctx, ffmpeg, "-v", "error", "-f", "lavfi", "-i", "color=size=32x32:rate=25:duration=1", "-f", "lavfi", "-i", "sine=duration=1", "-i", sub, "-f", "ffmetadata", "-i", chap, "-map", "0:v", "-map", "0:v", "-map", "1:a", "-map", "1:a", "-map", "2:s", "-map_chapters", "3", "-c:v", "mpeg4", "-c:a", "pcm_s16le", "-c:s", "srt", source)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestMergerFFmpegIntegration(t *testing.T) {
 		selected = append(selected, streams[len(streams)-1])
 	}
 	raw := filepath.Join(dir, "external.ac3")
-	if _, err = runCommand(ctx, ffmpeg, "-v", "error", "-f", "lavfi", "-i", "sine=frequency=700:duration=1", "-c:a", "ac3", raw); err != nil {
+	if _, err = runMergerCommand(ctx, ffmpeg, "-v", "error", "-f", "lavfi", "-i", "sine=frequency=700:duration=1", "-c:a", "ac3", raw); err != nil {
 		t.Fatal(err)
 	}
 	audio, err := probeMergerFile(ctx, ffprobe, raw, "audio")
@@ -92,7 +92,7 @@ func TestMergerFFmpegIntegration(t *testing.T) {
 	if err = muxMerger(ctx, tools, selected, chap, out); err != nil {
 		t.Fatal(err)
 	}
-	data, err := runCommand(ctx, ffprobe, "-v", "error", "-show_streams", "-show_chapters", "-of", "json", out)
+	data, err := runMergerCommand(ctx, ffprobe, "-v", "error", "-show_streams", "-show_chapters", "-of", "json", out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestMergerFFmpegIntegration(t *testing.T) {
 	if err = muxMerger(ctx, tools, selected, "", noChapter); err != nil {
 		t.Fatal(err)
 	}
-	data, _ = runCommand(ctx, ffprobe, "-v", "error", "-show_chapters", "-of", "json", noChapter)
+	data, _ = runMergerCommand(ctx, ffprobe, "-v", "error", "-show_chapters", "-of", "json", noChapter)
 	var none ffprobeChapterResult
 	json.Unmarshal(data, &none)
 	if len(none.Chapters) != 0 {
@@ -158,7 +158,7 @@ func TestMergerRawVideo(t *testing.T) {
 		t.Run(tc.ext, func(t *testing.T) {
 			dir := t.TempDir()
 			raw := filepath.Join(dir, "raw."+tc.ext)
-			if _, err := runCommand(ctx, ffmpeg, "-v", "error", "-f", "lavfi", "-i", "color=size=32x32:rate=25:duration=1", "-c:v", tc.codec, "-bf", "0", raw); err != nil {
+			if _, err := runMergerCommand(ctx, ffmpeg, "-v", "error", "-f", "lavfi", "-i", "color=size=32x32:rate=25:duration=1", "-c:v", tc.codec, "-bf", "0", raw); err != nil {
 				t.Fatal(err)
 			}
 			streams, err := probeMergerFile(ctx, ffprobe, raw, "video")
