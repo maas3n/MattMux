@@ -61,6 +61,7 @@ class MainActivity : Activity(), BillingManager.Listener {
         val tabs = android.widget.TabWidget(this).apply { id = android.R.id.tabs }
         val frame = android.widget.FrameLayout(this).apply { id = android.R.id.tabcontent }
         layout.addView(tabs); layout.addView(frame, LinearLayout.LayoutParams(-1, 0, 1f)); host.addView(layout); host.setup()
+        applySystemBarInsets(layout, 0, 0, 0, 0)
         host.addTab(host.newTabSpec("dvd").setIndicator("DVD Remux").setContent { dvd })
         host.addTab(host.newTabSpec("merger").setIndicator("Advanced Merger").setContent { advancedMerger.view })
         setContentView(host)
@@ -159,7 +160,6 @@ class MainActivity : Activity(), BillingManager.Listener {
             orientation = LinearLayout.VERTICAL
             setPadding(horizontalPadding, topPadding, horizontalPadding, bottomPadding)
         }
-        applySystemBarInsets(root, horizontalPadding, topPadding, horizontalPadding, bottomPadding)
         root.addView(TextView(this).apply {
             text = "MattMux"
             textSize = 30f

@@ -38,7 +38,8 @@ class AdvancedMergerPanel(private val activity: Activity) {
     val view: View
 
     init {
-        val content = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 24, 24, 24) }
+        val padding = (24 * activity.resources.displayMetrics.density).toInt()
+        val content = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(padding, padding, padding, padding) }
         fun button(label: String, action: () -> Unit) { content.addView(Button(activity).apply { text = label; setOnClickListener { action() }; controls += this }) }
         button("CHOOSE MOVIE FILES") { choose(0) }
         button("CHOOSE AUDIO FILES") { choose(1) }
