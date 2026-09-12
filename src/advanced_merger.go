@@ -48,6 +48,9 @@ func probeMergerFile(ctx context.Context, probe, path, kind string) ([]mergerStr
 			continue
 		}
 		t := trackOption{Index: raw.Index, Kind: raw.CodecType, Codec: raw.CodecName, Language: raw.Tags["language"], Title: raw.Tags["title"], Width: raw.Width, Height: raw.Height, Channels: raw.Channels, ChannelLayout: raw.ChannelLayout}
+		if t.Kind == "attachment" && t.Title == "" {
+			t.Title = raw.Tags["filename"]
+		}
 		streams = append(streams, mergerStream{abs, t})
 	}
 	if kind == "all" {
@@ -66,6 +69,10 @@ func probeMergerFile(ctx context.Context, probe, path, kind string) ([]mergerStr
 }
 
 func validateMergerChapters(ctx context.Context, probe, path string) error {
+	return validateMergerChapterSource(ctx, probe, path, false)
+}
+
+func validateMergerChapterSource(ctx context.Context, probe, path string, movieSource bool) error {
 	data, err := runMergerCommand(ctx, probe, "-v", "error", "-show_format", "-show_chapters", "-of", "json", path)
 	if err != nil {
 		return err
@@ -78,7 +85,7 @@ func validateMergerChapters(ctx context.Context, probe, path string) error {
 	if err = json.Unmarshal(data, &format); err != nil {
 		return err
 	}
-	if format.Format.Name != "ffmetadata" && !strings.Contains(format.Format.Name, "matroska") {
+	if !movieSource && format.Format.Name != "ffmetadata" && !strings.Contains(format.Format.Name, "matroska") {
 		return errors.New("choose FFMETADATA1 metadata or an MKV containing chapters")
 	}
 	var result ffprobeChapterResult
@@ -142,8 +149,14 @@ func mergerArgs(streams []mergerStream, chapters, output string) ([]string, erro
 			args = append(args, "-fflags", "+genpts", "-i", s.Path)
 		}
 	}
+	chapterIndex := -1
 	if chapters != "" {
-		args = append(args, "-i", chapters)
+		if index, ok := inputs[chapters]; ok {
+			chapterIndex = index
+		} else {
+			chapterIndex = len(inputs)
+			args = append(args, "-i", chapters)
+		}
 	}
 	seen := map[string]bool{}
 	for _, s := range streams {
@@ -153,23 +166,24 @@ func mergerArgs(streams []mergerStream, chapters, output string) ([]string, erro
 			seen[key] = true
 		}
 	}
-	args = append(args, "-map_metadata", "-1", "-map_chapters")
+	args = append(args, "-map_metadata", "0", "-map_chapters")
 	if chapters == "" {
 		args = append(args, "-1")
 	} else {
-		args = append(args, fmt.Sprint(len(inputs)))
+		args = append(args, fmt.Sprint(chapterIndex))
 	}
 	return append(args, "-c", "copy", "-f", "matroska", output), nil
 }
 
 func muxMerger(ctx context.Context, tools toolPaths, streams []mergerStream, chapters, output string) error {
+	movieChapters := chapters == ""
 	var selectionErr error
 	streams, chapters, selectionErr = resolveMergerSelection(streams, chapters)
 	if selectionErr != nil {
 		return selectionErr
 	}
 	if chapters != "" {
-		if err := validateMergerChapters(ctx, tools.ffprobe, chapters); err != nil {
+		if err := validateMergerChapterSource(ctx, tools.ffprobe, chapters, movieChapters); err != nil {
 			return err
 		}
 	}
