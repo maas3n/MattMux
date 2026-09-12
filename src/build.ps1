@@ -22,6 +22,10 @@ if ($sourceText.Contains($historicalMarker)) {
     $sourceText = $sourceText.Replace($historicalMarker, 'appVersion = "dev"')
     Set-Content -LiteralPath $windowsSource -Value $sourceText -Encoding UTF8 -NoNewline
 }
+if ($sourceText -notmatch 'appVersion\s*=\s*"([^"]+)"') {
+    throw 'Could not determine MattMux version for the Windows CLI build.'
+}
+$buildVersion = $Matches[1]
 
 $env:CGO_ENABLED = '0'
 $env:GOOS = 'windows'
@@ -29,5 +33,7 @@ $env:GOARCH = 'amd64'
 
 go test ./...
 go build -trimpath -buildvcs=false -ldflags "-s -w -H=windowsgui" -o ..\MattMux.exe .
+go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=$buildVersion" -o ..\mattmux-cli.exe .\cmd\mattmux-cli-windows
 Copy-Item .\MattMux.exe.manifest ..\MattMux.exe.manifest -Force
 Get-FileHash ..\MattMux.exe -Algorithm SHA256
+Get-FileHash ..\mattmux-cli.exe -Algorithm SHA256

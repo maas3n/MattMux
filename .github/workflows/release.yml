@@ -202,6 +202,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $ffDest,$miDest | Out-Null
 
           Copy-Item .\MattMux.exe (Join-Path $stage 'MattMux-Portable.exe') -Force
+          Copy-Item .\mattmux-cli.exe (Join-Path $stage 'mattmux-cli.exe') -Force
           Copy-Item .\src\MattMux.exe.manifest (Join-Path $stage 'MattMux-Portable.exe.manifest') -Force
           Copy-Item .\src\MattMux.ico (Join-Path $stage 'MattMux.ico') -Force
           Copy-Item .\THIRD_PARTY.md (Join-Path $stage 'THIRD_PARTY.md') -Force
@@ -213,6 +214,7 @@ jobs:
             "=========================",
             "",
             "Extract this entire folder and run MattMux-Portable.exe.",
+            "The included mattmux-cli.exe provides the Windows BATCH command-line mode.",
             "No installer is required and no FFmpeg, FFprobe, or MediaInfo download is required.",
             "",
             "Keep the folder together. Portable settings, logs, and bundled tools are stored under:",
@@ -367,7 +369,7 @@ jobs:
           test -x "$tmp/usr/bin/mattmux"
           test -x "$tmp/usr/bin/mattmux-cli"
           test -x "$tmp/usr/lib/mattmux/ffmpeg-bin/ffmpeg"
-          test -x "$tmp/usr/lib/mattmux/ffmpeg-bin/ffprobe"
+          test -x "$tmp/usr/lib/mattmux/ffprobe-bin/ffprobe" || test -x "$tmp/usr/lib/mattmux/ffmpeg-bin/ffprobe"
           test -x "$tmp/usr/lib/mattmux/mediainfo-bin/mediainfo"
 
           test -x "$standalone"

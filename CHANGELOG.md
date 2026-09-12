@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.7 — 2026-09-12
+
+- Add a desktop **BATCH** tab on Windows and Linux with a **ONECLICK BATCH MUX BUTTON** for collections laid out as `Movie Title/VIDEO_TS/VIDEO_TS.IFO`.
+- Discover each immediate movie-title folder, scan DVD titles through FFmpeg `dvdvideo` backed by `libdvdread`/`libdvdnav`, and automatically choose the longest readable title without restoring MattMux's removed `ReadDVDTitleCount()` path.
+- Remux each selected longest title with all streams and chapters using lossless stream copy and always apply `-analyzeduration 100M -probesize 100M -fflags +genpts` on the DVD input.
+- Default each completed MKV to its corresponding movie-title folder, with an optional common output folder in the BATCH UI.
+- Add Linux CLI batch mode: `mattmux-cli --batch [--log FILE] MOVIES_ROOT [OUTPUT_ROOT]`; `--log` is optional and batch output defaults to each movie folder when `OUTPUT_ROOT` is omitted.
+- Add a Windows `mattmux-cli.exe` batch executable with the same `--batch` / optional `--log` interface and package it with Setup and Portable distributions.
+- Keep Android/ChromeOS product behavior unchanged from 1.4.6.
+
 ## 1.4.6 — 2026-09-12
 
 - Keep the 1.4.5 Windows/Linux **Scan Titles** implementation unchanged: title discovery remains entirely on FFmpeg `dvdvideo` with `libdvdread`/`libdvdnav`, and MattMux's old `ReadDVDTitleCount()` parser stays removed.

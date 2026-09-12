@@ -31,7 +31,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            gcc g++ cmake ninja-build curl xz-utils file \
+            gcc g++ cmake ninja-build curl xz-utils file ffmpeg dvdauthor \
             libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
 
       - name: Verify Go module metadata
@@ -40,12 +40,80 @@ jobs:
           go mod tidy
           git diff --exit-code -- go.mod go.sum
 
+      - name: Test Linux GUI and batch core
+        working-directory: src
+        run: |
+          go test ./...
+          go vet ./...
+
+      - name: Test Linux CLI batch mode
+        working-directory: src
+        run: |
+          go test -tags cli ./...
+          go build -tags cli -trimpath -o /tmp/mattmux-cli .
+          /tmp/mattmux-cli --version
+          /tmp/mattmux-cli --help >/tmp/mattmux-help.txt 2>&1 || true
+          grep -F -- '--batch' /tmp/mattmux-help.txt
+
       - name: Validate Debian preview version ordering
         run: |
           dpkg --compare-versions '1.4.1~alpha.1' lt '1.4.1~beta.1'
           dpkg --compare-versions '1.4.1~beta.1' lt '1.4.1~rc.1'
           dpkg --compare-versions '1.4.1~rc.1' lt '1.4.1'
           dpkg --compare-versions '1.4.1' lt '1.4.2~alpha.1'
+
+      - name: Author real two-title VIDEO_TS fixture
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/mattmux-batch-e2e"
+          root="$work/movies"
+          movie="$root/Integration Movie"
+          out="$work/out"
+          rm -rf "$work"
+          mkdir -p "$movie" "$out"
+
+          make_title() {
+            seconds="$1"
+            dest="$2"
+            ffmpeg -hide_banner -loglevel warning -y \
+              -f lavfi -i "testsrc2=size=720x480:rate=30000/1001" \
+              -f lavfi -i "sine=frequency=440:sample_rate=48000" \
+              -f lavfi -i "sine=frequency=880:sample_rate=48000" \
+              -t "$seconds" \
+              -map 0:v:0 -map 1:a:0 -map 2:a:0 \
+              -c:v mpeg2video -pix_fmt yuv420p -r 30000/1001 -g 18 -aspect 4:3 \
+              -b:v 2500k -maxrate 7000k -bufsize 1835008 \
+              -c:a ac3 -ar 48000 -b:a 192k \
+              -f dvd "$dest"
+            test -s "$dest"
+          }
+          make_title 1 "$work/short.mpg"
+          make_title 3 "$work/long.mpg"
+
+          cat >"$work/dvd.xml" <<EOF
+          <dvdauthor dest="$movie" format="ntsc">
+            <vmgm />
+            <titleset>
+              <titles>
+                <pgc><vob file="$work/short.mpg" /></pgc>
+              </titles>
+            </titleset>
+            <titleset>
+              <titles>
+                <pgc><vob file="$work/long.mpg" /></pgc>
+              </titles>
+            </titleset>
+          </dvdauthor>
+          EOF
+          if ! dvdauthor -x "$work/dvd.xml" 2>&1 | tee "$work/dvdauthor.log"; then
+            echo 'dvdauthor failed; generated XML follows:' >&2
+            cat "$work/dvd.xml" >&2
+            exit 1
+          fi
+          find "$movie" -maxdepth 2 -type f -printf '%P\n' | sort
+          test -s "$movie/VIDEO_TS/VIDEO_TS.IFO"
+          test -s "$movie/VIDEO_TS/VTS_01_0.IFO"
+          test -s "$movie/VIDEO_TS/VTS_02_0.IFO"
 
       - name: Build GUI, CLI, self-contained DEB, tarballs and standalone
         run: |
@@ -80,6 +148,44 @@ jobs:
           "$tmp/usr/lib/mattmux/ffmpeg-bin/ffmpeg" -hide_banner -demuxers 2>/dev/null | grep dvdvideo
           "$tmp/usr/lib/mattmux/ffmpeg-bin/ffprobe" -version | head -n 1
           "$tmp/usr/lib/mattmux/mediainfo-bin/mediainfo" --Version | head -n 4
+
+      - name: Real VIDEO_TS one-click batch integration
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/mattmux-batch-e2e"
+          root="$work/movies"
+          out="$work/out"
+          log="$work/batch.log"
+          deb="dist/linux-release/MattMux-$MATTMUX_CI_VERSION-Linux-amd64.deb"
+          pkg="$work/pkg"
+          dpkg-deb --extract "$deb" "$pkg"
+          cli="$pkg/usr/lib/mattmux/app/mattmux-cli-bin"
+          ffprobe="$pkg/usr/lib/mattmux/ffmpeg-bin/ffprobe"
+          ffmpeg_private="$pkg/usr/lib/mattmux/ffmpeg-bin/ffmpeg"
+          test -x "$cli"
+          test -x "$ffprobe"
+          "$ffmpeg_private" -hide_banner -demuxers 2>&1 | tee "$work/demuxers.txt"
+          grep -F dvdvideo "$work/demuxers.txt"
+
+          set +e
+          PATH="$pkg/usr/lib/mattmux/ffmpeg-bin:$pkg/usr/lib/mattmux/mediainfo-bin:$PATH" \
+            "$cli" --batch --log="$log" "$root" "$out"
+          batch_rc=$?
+          set -e
+          cat "$log" || true
+          if [[ $batch_rc -ne 0 ]]; then
+            echo "mattmux-cli batch failed with exit code $batch_rc" >&2
+            exit "$batch_rc"
+          fi
+
+          final="$out/Integration Movie.mkv"
+          test -s "$final"
+          grep -F 'selected longest title 2' "$log"
+          "$ffprobe" -v error -show_streams "$final"
+          video_count="$("$ffprobe" -v error -select_streams v -show_entries stream=index -of csv=p=0 "$final" | wc -l)"
+          audio_count="$("$ffprobe" -v error -select_streams a -show_entries stream=index -of csv=p=0 "$final" | wc -l)"
+          test "$video_count" -eq 1
+          test "$audio_count" -eq 2
 
       - name: Validate single-file standalone executable
         run: |

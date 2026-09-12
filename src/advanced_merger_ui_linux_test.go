@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-func TestAdvancedMergerTab(t *testing.T) {
+func TestAdvancedMergerAndBatchTabs(t *testing.T) {
 	a := test.NewApp()
 	defer a.Quit()
 	w := a.NewWindow("test")
@@ -22,11 +22,17 @@ func TestAdvancedMergerTab(t *testing.T) {
 	if !ok {
 		t.Fatal("missing tabs")
 	}
-	if len(tabs.Items) != 2 || tabs.Items[1].Text != "Advanced Merger" {
+	if len(tabs.Items) != 3 {
+		t.Fatalf("tabs = %d; want 3", len(tabs.Items))
+	}
+	if tabs.Items[1].Text != "Advanced Merger" {
 		t.Fatal("missing Advanced Merger tab")
 	}
+	if tabs.Items[2].Text != "BATCH" {
+		t.Fatal("missing BATCH tab")
+	}
 	w.Resize(fyne.NewSize(840, 620))
-	tabs.SelectIndex(1)
+	tabs.SelectIndex(2)
 	if path := os.Getenv("MATTMUX_UI_CAPTURE"); path != "" {
 		f, err := os.Create(path)
 		if err != nil {
@@ -37,7 +43,7 @@ func TestAdvancedMergerTab(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if tabs.SelectedIndex() != 1 {
-		t.Fatal("cannot select merger tab")
+	if tabs.SelectedIndex() != 2 {
+		t.Fatal("cannot select BATCH tab")
 	}
 }

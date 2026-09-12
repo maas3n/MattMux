@@ -25,6 +25,10 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if os.Args[1] == "--batch" {
+		cliBatch(ctx, os.Args[2:])
+		return
+	}
 	switch os.Args[1] {
 	case "tools", "doctor":
 		fmt.Println(toolSummary(ctx))
@@ -49,10 +53,18 @@ Usage:
   mattmux-cli scan SOURCE
   mattmux-cli metadata [--title N] SOURCE
   mattmux-cli remux [--title N] [--output DIR] [--no-chapters] SOURCE
+  mattmux-cli --batch [--log FILE] MOVIES_ROOT [OUTPUT_ROOT]
   mattmux-cli --version
 
 SOURCE may be a DVD directory/VIDEO_TS structure or an ISO image.
 If --title is omitted, MattMux scans the disc and selects the longest title.
+
+Batch mode expects MOVIES_ROOT to contain movie folders with VIDEO_TS subfolders.
+Each movie is scanned through FFmpeg dvdvideo/libdvdread/libdvdnav, the longest title
+is selected automatically, and all streams are remuxed losslessly to MKV. When
+OUTPUT_ROOT is omitted, each MKV is written into its corresponding movie folder.
+--log is optional and appends batch activity to the chosen file.
+
 The CLI first uses compatible ffmpeg/ffprobe binaries already installed on PATH.
 If system FFmpeg lacks the dvdvideo demuxer, MattMux prepares its pinned fallback.
 `, appVersion)
@@ -68,6 +80,42 @@ func cliStatus(frac float64, status string) {
 		fmt.Fprintln(os.Stderr, status)
 	}
 }
+
+func cliBatch(ctx context.Context, args []string) {
+	fs := flag.NewFlagSet("--batch", flag.ExitOnError)
+	logPath := fs.String("log", "", "optional batch log file")
+	fs.Usage = func() { fmt.Fprintln(os.Stderr, "Usage: mattmux-cli --batch [--log FILE] MOVIES_ROOT [OUTPUT_ROOT]") }
+	_ = fs.Parse(args)
+	if fs.NArg() < 1 || fs.NArg() > 2 {
+		fs.Usage()
+		os.Exit(2)
+	}
+	inputRoot := fs.Arg(0)
+	outputRoot := ""
+	if fs.NArg() == 2 {
+		outputRoot = fs.Arg(1)
+	}
+	var logFile *os.File
+	if strings.TrimSpace(*logPath) != "" {
+		abs, err := filepath.Abs(strings.TrimSpace(*logPath))
+		fatalIf(err)
+		if err := os.MkdirAll(filepath.Dir(abs), 0755); err != nil {
+			fatalIf(fmt.Errorf("create log folder: %w", err))
+		}
+		logFile, err = os.OpenFile(abs, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		fatalIf(err)
+		defer logFile.Close()
+		fmt.Fprintf(os.Stderr, "Batch log: %s\n", abs)
+	}
+	result, err := runBatch(ctx, batchOptions{InputRoot: inputRoot, OutputRoot: outputRoot, Log: logFile}, func(frac float64, status string) {
+		cliStatus(frac, status)
+	})
+	for _, output := range result.Outputs {
+		fmt.Println(output)
+	}
+	fatalIf(err)
+}
+
 func cliScan(ctx context.Context, args []string) {
 	fs := flag.NewFlagSet("scan", flag.ExitOnError)
 	fs.Usage = func() { fmt.Fprintln(os.Stderr, "Usage: mattmux-cli scan SOURCE") }
