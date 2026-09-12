@@ -127,6 +127,14 @@ jobs:
           test -s dist/MattMux-1.4.2-Android-DEBUG.apk
           test -s dist/MattMux-1.4.2-Android-DEBUG.apk.sha256
 
+      - name: Upload DEBUG build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MattMux-1.4.2-Android-DEBUG-build-log
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/mattmux-v142-android-debug-build.log
+
       - name: Upload DEBUG APK as workflow artifact
         uses: actions/upload-artifact@v4
         with:
