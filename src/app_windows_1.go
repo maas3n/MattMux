@@ -177,7 +177,8 @@ func windowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		}
 		return 0
 	case 0x004e:
-		header := (*mergerNotifyHeader)(unsafe.Pointer(lParam))
+		var header mergerNotifyHeader
+		kernel32.NewProc("RtlMoveMemory").Call(uintptr(unsafe.Pointer(&header)), lParam, unsafe.Sizeof(header))
 		if header.From == mergerWindow.tab && header.Code == -551 {
 			showMergerWindowsTab()
 			return 0
