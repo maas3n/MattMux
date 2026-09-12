@@ -67,7 +67,7 @@ jobs:
 
       - name: Upload remux parity diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: remux-parity-${{ github.run_id }}
           if-no-files-found: ignore
@@ -102,7 +102,7 @@ jobs:
             -c -P 16 -v 4 "${APK}"
 
       - name: Upload Android artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: MattMux-Android-ChromeOS-dev
           if-no-files-found: error

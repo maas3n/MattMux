@@ -310,7 +310,7 @@ jobs:
           $lines | Set-Content -LiteralPath .\dist\SHA256SUMS-Windows.txt -Encoding ASCII
 
       - name: Upload Windows release payload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-windows
           if-no-files-found: error
@@ -386,7 +386,7 @@ jobs:
           rm -f SHA256SUMS.txt
 
       - name: Upload Linux release payload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-linux
           if-no-files-found: error
@@ -516,7 +516,7 @@ jobs:
           )
 
       - name: Upload Android / ChromeOS release payload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-android
           if-no-files-found: error
