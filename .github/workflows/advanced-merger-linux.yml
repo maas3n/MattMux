@@ -30,7 +30,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            gcc g++ cmake ninja-build curl xz-utils file ffmpeg \
+            gcc g++ cmake ninja-build curl xz-utils file ffmpeg xvfb \
             libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
 
       - name: Test Advanced Merger with real media and headless UI
@@ -83,6 +83,21 @@ jobs:
           "$tmp/usr/lib/mattmux/ffmpeg-bin/ffmpeg" -hide_banner -demuxers 2>/dev/null | grep dvdvideo
           "$tmp/usr/lib/mattmux/ffmpeg-bin/ffprobe" -version | head -n 1
           "$tmp/usr/lib/mattmux/mediainfo-bin/mediainfo" --Version | head -n 4
+
+      - name: Exercise packaged FFmpeg and launch packaged GUI
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          dpkg-deb --extract "dist/linux-release/MattMux-$MATTMUX_CI_VERSION-Linux-amd64.deb" "$tmp"
+          export PATH="$tmp/usr/lib/mattmux/ffmpeg-bin:$PATH"
+          (cd src && go test -tags cli -run TestMerger -count=1 -v)
+          set +e
+          xvfb-run -a timeout 8s "$tmp/usr/lib/mattmux/app/mattmux-bin" > "$tmp/gui.log" 2>&1
+          result=$?
+          set -e
+          cat "$tmp/gui.log"
+          test "$result" -eq 124
 
       - name: Validate single-file standalone executable
         run: |

@@ -8,9 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -70,8 +72,8 @@ func validateMergerChapters(ctx context.Context, probe, path string) error {
 		return err
 	}
 	defer f.Close()
-	header, err := bufio.NewReader(f).ReadString('\n')
-	if (err != nil && len(header) == 0) || strings.TrimRight(header, "\r\n") != ";FFMETADATA1" {
+	header, err := bufio.NewReader(f).ReadSlice('\n')
+	if (err != nil) || strings.TrimRight(string(header), "\r\n") != ";FFMETADATA1" {
 		return errors.New("chapter file must start with ;FFMETADATA1 on its own line")
 	}
 	data, err := runCommand(ctx, probe, "-v", "error", "-f", "ffmetadata", "-show_chapters", "-of", "json", path)
@@ -84,6 +86,13 @@ func validateMergerChapters(ctx context.Context, probe, path string) error {
 	}
 	if len(result.Chapters) == 0 {
 		return errors.New("chapter file contains no chapters")
+	}
+	for _, chapter := range result.Chapters {
+		start, e1 := strconv.ParseFloat(chapter.StartTime, 64)
+		end, e2 := strconv.ParseFloat(chapter.EndTime, 64)
+		if e1 != nil || e2 != nil || math.IsNaN(start) || math.IsNaN(end) || math.IsInf(start, 0) || math.IsInf(end, 0) || start < 0 || end <= start {
+			return errors.New("chapter timestamps must have a nonnegative start and an end after the start")
+		}
 	}
 	return nil
 }

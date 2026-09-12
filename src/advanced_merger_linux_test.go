@@ -142,3 +142,32 @@ func TestMergerFFmpegIntegration(t *testing.T) {
 		t.Fatal("cancel left final file")
 	}
 }
+
+func TestMergerRawVideo(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg required")
+	}
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	for _, tc := range []struct{ ext, codec string }{{"h264", "libx264"}, {"m2v", "mpeg2video"}, {"vob", "mpeg2video"}} {
+		t.Run(tc.ext, func(t *testing.T) {
+			dir := t.TempDir()
+			raw := filepath.Join(dir, "raw."+tc.ext)
+			if _, err := runCommand(ctx, ffmpeg, "-v", "error", "-f", "lavfi", "-i", "color=size=32x32:rate=25:duration=1", "-c:v", tc.codec, "-bf", "0", raw); err != nil {
+				t.Fatal(err)
+			}
+			streams, err := probeMergerFile(ctx, ffprobe, raw, "video")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = muxMerger(ctx, toolPaths{ffmpeg: ffmpeg, ffprobe: ffprobe}, streams, "", filepath.Join(dir, "out.mkv")); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

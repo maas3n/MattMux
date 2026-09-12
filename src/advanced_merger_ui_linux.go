@@ -29,6 +29,7 @@ func (g *linuxGUI) buildAdvancedMerger() fyne.CanvasObject {
 	status := widget.NewLabel("Choose files, then select the streams to include.")
 	status.Wrapping = fyne.TextWrapWord
 	var controls []fyne.Disableable
+	var baseControlCount int
 	var cancel context.CancelFunc
 	cancelBtn := widget.NewButton("Cancel", func() {
 		if cancel != nil {
@@ -216,11 +217,13 @@ func (g *linuxGUI) buildAdvancedMerger() fyne.CanvasObject {
 	clear := widget.NewButton("Clear streams", func() {
 		streams = nil
 		checks = nil
+		controls = controls[:baseControlCount]
 		list.Objects = nil
 		list.Refresh()
 		status.SetText("Choose files to add streams.")
 	})
 	controls = []fyne.Disableable{movies, audio, subs, chapters, folder, mux, clear, chapter, output, name}
+	baseControlCount = len(controls)
 	scroll := container.NewVScroll(list)
 	return container.NewBorder(container.NewVBox(container.NewGridWithColumns(3, movies, audio, subs), widget.NewLabel("Select Streams")), container.NewVBox(clear, container.NewBorder(nil, nil, nil, chapters, chapter), container.NewBorder(nil, nil, nil, folder, output), container.NewBorder(nil, nil, widget.NewLabel("Output filename"), nil, name), status, container.NewHBox(mux, cancelBtn)), nil, nil, scroll)
 }
