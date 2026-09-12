@@ -1,0 +1,54 @@
+name: Fix Advanced Merger Android insets
+
+on:
+  push:
+    branches:
+      - feature/advanced-merger
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/advanced-merger
+          fetch-depth: 0
+
+      - name: Move system-bar insets to the tab container
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('android/app/src/main/java/io/github/maas3n/mattmux/MainActivity.kt')
+          text = path.read_text()
+          old = '        layout.addView(tabs); layout.addView(frame, LinearLayout.LayoutParams(-1, 0, 1f)); host.addView(layout); host.setup()\n'
+          new = old + '        applySystemBarInsets(layout, 0, 0, 0, 0)\n'
+          if old not in text:
+              raise SystemExit('Tab layout insertion point not found')
+          text = text.replace(old, new, 1)
+          old_inset = '        applySystemBarInsets(root, horizontalPadding, topPadding, horizontalPadding, bottomPadding)\n'
+          if old_inset not in text:
+              raise SystemExit('DVD root inset call not found')
+          text = text.replace(old_inset, '', 1)
+          path.write_text(text)
+
+          path = Path('android/app/src/main/java/io/github/maas3n/mattmux/AdvancedMergerPanel.kt')
+          text = path.read_text()
+          old = '        val content = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 24, 24, 24) }\n'
+          new = '        val padding = (24 * activity.resources.displayMetrics.density).toInt()\n        val content = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(padding, padding, padding, padding) }\n'
+          if old not in text:
+              raise SystemExit('Advanced Merger padding line not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Commit fix and remove helper
+        run: |
+          rm .github/workflows/fix-advanced-merger-android-insets.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Keep Android merger tabs clear of system bars"
+          git push origin HEAD:feature/advanced-merger
