@@ -14,6 +14,15 @@ stream properties, common-clock PTS/DTS and chapters. The harness supplies cell
 and chapter arrays directly; it does not claim to test real IFO navigation.
 The host-only test library is never packaged in the Android APK.
 
+The same harness also runs a second PAL fixture with two B-frames and sparse
+video PES timestamps. It retains the initial clock anchor and replaces later
+optional PTS/DTS fields with stuffing without modifying compressed payloads.
+The fixture must expose missing video PTS to ordinary demuxing. Both folder and
+ISO remuxes must succeed, including video-only selection; packet hashes and
+presentation timestamps are checked against the fully timestamped original.
+The timing tolerance is 1 ms for Matroska clock quantization, using one shared
+A/V origin. This covers missing PTS, not DVD cell clock discontinuities.
+
 `DvdIfoParserTest` separately verifies IFO selection, angle-1 cell ranges, chapters,
 BCD validation and stable `diagnosticJson()`. The app logs the selected plan under
 `MattMuxPlan`; successful `RemuxResult` also carries it as `planJson`.

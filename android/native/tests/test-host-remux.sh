@@ -22,3 +22,20 @@ java -cp "${TEST_WORK}/classes" io.github.maas3n.mattmux.AndroidNativeRemuxEngin
   "${TEST_WORK}/libmattmux_host_test.so" "${TEST_WORK}"
 python3 "${ROOT}/android/native/tests/remux_fingerprint.py" "${TEST_WORK}/folder.mkv" "${TEST_WORK}/iso.mkv" "${TEST_WORK}/input.vob"
 ffprobe -v error -show_entries stream=codec_type -of json "${TEST_WORK}/selected.mkv" | python3 -c 'import json,sys; streams=json.load(sys.stdin)["streams"]; assert len(streams)==1 and streams[0]["codec_type"]=="video", streams'
+
+# Exercise the production JNI with omitted PES timestamps and reordered frames.
+# The original fixture remains a separate baseline; do not replace its coverage.
+SPARSE_WORK="${TEST_WORK}/sparse"
+mkdir -p "$SPARSE_WORK"
+ffmpeg -v error -f lavfi -i 'testsrc2=size=720x576:rate=25' \
+  -f lavfi -i 'sine=frequency=440:sample_rate=48000' -t 2 -target pal-dvd -bf 2 \
+  -y "${SPARSE_WORK}/reference.vob"
+python3 "${ROOT}/android/native/tests/sparse_timestamps.py" make \
+  "${SPARSE_WORK}/reference.vob" "${SPARSE_WORK}/input.vob"
+python3 "${ROOT}/android/native/tests/make_remux_iso.py" "$SPARSE_WORK"
+java -cp "${TEST_WORK}/classes" io.github.maas3n.mattmux.AndroidNativeRemuxEngine \
+  "${TEST_WORK}/libmattmux_host_test.so" "$SPARSE_WORK"
+python3 "${ROOT}/android/native/tests/remux_fingerprint.py" \
+  "${SPARSE_WORK}/folder.mkv" "${SPARSE_WORK}/iso.mkv" "${SPARSE_WORK}/input.vob"
+python3 "${ROOT}/android/native/tests/sparse_timestamps.py" verify \
+  "${SPARSE_WORK}/reference.vob" "${SPARSE_WORK}/folder.mkv"

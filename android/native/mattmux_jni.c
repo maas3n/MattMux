@@ -17,6 +17,7 @@
 #include <libavutil/mathematics.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/mem.h>
+#include <libavutil/timestamp.h>
 
 #define IO_BUFFER_SIZE (64 * 1024)
 #define DVD_SECTOR_SIZE 2048LL
@@ -623,6 +624,10 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
     input->flags |= AVFMT_FLAG_CUSTOM_IO;
     ret = avformat_open_input(&input, NULL, NULL, NULL);
     if (ret < 0) { ff_error(error, sizeof(error), "Could not open selected DVD program stream", ret); goto cleanup; }
+    /* MPEG-PS may omit PTS on reordered video packets. Let the demuxer look
+       ahead to derive presentation timing; copying DTS to PTS would break
+       B-frame presentation order. Keep the common A/V origin below. */
+    input->flags |= AVFMT_FLAG_GENPTS;
     ret = avformat_find_stream_info(input, NULL);
     if (ret < 0) { ff_error(error, sizeof(error), "Could not probe DVD streams", ret); goto cleanup; }
 
@@ -704,8 +709,17 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
             packet->stream_index = out_index;
             av_packet_rescale_ts(packet, in_stream->time_base, out_stream->time_base);
             packet->pos = -1;
+            /* The interleaver consumes packet even on failure. Capture context
+               first; it may also fail while flushing an earlier queued packet. */
+            char write_step[256];
+            snprintf(write_step, sizeof(write_step),
+                "Matroska write failed while submitting %s stream %d (%s; pts=%s, dts=%s, time_base=%d/%d)",
+                track_type_name(in_stream->codecpar->codec_type), in_index,
+                avcodec_get_name(in_stream->codecpar->codec_id),
+                av_ts2str(packet->pts), av_ts2str(packet->dts),
+                out_stream->time_base.num, out_stream->time_base.den);
             ret = av_interleaved_write_frame(out, packet);
-            if (ret < 0) { ff_error(error, sizeof(error), "Matroska write failed", ret); av_packet_unref(packet); break; }
+            if (ret < 0) { ff_error(error, sizeof(error), write_step, ret); av_packet_unref(packet); break; }
         }
         av_packet_unref(packet);
         int percent = source.stream_size > 0 ? (int)((source.pos * 100) / source.stream_size) : 0;
