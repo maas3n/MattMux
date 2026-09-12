@@ -5,11 +5,13 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Typeface
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsets
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -137,10 +139,14 @@ class MainActivity : Activity(), BillingManager.Listener {
     }
 
     private fun buildUi(): ViewGroup {
+        val horizontalPadding = dp(28)
+        val topPadding = dp(24)
+        val bottomPadding = dp(28)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(28), dp(24), dp(28), dp(28))
+            setPadding(horizontalPadding, topPadding, horizontalPadding, bottomPadding)
         }
+        applySystemBarInsets(root, horizontalPadding, topPadding, horizontalPadding, bottomPadding)
         root.addView(TextView(this).apply {
             text = "MattMux"
             textSize = 30f
@@ -191,6 +197,25 @@ class MainActivity : Activity(), BillingManager.Listener {
         root.addView(cancelButton)
 
         return ScrollView(this).apply { addView(root) }
+    }
+
+    private fun applySystemBarInsets(view: View, left: Int, top: Int, right: Int, bottom: Int) {
+        view.setOnApplyWindowInsetsListener { target, insets ->
+            val topInset: Int
+            val bottomInset: Int
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                topInset = insets.getInsets(WindowInsets.Type.statusBars()).top
+                bottomInset = insets.getInsets(WindowInsets.Type.navigationBars()).bottom
+            } else {
+                @Suppress("DEPRECATION")
+                topInset = insets.systemWindowInsetTop
+                @Suppress("DEPRECATION")
+                bottomInset = insets.systemWindowInsetBottom
+            }
+            target.setPadding(left, top + topInset, right, bottom + bottomInset)
+            insets
+        }
+        view.post { view.requestApplyInsets() }
     }
 
     private fun startRemux() {
