@@ -72,12 +72,11 @@ jobs:
           log="$work/batch.log"
           mkdir -p "$movie" "$out"
 
-          # Author two real DVD titles. Title 2 is deliberately longer, and both
-          # titles carry one MPEG-2 video stream plus two AC-3 audio streams.
+          echo 'Creating DVD-compliant MPEG program streams...'
           make_title() {
             seconds="$1"
             dest="$2"
-            ffmpeg -hide_banner -loglevel error -y \
+            ffmpeg -hide_banner -loglevel warning -y \
               -f lavfi -i "testsrc2=size=720x480:rate=30000/1001" \
               -f lavfi -i "sine=frequency=440:sample_rate=48000" \
               -f lavfi -i "sine=frequency=880:sample_rate=48000" \
@@ -87,21 +86,35 @@ jobs:
               -b:v 2500k -maxrate 7000k -bufsize 1835008 \
               -c:a ac3 -ar 48000 -b:a 192k \
               -f dvd "$dest"
+            test -s "$dest"
           }
           make_title 1 "$work/short.mpg"
           make_title 3 "$work/long.mpg"
+
+          echo 'Authoring a real VIDEO_TS with two DVD titles...'
+          # Separate titlesets give us two globally addressable DVD titles while
+          # keeping the fixture simple and standards-compliant.
           cat >"$work/dvd.xml" <<EOF
           <dvdauthor dest="$movie">
             <vmgm />
             <titleset>
               <titles>
                 <pgc><vob file="$work/short.mpg" /></pgc>
+              </titles>
+            </titleset>
+            <titleset>
+              <titles>
                 <pgc><vob file="$work/long.mpg" /></pgc>
               </titles>
             </titleset>
           </dvdauthor>
           EOF
-          dvdauthor -x "$work/dvd.xml" >/tmp/dvdauthor.log 2>&1
+          if ! dvdauthor -x "$work/dvd.xml" 2>&1 | tee "$work/dvdauthor.log"; then
+            echo 'dvdauthor failed; generated XML follows:' >&2
+            cat "$work/dvd.xml" >&2
+            exit 1
+          fi
+          find "$movie" -maxdepth 2 -type f -printf '%P\n' | sort
           test -s "$movie/VIDEO_TS/VIDEO_TS.IFO"
 
           deb="dist/linux-release/MattMux-$MATTMUX_CI_VERSION-Linux-amd64.deb"
@@ -112,15 +125,28 @@ jobs:
           ffmpeg_private="$pkg/usr/lib/mattmux/ffmpeg-bin/ffmpeg"
           test -x "$cli"
           test -x "$ffprobe"
-          "$ffmpeg_private" -hide_banner -demuxers 2>/dev/null | grep -F dvdvideo
+          echo 'Verifying packaged FFmpeg dvdvideo/libdvdread/libdvdnav support...'
+          "$ffmpeg_private" -hide_banner -demuxers 2>&1 | tee "$work/demuxers.txt"
+          grep -F dvdvideo "$work/demuxers.txt"
 
+          echo 'Running the packaged CLI against the authored VIDEO_TS...'
+          set +e
           PATH="$pkg/usr/lib/mattmux/ffmpeg-bin:$pkg/usr/lib/mattmux/mediainfo-bin:$PATH" \
             "$cli" --batch --log="$log" "$root" "$out"
+          batch_rc=$?
+          set -e
+          cat "$log" || true
+          if [[ $batch_rc -ne 0 ]]; then
+            echo "mattmux-cli batch failed with exit code $batch_rc" >&2
+            exit "$batch_rc"
+          fi
+
           final="$out/Integration Movie.mkv"
           test -s "$final"
           grep -F 'selected longest title 2' "$log"
 
           # The remux must contain every media stream from the DVD title.
+          "$ffprobe" -v error -show_streams "$final"
           video_count="$("$ffprobe" -v error -select_streams v -show_entries stream=index -of csv=p=0 "$final" | wc -l)"
           audio_count="$("$ffprobe" -v error -select_streams a -show_entries stream=index -of csv=p=0 "$final" | wc -l)"
           test "$video_count" -eq 1
