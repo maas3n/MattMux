@@ -157,6 +157,7 @@ func createControls(hwnd, hInstance uintptr) {
 	app.progress = add(0, "msctls_progress32", "", WS_CHILD|WS_VISIBLE, 28, 450, 764, 16, 0, app.bodyFont)
 	procSendMessageW.Call(app.progress, PBM_SETRANGE32, 0, 1000)
 	app.statusText = add(0, "STATIC", "", WS_CHILD|WS_VISIBLE, 30, 474, 755, 42, 0, app.bodyFont)
+	add(0, "STATIC", "Remux uses fixed timestamps (-fflags +genpts).", WS_CHILD|WS_VISIBLE, 30, 516, 480, 18, 0, app.bodyFont)
 	app.remuxBtn = add(0, "BUTTON", "Start Remux", WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_DEFPUSHBUTTON, 538, 535, 132, 38, idRemuxBtn, app.bodyFont)
 	app.cancelBtn = add(0, "BUTTON", "Cancel", WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_PUSHBUTTON, 680, 535, 110, 38, idCancelBtn, app.bodyFont)
 	procEnableWindow.Call(app.cancelBtn, 0)
