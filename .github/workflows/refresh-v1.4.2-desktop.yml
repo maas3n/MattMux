@@ -1,0 +1,410 @@
+name: Refresh v1.4.2 desktop release
+
+on:
+  push:
+    branches:
+      - fix/desktop-genpts-title-scan
+    paths:
+      - '.github/workflows/refresh-v1.4.2-desktop.yml'
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_TAG: v1.4.2
+  RELEASE_VERSION: '1.4.2'
+  WINDOWS_NUMERIC_VERSION: '1.4.2.0'
+  SOURCE_SHA: f292cc17332f2b92dd85c6bdc894f020c1a47dfe
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Check out exact main source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+
+      - name: Set up Go 1.27.1
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.1'
+          cache: false
+
+      - name: Inject release version into Windows source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:RELEASE_VERSION
+          $path = '.\src\app_windows.go'
+          $text = Get-Content -LiteralPath $path -Raw
+          $old = 'appVersion = "1.2.0"'
+          if (-not $text.Contains($old)) {
+            throw "Windows version declaration changed; update release version injection."
+          }
+          $text = $text.Replace($old, "appVersion = `"$version`"")
+          Set-Content -LiteralPath $path -Value $text -Encoding UTF8 -NoNewline
+
+      - name: Test and build Windows GUI
+        shell: pwsh
+        working-directory: src
+        run: |
+          $ErrorActionPreference = 'Stop'
+          go test ./...
+          go vet ./...
+          .\build.ps1
+
+      - name: Prepare pinned bundled runtime tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ffTag = 'autobuild-2026-09-08-23-15'
+          $ffAsset = 'ffmpeg-N-126479-g08cd8df29d-win64-gpl-shared.zip'
+          $ffManifestSha = 'f64be162403094773397bfcc299a4a059507028afa7563591fd05c17d56b3214'
+          $miVersion = '26.05'
+          $miAsset = 'MediaInfo_CLI_26.05_Windows_x64.zip'
+          $miSha = 'f7f80620ce6d14f4995f0de6f98e3ef18ad29496db01899571152ee3311229f9'
+          $work = Join-Path $env:RUNNER_TEMP 'mattmux-bundled-tools'
+          $stage = Join-Path $PWD 'packaging\installer\bundled-tools'
+          Remove-Item $work,$stage -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $work,$stage | Out-Null
+
+          function Assert-Sha([string]$Path,[string]$Expected) {
+            $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+            if ($got -ne $Expected.ToLowerInvariant()) {
+              throw "SHA-256 mismatch for $Path`nExpected: $Expected`nActual:   $got"
+            }
+          }
+
+          $ffBase = "https://github.com/BtbN/FFmpeg-Builds/releases/download/$ffTag"
+          $manifest = Join-Path $work 'checksums.sha256'
+          Invoke-WebRequest -UseBasicParsing -Uri "$ffBase/checksums.sha256" -OutFile $manifest
+          Assert-Sha $manifest $ffManifestSha
+          $manifestText = Get-Content -LiteralPath $manifest -Raw
+          $escaped = [regex]::Escape($ffAsset)
+          $match = [regex]::Match($manifestText, "(?im)^([0-9a-f]{64})\s+\*?$escaped\s*$")
+          if (-not $match.Success) { throw "Verified FFmpeg manifest does not contain $ffAsset" }
+          $ffArchiveSha = $match.Groups[1].Value.ToLowerInvariant()
+          $ffArchive = Join-Path $work $ffAsset
+          Invoke-WebRequest -UseBasicParsing -Uri "$ffBase/$ffAsset" -OutFile $ffArchive
+          Assert-Sha $ffArchive $ffArchiveSha
+
+          $ffExtract = Join-Path $work 'ffmpeg'
+          Expand-Archive -LiteralPath $ffArchive -DestinationPath $ffExtract -Force
+          $ffmpeg = Get-ChildItem $ffExtract -Filter ffmpeg.exe -File -Recurse | Select-Object -First 1
+          if ($null -eq $ffmpeg) { throw 'ffmpeg.exe missing from verified archive' }
+          $ffBin = $ffmpeg.Directory.FullName
+          if (-not (Test-Path (Join-Path $ffBin 'ffprobe.exe'))) { throw 'ffprobe.exe missing from verified archive' }
+          $ffDest = Join-Path $stage 'ffmpeg-2026-09-08'
+          New-Item -ItemType Directory -Force -Path $ffDest | Out-Null
+          Copy-Item (Join-Path $ffBin '*') $ffDest -Force
+
+          $miArchive = Join-Path $work $miAsset
+          Invoke-WebRequest -UseBasicParsing -Uri "https://mediaarea.net/download/binary/mediainfo/$miVersion/$miAsset" -OutFile $miArchive
+          Assert-Sha $miArchive $miSha
+          $miExtract = Join-Path $work 'mediainfo'
+          Expand-Archive -LiteralPath $miArchive -DestinationPath $miExtract -Force
+          $miExe = Get-ChildItem $miExtract -Filter MediaInfo.exe -File -Recurse | Select-Object -First 1
+          if ($null -eq $miExe) { throw 'MediaInfo.exe missing from verified archive' }
+          $miDest = Join-Path $stage 'mediainfo-26.05'
+          New-Item -ItemType Directory -Force -Path $miDest | Out-Null
+          Copy-Item $miExe.FullName (Join-Path $miDest 'MediaInfo.exe') -Force
+
+          & (Join-Path $ffDest 'ffmpeg.exe') -hide_banner -demuxers | Select-String dvdvideo
+          if ($LASTEXITCODE -ne 0) { throw 'Bundled FFmpeg self-check failed' }
+
+      - name: Build Windows portable package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:RELEASE_VERSION
+          New-Item -ItemType Directory -Force -Path .\dist | Out-Null
+          $stage = Join-Path $PWD "dist\MattMux-$version-Windows-Portable"
+          $releaseZip = Join-Path $PWD "dist\MattMux-$version-Windows-Portable.zip"
+          $internalZip = Join-Path $PWD "dist\MattMux-$version-Portable.zip"
+          Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item $releaseZip,$internalZip -Force -ErrorAction SilentlyContinue
+
+          $ffDest = Join-Path $stage 'MattMuxData\tools\ffmpeg-2026-09-08'
+          $miDest = Join-Path $stage 'MattMuxData\tools\mediainfo-26.05'
+          New-Item -ItemType Directory -Force -Path $ffDest,$miDest | Out-Null
+
+          Copy-Item .\MattMux.exe (Join-Path $stage 'MattMux-Portable.exe') -Force
+          Copy-Item .\src\MattMux.exe.manifest (Join-Path $stage 'MattMux-Portable.exe.manifest') -Force
+          Copy-Item .\src\MattMux.ico (Join-Path $stage 'MattMux.ico') -Force
+          Copy-Item .\THIRD_PARTY.md (Join-Path $stage 'THIRD_PARTY.md') -Force
+          Copy-Item .\packaging\installer\bundled-tools\ffmpeg-2026-09-08\* $ffDest -Force
+          Copy-Item .\packaging\installer\bundled-tools\mediainfo-26.05\MediaInfo.exe $miDest -Force
+
+          @(
+            "MattMux $version Portable",
+            "=========================",
+            "",
+            "Extract this entire folder and run MattMux-Portable.exe.",
+            "No installer is required and no FFmpeg, FFprobe, or MediaInfo download is required.",
+            "",
+            "Keep the folder together. Portable settings, logs, and bundled tools are stored under:",
+            "  MattMuxData\"
+          ) | Set-Content -LiteralPath (Join-Path $stage 'README-PORTABLE.txt') -Encoding UTF8
+
+          $checksumPath = Join-Path $stage 'CHECKSUMS.txt'
+          $lines = Get-ChildItem -LiteralPath $stage -File -Recurse |
+            Where-Object { $_.FullName -ne $checksumPath } |
+            Sort-Object FullName |
+            ForEach-Object {
+              $rel = $_.FullName.Substring($stage.Length + 1).Replace('\','/')
+              $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant()
+              "$hash  $rel"
+            }
+          $lines | Set-Content -LiteralPath $checksumPath -Encoding ASCII
+          Compress-Archive -LiteralPath $stage -DestinationPath $releaseZip -CompressionLevel Optimal
+          Copy-Item -LiteralPath $releaseZip -Destination $internalZip -Force
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build Windows installer and All-in-One
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:RELEASE_VERSION
+          $numericVersion = $env:WINDOWS_NUMERIC_VERSION
+          $issPath = '.\packaging\installer\MattMux.iss'
+
+          $iss = Get-Content -LiteralPath $issPath -Raw
+          $needle = 'VersionInfoVersion={#MyAppVersion}.0'
+          if (-not $iss.Contains($needle)) {
+            throw 'Inno Setup version declaration changed; update release workflow.'
+          }
+          $iss = $iss.Replace($needle, "VersionInfoVersion=$numericVersion")
+          Set-Content -LiteralPath $issPath -Value $iss -Encoding UTF8 -NoNewline
+
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path -LiteralPath $iscc)) {
+            $cmd = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+            if ($null -eq $cmd) { throw 'Inno Setup compiler (ISCC.exe) was not found.' }
+            $iscc = $cmd.Source
+          }
+
+          & $iscc "/DMyAppVersion=$version" $issPath
+          if ($LASTEXITCODE -ne 0) { throw "Installer build failed with exit code $LASTEXITCODE" }
+          $setup = ".\dist\MattMux-$version-Setup.exe"
+          $releaseSetup = ".\dist\MattMux-$version-Windows-Setup.exe"
+          if (-not (Test-Path -LiteralPath $setup)) { throw "Missing installer: $setup" }
+          Move-Item -LiteralPath $setup -Destination $releaseSetup -Force
+
+          $aioScript = '.\packaging\all-in-one\Build-AllInOne.ps1'
+          $aioMain = '.\packaging\all-in-one\main.go'
+          foreach ($path in @($aioScript, $aioMain)) {
+            $text = Get-Content -LiteralPath $path -Raw
+            if (-not $text.Contains('1.2.0')) {
+              throw "Expected historical version marker was not found in $path"
+            }
+            $text = $text.Replace('1.2.0', $version)
+            Set-Content -LiteralPath $path -Value $text -Encoding UTF8 -NoNewline
+          }
+
+          & $aioScript
+          if ($LASTEXITCODE -ne 0) { throw "All-in-One build failed with exit code $LASTEXITCODE" }
+          $aio = ".\dist\MattMux-$version-All-in-One.exe"
+          $releaseAio = ".\dist\MattMux-$version-Windows-All-in-One.exe"
+          if (-not (Test-Path -LiteralPath $aio)) { throw "Missing All-in-One executable: $aio" }
+          Move-Item -LiteralPath $aio -Destination $releaseAio -Force
+          Remove-Item ".\dist\MattMux-$version-Portable.zip" -Force -ErrorAction SilentlyContinue
+
+      - name: Create Windows checksums
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:RELEASE_VERSION
+          $assets = @(
+            ".\dist\MattMux-$version-Windows-Setup.exe",
+            ".\dist\MattMux-$version-Windows-All-in-One.exe",
+            ".\dist\MattMux-$version-Windows-Portable.zip"
+          )
+          $lines = foreach ($asset in $assets) {
+            if (-not (Test-Path -LiteralPath $asset)) { throw "Missing release asset: $asset" }
+            $item = Get-Item -LiteralPath $asset
+            if ($item.Length -le 0) { throw "Empty release asset: $asset" }
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $asset).Hash.ToLowerInvariant()
+            "$hash  $($item.Name)"
+          }
+          $lines | Set-Content -LiteralPath .\dist\SHA256SUMS-Windows.txt -Encoding ASCII
+
+      - name: Upload Windows payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: refresh-v1.4.2-windows
+          if-no-files-found: error
+          path: |
+            dist/MattMux-1.4.2-Windows-Setup.exe
+            dist/MattMux-1.4.2-Windows-All-in-One.exe
+            dist/MattMux-1.4.2-Windows-Portable.zip
+            dist/SHA256SUMS-Windows.txt
+
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out exact main source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+
+      - name: Set up Go 1.27.1
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.1'
+          cache: false
+
+      - name: Install Linux build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc g++ cmake ninja-build curl xz-utils file \
+            libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
+
+      - name: Verify Go module metadata
+        working-directory: src
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Build Linux release payload
+        run: |
+          set -euo pipefail
+          bash packaging/linux/build-linux-release.sh "$RELEASE_VERSION"
+          bash packaging/linux/build-linux-standalone.sh "$RELEASE_VERSION"
+
+      - name: Validate Linux packages
+        run: |
+          set -euo pipefail
+          deb="dist/linux-release/MattMux-$RELEASE_VERSION-Linux-amd64.deb"
+          standalone="dist/linux-release/MattMux-$RELEASE_VERSION-Linux-amd64Standalone"
+          dpkg-deb --info "$deb"
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          dpkg-deb --extract "$deb" "$tmp"
+          test -x "$tmp/usr/bin/mattmux"
+          test -x "$tmp/usr/bin/mattmux-cli"
+          test -x "$tmp/usr/lib/mattmux/ffmpeg-bin/ffmpeg"
+          test -x "$tmp/usr/lib/mattmux/ffmpeg-bin/ffprobe"
+          test -x "$tmp/usr/lib/mattmux/mediainfo-bin/mediainfo"
+          test -x "$standalone"
+          file "$standalone" | grep -E 'ELF 64-bit.*x86-64'
+          cache="$(mktemp -d)"
+          XDG_CACHE_HOME="$cache" "$standalone" --standalone-self-test
+          rm -rf "$cache"
+
+      - name: Create Linux checksums
+        run: |
+          set -euo pipefail
+          cd dist/linux-release
+          sha256sum ./*.deb ./*.tar.gz ./*Standalone > SHA256SUMS-Linux.txt
+          rm -f SHA256SUMS.txt
+
+      - name: Upload Linux payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: refresh-v1.4.2-linux
+          if-no-files-found: error
+          path: |
+            dist/linux-release/*.deb
+            dist/linux-release/*.tar.gz
+            dist/linux-release/*Standalone
+            dist/linux-release/SHA256SUMS-Linux.txt
+
+  publish:
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact main source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.SOURCE_SHA }}
+
+      - name: Download refreshed desktop payloads
+        uses: actions/download-artifact@v4
+        with:
+          pattern: refresh-v1.4.2-*
+          path: refreshed
+          merge-multiple: true
+
+      - name: Overlay existing release and recompute checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir release-assets
+
+          required=(
+            "MattMux-$RELEASE_VERSION-Windows-Setup.exe"
+            "MattMux-$RELEASE_VERSION-Windows-All-in-One.exe"
+            "MattMux-$RELEASE_VERSION-Windows-Portable.zip"
+            "SHA256SUMS-Windows.txt"
+            "MattMux-$RELEASE_VERSION-Linux-amd64.deb"
+            "MattMux-$RELEASE_VERSION-Linux-amd64.tar.gz"
+            "MattMux-$RELEASE_VERSION-Linux-amd64Standalone"
+            "MattMux-$RELEASE_VERSION-Source.tar.gz"
+            "SHA256SUMS-Linux.txt"
+          )
+          for name in "${required[@]}"; do
+            test -s "refreshed/$name" || { echo "Missing refreshed asset: $name" >&2; exit 1; }
+            cp "refreshed/$name" "release-assets/$name"
+          done
+
+          cp THIRD_PARTY.md "release-assets/MattMux-$RELEASE_VERSION-THIRD-PARTY.md"
+          (
+            cd release-assets
+            find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' -print0 \
+              | sort -z \
+              | xargs -0 sha256sum > SHA256SUMS.txt
+          )
+
+      - name: Replace Windows and Linux assets in existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" \
+            "release-assets/MattMux-$RELEASE_VERSION-Windows-Setup.exe" \
+            "release-assets/MattMux-$RELEASE_VERSION-Windows-All-in-One.exe" \
+            "release-assets/MattMux-$RELEASE_VERSION-Windows-Portable.zip" \
+            "release-assets/SHA256SUMS-Windows.txt" \
+            "release-assets/MattMux-$RELEASE_VERSION-Linux-amd64.deb" \
+            "release-assets/MattMux-$RELEASE_VERSION-Linux-amd64.tar.gz" \
+            "release-assets/MattMux-$RELEASE_VERSION-Linux-amd64Standalone" \
+            "release-assets/MattMux-$RELEASE_VERSION-Source.tar.gz" \
+            "release-assets/SHA256SUMS-Linux.txt" \
+            "release-assets/MattMux-$RELEASE_VERSION-THIRD-PARTY.md" \
+            "release-assets/SHA256SUMS.txt" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
+      - name: Move existing tag to exact main source
+        run: |
+          set -euo pipefail
+          git fetch origin --tags --force
+          test "$(git rev-parse "$SOURCE_SHA^{commit}")" = "$SOURCE_SHA"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -f "$RELEASE_TAG" "$SOURCE_SHA"
+          git push origin "refs/tags/${RELEASE_TAG}" --force
+
+      - name: Remove one-shot helper from fix branch
+        run: |
+          set -euo pipefail
+          git fetch origin fix/desktop-genpts-title-scan
+          test "$(git rev-parse origin/fix/desktop-genpts-title-scan)" = "$GITHUB_SHA" || {
+            echo 'helper branch advanced while release refresh was running; refusing cleanup' >&2
+            exit 1
+          }
+          git checkout -B fix/desktop-genpts-title-scan "$GITHUB_SHA"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/refresh-v1.4.2-desktop.yml
+          git commit -m 'Remove one-shot v1.4.2 desktop refresh workflow'
+          git push origin HEAD:fix/desktop-genpts-title-scan
