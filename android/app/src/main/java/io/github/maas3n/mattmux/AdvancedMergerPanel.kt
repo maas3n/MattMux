@@ -30,7 +30,7 @@ class AdvancedMergerPanel(private val activity: Activity) {
     @Volatile private var destroyed = false
     @Volatile private var busy = false
     private val status = TextView(activity).apply { text = "Choose files and select streams. Temporary space is needed for input copies and the output MKV." }
-    private val chapterLabel = TextView(activity).apply { text = "No chapter file (optional FFMETADATA1)" }
+    private val chapterLabel = TextView(activity).apply { text = "No chapter override (optional MKV or FFMETADATA1)" }
     private val outputLabel = TextView(activity).apply { text = "Choose output folder" }
     private val filename = EditText(activity).apply { setSingleLine(); setText("merged.mkv") }
     private val streamList = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
@@ -42,14 +42,14 @@ class AdvancedMergerPanel(private val activity: Activity) {
         val content = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(padding, padding, padding, padding) }
         fun button(label: String, action: () -> Unit) { content.addView(Button(activity).apply { text = label; setOnClickListener { action() }; controls += this }) }
         button("CHOOSE MOVIE FILES") { choose(0) }
-        button("CHOOSE AUDIO FILES") { choose(1) }
-        button("CHOOSE SUBTITLE FILES") { choose(2) }
-        content.addView(TextView(activity).apply { text = "Select Streams" })
+        button("CHOOSE AUDIO FILES FROM MKV or RAW") { choose(1) }
+        button("CHOOSE SUBTITLE FILES FROM MKV or RAW") { choose(2) }
+        content.addView(TextView(activity).apply { text = "Select Streams — movie inputs include every stream and embedded chapters" })
         content.addView(streamList)
         button("Clear streams") { selections.clear(); streamList.removeAllViews() }
-        button("CHOOSE CHAPTER FILE") { choose(3) }
+        button("CHOOSE CHAPTER FILE FROM MKV or RAW") { choose(3) }
         content.addView(chapterLabel)
-        button("Clear chapters") { chapters = null; chapterLabel.text = "No chapter file" }
+        button("Clear chapter override") { chapters = null; chapterLabel.text = "No chapter override" }
         button("CHOOSE OUTPUT FOLDER") { activity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), FIRST_REQUEST + 4) }
         content.addView(outputLabel)
         content.addView(filename); controls += filename
@@ -85,26 +85,27 @@ class AdvancedMergerPanel(private val activity: Activity) {
             if (kind == 3) {
                 val file = files.single()
                 native.validateChapters(file.absolutePath)?.let { error(it) }
-                return@run { chapters = file; chapterLabel.text = file.name; status.text = "Chapter file ready" }
+                return@run { chapters = file; chapterLabel.text = file.name; status.text = "Chapter override ready" }
             }
-            val type = listOf("video", "audio", "subtitle")[kind]
+            val type = when (kind) { 0 -> null; 1 -> "audio"; else -> "subtitle" }
             val added = files.flatMap { file ->
-                // A VobSub .sub is data for the matching .idx, not another selectable source.
-                if (file.extension.equals("sub", true) && files.any { it.nameWithoutExtension == file.nameWithoutExtension && it.extension.equals("idx", true) }) emptyList()
+                // A VobSub .sub is data for the matching .idx, not another selectable subtitle source.
+                if (kind == 2 && file.extension.equals("sub", true) && files.any { it.nameWithoutExtension == file.nameWithoutExtension && it.extension.equals("idx", true) }) emptyList()
                 else {
-                    val tracks = native.probe(file.absolutePath).map(::parseTrack).filter { it.kind == type }
-                    require(tracks.isNotEmpty()) { "${file.name} contains no $type streams" }
+                    val tracks = native.probe(file.absolutePath).map(::parseTrack).filter { type == null || it.kind == type }
+                    require(tracks.isNotEmpty()) { "${file.name} contains no ${type ?: "streams"}" }
                     tracks.map { file to it }
                 }
             }
             return@run {
                 added.forEach { (file, track) ->
-                    if (selections.none { it.file == file && it.track.index == track.index }) {
-                        val check = CheckBox(activity).apply { text = "${file.name} — ${track.displayLabel()}"; isChecked = true }
+                    if (selections.none { it.file == file && it.track.index == track.index && it.track.kind == track.kind }) {
+                        val label = if (track.kind == "chapters") "Chapters  ${track.title ?: "embedded chapter set"}" else track.displayLabel()
+                        val check = CheckBox(activity).apply { text = "${file.name} — $label"; isChecked = true }
                         selections += Selection(file, track, check); streamList.addView(check)
                     }
                 }
-                status.text = "${selections.size} streams available"
+                status.text = "${selections.size} streams / chapter sets available"
             }
         }
         return true
@@ -135,18 +136,23 @@ class AdvancedMergerPanel(private val activity: Activity) {
 
     private fun mux() {
         val selected = selections.filter { it.check.isChecked }
+        val media = selected.filter { it.track.kind != "chapters" }
+        val selectedChapterFiles = selected.filter { it.track.kind == "chapters" }.map { it.file }.distinct()
         val folder = output
         val name = filename.text.toString().trim()
-        if (selected.isEmpty() || folder == null || name != File(name).name || !name.endsWith(".mkv", true)) {
-            AlertDialog.Builder(activity).setMessage("Select streams, choose an output folder, and enter a filename ending in .mkv.").setPositiveButton("OK", null).show(); return
+        if (media.isEmpty() || folder == null || name != File(name).name || !name.endsWith(".mkv", true)) {
+            AlertDialog.Builder(activity).setMessage("Select at least one media or attachment stream, choose an output folder, and enter a filename ending in .mkv.").setPositiveButton("OK", null).show(); return
         }
-        val inputs = selected.map { it.file }.distinct()
-        val chapter = chapters?.absolutePath
+        if (chapters == null && selectedChapterFiles.size > 1) {
+            AlertDialog.Builder(activity).setMessage("Select only one movie chapter set, or choose a chapter file to override them.").setPositiveButton("OK", null).show(); return
+        }
+        val inputs = media.map { it.file }.distinct()
+        val chapter = chapters?.absolutePath ?: selectedChapterFiles.singleOrNull()?.absolutePath
         run("Muxing selected streams…") {
             val temporary = File.createTempFile("merged-", ".mkv", root)
             var destination: Uri? = null
             try {
-                native.mux(inputs.map { it.absolutePath }.toTypedArray(), selected.map { inputs.indexOf(it.file) }.toIntArray(), selected.map { it.track.index }.toIntArray(), chapter, temporary.absolutePath)?.let { error(it) }
+                native.mux(inputs.map { it.absolutePath }.toTypedArray(), media.map { inputs.indexOf(it.file) }.toIntArray(), media.map { it.track.index }.toIntArray(), chapter, temporary.absolutePath)?.let { error(it) }
                 check(!native.cancelled.get()) { "Cancelled" }
                 val parent = DocumentsContract.buildDocumentUriUsingTree(folder, DocumentsContract.getTreeDocumentId(folder))
                 // createDocument creates a new document; it never opens an existing movie for replacement.
