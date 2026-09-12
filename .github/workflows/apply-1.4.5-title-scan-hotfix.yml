@@ -19,178 +19,68 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Apply desktop dvdvideo title-scan hotfix
-        shell: python
-        run: |
-          from pathlib import Path
-
-          def replace_once(path, old, new):
-              p = Path(path)
-              text = p.read_text()
-              if text.count(old) != 1:
-                  raise SystemExit(f"expected exactly one match in {path}, found {text.count(old)}")
-              p.write_text(text.replace(old, new, 1))
-
-          old_scan = '''\tmaxTitle := 99
-\tif !strings.EqualFold(filepath.Ext(src), ".iso") {
-\t\tcount, countErr := ReadDVDTitleCount(src)
-\t\tif countErr != nil {
-\t\t\treturn fmt.Errorf("Could not read DVD title table: %w", countErr)
-\t\t}
-\t\tmaxTitle = count
-\t}
-'''
-          new_scan = '''\t// FFmpeg's dvdvideo demuxer accepts title numbers 1..99 and uses
-\t// libdvdread/libdvdnav as its source of truth. Deliberately probe the full
-\t// title-number range instead of parsing VIDEO_TS.IFO in MattMux. This keeps
-\t// folder and ISO title discovery on the same libdvdread/libdvdnav path.
-\tmaxTitle := 99
-'''
-          replace_once('src/app_windows_2.go', old_scan, new_scan)
-
-          old_linux_scan = '''\tmaxTitle := 99
-\tif !strings.EqualFold(filepath.Ext(src), ".iso") {
-\t\tcount, countErr := ReadDVDTitleCount(src)
-\t\tif countErr != nil {
-\t\t\treturn nil, fmt.Errorf("could not read DVD title table: %w", countErr)
-\t\t}
-\t\tmaxTitle = count
-\t}
-'''
-          replace_once('src/linux_core.go', old_linux_scan, new_scan)
-
-          old_count = '''// ReadDVDTitleCount returns the number of global DVD titles declared by
-// VIDEO_TS.IFO's TT_SRPT table. It intentionally handles VIDEO_TS directory
-// sources only; ISO/UDF sources continue through the FFmpeg fallback scanner.
-func ReadDVDTitleCount(source string) (int, error) {
-\tvideoTS, err := findVideoTSDir(source)
-\tif err != nil {
-\t\treturn 0, err
-\t}
-\tvmg, err := readIFO(filepath.Join(videoTS, "VIDEO_TS.IFO"), "DVDVIDEO-VMG")
-\tif err != nil {
-\t\treturn 0, err
-\t}
-\ttable, _, err := sectorTable(vmg, 0xC4)
-\tif err != nil {
-\t\treturn 0, fmt.Errorf("TT_SRPT: %w", err)
-\t}
-\tn, err := be16(vmg, table)
-\tif err != nil {
-\t\treturn 0, err
-\t}
-\tif n == 0 || n > 999 {
-\t\treturn 0, fmt.Errorf("TT_SRPT has invalid title count %d", n)
-\t}
-\treturn int(n), nil
-}
-
-'''
-          replace_once('src/dvdchapters.go', old_count, '')
-
-          old_test = '''func TestReadDVDTitleCount(t *testing.T) {
-\troot := t.TempDir()
-\tvideoTS := filepath.Join(root, "VIDEO_TS")
-\tif err := os.Mkdir(videoTS, 0755); err != nil {
-\t\tt.Fatal(err)
-\t}
-\tvmg := make([]byte, 2*dvdSectorSize)
-\tcopy(vmg, []byte("DVDVIDEO-VMG"))
-\tbinary.BigEndian.PutUint32(vmg[0xC4:], 1)
-\ttt := dvdSectorSize
-\tbinary.BigEndian.PutUint16(vmg[tt:], 13)
-\tbinary.BigEndian.PutUint32(vmg[tt+4:], 7)
-\tif err := os.WriteFile(filepath.Join(videoTS, "VIDEO_TS.IFO"), vmg, 0644); err != nil {
-\t\tt.Fatal(err)
-\t}
-
-\tcount, err := ReadDVDTitleCount(root)
-\tif err != nil {
-\t\tt.Fatal(err)
-\t}
-\tif count != 13 {
-\t\tt.Fatalf("title count = %d, want 13", count)
-\t}
-}
-
-'''
-          replace_once('src/dvdchapters_test.go', old_test, '')
-
-          changelog = Path('CHANGELOG.md')
-          c = changelog.read_text()
-          marker = '# Changelog\n\n'
-          if not c.startswith(marker):
-              raise SystemExit('unexpected CHANGELOG header')
-          entry = '''## 1.4.5 — 2026-09-12
-
-- Hotfix Windows and Linux **Scan Titles** so both DVD folders/`VIDEO_TS` and ISO sources are discovered through FFmpeg `dvdvideo`, whose DVD navigation path uses `libdvdread` and `libdvdnav`.
-- Remove the desktop `ReadDVDTitleCount()`/TT_SRPT title-count parser from the scan path; candidate title numbers 1–99 are now validated by the same `dvdvideo` path on both desktop platforms.
-- Keep the native desktop IFO chapter parser unchanged for chapter metadata; this hotfix changes title scanning only.
-- Android/ChromeOS behavior is unchanged from 1.4.4.
-
-'''
-          changelog.write_text(marker + entry + c[len(marker):])
-
-          readme = Path('README.md')
-          r = readme.read_text()
-          replacements = {
-              '## Download MattMux 1.4.4': '## Download MattMux 1.4.5',
-              '**MattMux 1.4.4** is the current unified release line. Windows, Linux, and Android/ChromeOS packages are built from the same tagged source commit and published together in one GitHub Release.': '**MattMux 1.4.5** is the current unified release line. Windows, Linux, and Android/ChromeOS packages are built from the same tagged source commit and published together in one GitHub Release.',
-              'MattMux 1.4.4 expands the **Advanced Merger** so movie/container inputs expose all discovered streams and embedded chapter sets, while the Audio and Subtitle buttons remain category-filtered. Chapters can come from an embedded movie chapter set or a dedicated MKV/FFMETADATA1 chapter source.': "MattMux 1.4.5 is a desktop title-scanning hotfix on top of 1.4.4. On Windows and Linux, **Scan Titles** now uses FFmpeg `dvdvideo`/`libdvdread`/`libdvdnav` for both DVD folders and ISO images instead of using MattMux's own title-count parser. Advanced Merger behavior is unchanged from 1.4.4.",
-              '[**Download MattMux 1.4.4**](https://github.com/maas3n/MattMux/releases/tag/v1.4.4)': '[**Download MattMux 1.4.5**](https://github.com/maas3n/MattMux/releases/tag/v1.4.5)',
-              '`MattMux-1.4.4-Windows-All-in-One.exe`': '`MattMux-1.4.5-Windows-All-in-One.exe`',
-              '`MattMux-1.4.4-Windows-Setup.exe`': '`MattMux-1.4.5-Windows-Setup.exe`',
-              '`MattMux-1.4.4-Windows-Portable.zip`': '`MattMux-1.4.5-Windows-Portable.zip`',
-              '`MattMux-1.4.4-Linux-amd64Standalone`': '`MattMux-1.4.5-Linux-amd64Standalone`',
-              '`MattMux-1.4.4-Linux-amd64.deb`': '`MattMux-1.4.5-Linux-amd64.deb`',
-              '`MattMux-1.4.4-Android.apk`': '`MattMux-1.4.5-Android.apk`',
-              '`MattMux-1.4.4-ChromeOS.apk`': '`MattMux-1.4.5-ChromeOS.apk`',
-              '[MattMux 1.4.4 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.4)': '[MattMux 1.4.5 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.5)',
-              './MattMux-1.4.4-Linux-amd64Standalone': './MattMux-1.4.5-Linux-amd64Standalone',
-              './MattMux-1.4.4-Linux-amd64.deb': './MattMux-1.4.5-Linux-amd64.deb',
-              'MattMux **1.4.4** expands it with all-stream movie imports, embedded chapter selection, MKV/FFMETADATA1 chapter overrides, and metadata preservation.': 'MattMux **1.4.4** expanded it with all-stream movie imports, embedded chapter selection, MKV/FFMETADATA1 chapter overrides, and metadata preservation. MattMux **1.4.5** changes Windows/Linux title scanning to rely entirely on FFmpeg `dvdvideo` with `libdvdread`/`libdvdnav` for title discovery.',
-              'For current downloads, use the unified **MattMux 1.4.4** release.': 'For current downloads, use the unified **MattMux 1.4.5** release.',
-          }
-          for old, new in replacements.items():
-              if old not in r:
-                  raise SystemExit(f'missing README text: {old}')
-              r = r.replace(old, new)
-          highlight = '- Longest-title auto-selection after scanning\n'
-          if highlight not in r:
-              raise SystemExit('missing README scan highlight anchor')
-          r = r.replace(highlight, highlight + '- Windows/Linux **Scan Titles** probes DVD title numbers through FFmpeg `dvdvideo` (`libdvdread` + `libdvdnav`) for both folders and ISOs; MattMux no longer parses the DVD title count itself\n', 1)
-          readme.write_text(r)
-
-          # This workflow is a one-shot patch applicator. Delete it from the
-          # resulting hotfix commit so release source stays clean.
-          Path('.github/workflows/apply-1.4.5-title-scan-hotfix.yml').unlink()
-
-      - name: Format and validate patch
-        shell: bash
-        run: |
-          set -euo pipefail
-          gofmt -w src/app_windows_2.go src/linux_core.go src/dvdchapters.go src/dvdchapters_test.go
-          if grep -R "ReadDVDTitleCount" -n src; then
-            echo 'ReadDVDTitleCount still exists after hotfix' >&2
-            exit 1
-          fi
-          grep -q 'releases/tag/v1.4.5' README.md
-          ! grep -q 'MattMux 1.4.5 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.4)' README.md
-
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version: '1.27.1'
           cache: false
 
+      - name: Apply remaining source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('src/linux_core.go')
+          text = p.read_text()
+          old = '''\tmaxTitle := 99
+          \tif !strings.EqualFold(filepath.Ext(src), ".iso") {
+          \t\tcount, countErr := ReadDVDTitleCount(src)
+          \t\tif countErr != nil {
+          \t\t\treturn nil, fmt.Errorf("could not read DVD title table: %w", countErr)
+          \t\t}
+          \t\tmaxTitle = count
+          \t}
+          '''
+          new = '''\t// FFmpeg's dvdvideo demuxer accepts title numbers 1..99 and uses
+          \t// libdvdread/libdvdnav as its source of truth. Deliberately probe the full
+          \t// title-number range instead of parsing VIDEO_TS.IFO in MattMux. This keeps
+          \t// folder and ISO title discovery on the same libdvdread/libdvdnav path.
+          \tmaxTitle := 99
+          '''
+          if old not in text:
+              raise SystemExit('Linux scan block was not found exactly once')
+          p.write_text(text.replace(old, new, 1))
+
+          p = Path('src/dvdchapters.go')
+          text = p.read_text()
+          start = text.index('// ReadDVDTitleCount returns')
+          end = text.index('// ReadDVDChapters reads', start)
+          p.write_text(text[:start] + text[end:])
+
+          p = Path('src/dvdchapters_test.go')
+          text = p.read_text()
+          start = text.index('func TestReadDVDTitleCount')
+          end = text.index('func TestReadDVDChaptersSimple', start)
+          p.write_text(text[:start] + text[end:])
+          PY
+
+          gofmt -w src/app_windows_2.go src/linux_core.go src/dvdchapters.go src/dvdchapters_test.go
+          if grep -R "ReadDVDTitleCount" -n src; then
+            echo 'ReadDVDTitleCount still exists after hotfix' >&2
+            exit 1
+          fi
+
       - name: Run Go tests
         working-directory: src
         run: go test ./...
 
-      - name: Commit hotfix
+      - name: Commit source hotfix and remove applicator
         shell: bash
         run: |
           set -euo pipefail
+          rm .github/workflows/apply-1.4.5-title-scan-hotfix.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
