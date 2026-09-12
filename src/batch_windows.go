@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 )
 
@@ -103,9 +102,6 @@ func batchRemuxTitleWindows(ctx context.Context, src string, title titleInfo, ou
 		return "", fmt.Errorf("%w; completed MKV retained at %s", err, partial)
 	}
 	cleanup = false
-	if err := syncDirectory(filepath.Dir(final)); err != nil {
-		return "", fmt.Errorf("output committed to %s but directory sync failed: %w", final, err)
-	}
 	progress(1, "Completed: "+final)
 	return final, nil
 }
