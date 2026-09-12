@@ -11,12 +11,16 @@ public final class AdvancedMergerNative {
         AdvancedMergerNative engine = new AdvancedMergerNative();
         String dir = args[1];
         String[] tracks = engine.probe(dir + "/mixed.mkv");
-        if (tracks.length != 5) throw new AssertionError("Expected 2 video, 2 audio, 1 subtitle");
-        if (engine.validateChapters(dir + "/chapters.txt") != null) throw new AssertionError("Valid chapters rejected");
+        if (tracks.length != 6) throw new AssertionError("Expected 2 video, 2 audio, 1 subtitle, and chapters");
+        if (!tracks[5].startsWith("-1\tchapters\t")) throw new AssertionError("Embedded chapters not exposed by movie probe");
+        if (engine.validateChapters(dir + "/chapters.txt") != null) throw new AssertionError("Valid FFMETADATA1 chapters rejected");
+        if (engine.validateChapters(dir + "/mixed.mkv") != null) throw new AssertionError("MKV chapter source rejected");
         if (engine.validateChapters(dir + "/captions.srt") == null) throw new AssertionError("Invalid chapters accepted");
         String[] paths = {dir + "/mixed.mkv", dir + "/raw.ac3", dir + "/captions.srt"};
         String error = engine.mux(paths, new int[]{0,0,0,1,2}, new int[]{1,3,4,0,0}, dir + "/chapters.txt", dir + "/merged.mkv");
         if (error != null) throw new AssertionError(error);
+        error = engine.mux(paths, new int[]{0}, new int[]{1}, dir + "/mixed.mkv", dir + "/embedded-chapters.mkv");
+        if (error != null) throw new AssertionError("Embedded chapters: " + error);
         error = engine.mux(paths, new int[]{0}, new int[]{1}, null, dir + "/no-chapters.mkv");
         if (error != null) throw new AssertionError(error);
         error = engine.mux(paths, new int[]{0}, new int[]{99}, null, dir + "/invalid.mkv");

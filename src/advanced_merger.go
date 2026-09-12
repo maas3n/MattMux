@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,7 +20,7 @@ type mergerStream struct {
 }
 
 func probeMergerFile(ctx context.Context, probe, path, kind string) ([]mergerStream, error) {
-	if kind != "video" && kind != "audio" && kind != "subtitle" {
+	if kind != "all" && kind != "video" && kind != "audio" && kind != "subtitle" {
 		return nil, errors.New("invalid stream category")
 	}
 	abs, err := filepath.Abs(path)
@@ -35,7 +34,7 @@ func probeMergerFile(ctx context.Context, probe, path, kind string) ([]mergerStr
 	if !st.Mode().IsRegular() {
 		return nil, errors.New("choose a regular media file")
 	}
-	data, err := runMergerCommand(ctx, probe, "-v", "error", "-show_streams", "-of", "json", abs)
+	data, err := runMergerCommand(ctx, probe, "-v", "error", "-show_streams", "-show_chapters", "-of", "json", abs)
 	if err != nil {
 		return nil, err
 	}
@@ -44,9 +43,23 @@ func probeMergerFile(ctx context.Context, probe, path, kind string) ([]mergerStr
 		return nil, err
 	}
 	var streams []mergerStream
-	for _, t := range trackOptionsFromProbe(result) {
-		if t.Kind == kind {
-			streams = append(streams, mergerStream{abs, t})
+	for _, raw := range result.Streams {
+		if kind != "all" && raw.CodecType != kind {
+			continue
+		}
+		t := trackOption{Index: raw.Index, Kind: raw.CodecType, Codec: raw.CodecName, Language: raw.Tags["language"], Title: raw.Tags["title"], Width: raw.Width, Height: raw.Height, Channels: raw.Channels, ChannelLayout: raw.ChannelLayout}
+		if t.Kind == "attachment" && t.Title == "" {
+			t.Title = raw.Tags["filename"]
+		}
+		streams = append(streams, mergerStream{abs, t})
+	}
+	if kind == "all" {
+		var chapters ffprobeChapterResult
+		if err = json.Unmarshal(data, &chapters); err != nil {
+			return nil, err
+		}
+		if len(chapters.Chapters) > 0 {
+			streams = append(streams, mergerStream{abs, trackOption{Index: -1, Kind: "chapters", Title: fmt.Sprintf("%d chapters", len(chapters.Chapters))}})
 		}
 	}
 	if len(streams) == 0 {
@@ -56,18 +69,24 @@ func probeMergerFile(ctx context.Context, probe, path, kind string) ([]mergerStr
 }
 
 func validateMergerChapters(ctx context.Context, probe, path string) error {
-	f, err := os.Open(path)
+	return validateMergerChapterSource(ctx, probe, path, false)
+}
+
+func validateMergerChapterSource(ctx context.Context, probe, path string, movieSource bool) error {
+	data, err := runMergerCommand(ctx, probe, "-v", "error", "-show_format", "-show_chapters", "-of", "json", path)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	header, err := bufio.NewReader(f).ReadSlice('\n')
-	if (err != nil) || strings.TrimRight(string(header), "\r\n") != ";FFMETADATA1" {
-		return errors.New("chapter file must start with ;FFMETADATA1 on its own line")
+	var format struct {
+		Format struct {
+			Name string `json:"format_name"`
+		} `json:"format"`
 	}
-	data, err := runMergerCommand(ctx, probe, "-v", "error", "-f", "ffmetadata", "-show_chapters", "-of", "json", path)
-	if err != nil {
+	if err = json.Unmarshal(data, &format); err != nil {
 		return err
+	}
+	if !movieSource && format.Format.Name != "ffmetadata" && !strings.Contains(format.Format.Name, "matroska") {
+		return errors.New("choose FFMETADATA1 metadata or an MKV containing chapters")
 	}
 	var result ffprobeChapterResult
 	if err = json.Unmarshal(data, &result); err != nil {
@@ -86,9 +105,35 @@ func validateMergerChapters(ctx context.Context, probe, path string) error {
 	return nil
 }
 
+// Chapters are selectable groups, not packet streams. A dedicated source overrides
+// movie chapter checkboxes; otherwise exactly one selected chapter set is used.
+func resolveMergerSelection(streams []mergerStream, override string) ([]mergerStream, string, error) {
+	var media []mergerStream
+	chapter := override
+	for _, s := range streams {
+		if s.Track.Kind != "chapters" {
+			media = append(media, s)
+			continue
+		}
+		if override != "" {
+			continue
+		}
+		if chapter != "" && chapter != s.Path {
+			return nil, "", errors.New("select only one movie chapter set, or choose a chapter file to override them")
+		}
+		chapter = s.Path
+	}
+	if len(media) == 0 {
+		return nil, "", errors.New("select at least one media or attachment stream")
+	}
+	return media, chapter, nil
+}
+
 func mergerArgs(streams []mergerStream, chapters, output string) ([]string, error) {
-	if len(streams) == 0 {
-		return nil, errors.New("select at least one stream")
+	var err error
+	streams, chapters, err = resolveMergerSelection(streams, chapters)
+	if err != nil {
+		return nil, err
 	}
 	args := []string{"-hide_banner", "-nostdin", "-y"}
 	inputs := map[string]int{}
@@ -96,7 +141,7 @@ func mergerArgs(streams []mergerStream, chapters, output string) ([]string, erro
 		if s.Path == "" || s.Track.Index < 0 {
 			return nil, errors.New("invalid selected stream")
 		}
-		if s.Track.Kind != "video" && s.Track.Kind != "audio" && s.Track.Kind != "subtitle" {
+		if s.Track.Kind != "video" && s.Track.Kind != "audio" && s.Track.Kind != "subtitle" && s.Track.Kind != "attachment" && s.Track.Kind != "data" && s.Track.Kind != "unknown" {
 			return nil, errors.New("unsupported selected stream type")
 		}
 		if _, ok := inputs[s.Path]; !ok {
@@ -104,29 +149,41 @@ func mergerArgs(streams []mergerStream, chapters, output string) ([]string, erro
 			args = append(args, "-fflags", "+genpts", "-i", s.Path)
 		}
 	}
+	chapterIndex := -1
 	if chapters != "" {
-		args = append(args, "-f", "ffmetadata", "-i", chapters)
+		if index, ok := inputs[chapters]; ok {
+			chapterIndex = index
+		} else {
+			chapterIndex = len(inputs)
+			args = append(args, "-i", chapters)
+		}
 	}
 	seen := map[string]bool{}
 	for _, s := range streams {
 		key := fmt.Sprintf("%d:%d", inputs[s.Path], s.Track.Index)
 		if !seen[key] {
-			args = append(args, "-map", key)
+			args = append(args, "-map", key, fmt.Sprintf("-map_metadata:s:%d", len(seen)), fmt.Sprintf("%d:s:%d", inputs[s.Path], s.Track.Index))
 			seen[key] = true
 		}
 	}
-	args = append(args, "-map_metadata", "-1", "-map_chapters")
+	args = append(args, "-map_metadata", "0", "-map_chapters")
 	if chapters == "" {
 		args = append(args, "-1")
 	} else {
-		args = append(args, fmt.Sprint(len(inputs)))
+		args = append(args, fmt.Sprint(chapterIndex))
 	}
 	return append(args, "-c", "copy", "-f", "matroska", output), nil
 }
 
 func muxMerger(ctx context.Context, tools toolPaths, streams []mergerStream, chapters, output string) error {
+	movieChapters := chapters == ""
+	var selectionErr error
+	streams, chapters, selectionErr = resolveMergerSelection(streams, chapters)
+	if selectionErr != nil {
+		return selectionErr
+	}
 	if chapters != "" {
-		if err := validateMergerChapters(ctx, tools.ffprobe, chapters); err != nil {
+		if err := validateMergerChapterSource(ctx, tools.ffprobe, chapters, movieChapters); err != nil {
 			return err
 		}
 	}

@@ -18,20 +18,27 @@ static int merger_open(const char *path, AVFormatContext **input, CancelContext 
     return ret;
 }
 
-static int merger_chapters(const char *path, AVFormatContext **input, CancelContext *cancel)
+static int merger_is_matroska(const AVFormatContext *input)
 {
-    char header[32];
+    return input && input->iformat && input->iformat->name && strstr(input->iformat->name, "matroska") != NULL;
+}
+
+static int merger_chapters(const char *path, AVFormatContext **input, CancelContext *cancel, int strict_source)
+{
+    char header[32] = {0};
     FILE *file = fopen(path, "rb");
-    if (!file) return AVERROR(errno);
-    int valid = fgets(header, sizeof(header), file) &&
-        (!strcmp(header, ";FFMETADATA1\n") || !strcmp(header, ";FFMETADATA1\r\n"));
-    fclose(file);
-    if (!valid) return AVERROR_INVALIDDATA;
+    int is_ffmetadata = 0;
+    if (file) {
+        is_ffmetadata = fgets(header, sizeof(header), file) &&
+            (!strcmp(header, ";FFMETADATA1\n") || !strcmp(header, ";FFMETADATA1\r\n"));
+        fclose(file);
+    }
     *input = avformat_alloc_context();
     if (!*input) return AVERROR(ENOMEM);
     (*input)->interrupt_callback = (AVIOInterruptCB){is_cancelled, cancel};
-    int ret = avformat_open_input(input, path, av_find_input_format("ffmetadata"), NULL);
+    int ret = avformat_open_input(input, path, is_ffmetadata ? av_find_input_format("ffmetadata") : NULL, NULL);
     if (ret < 0) return ret;
+    if (strict_source && !is_ffmetadata && !merger_is_matroska(*input)) return AVERROR_INVALIDDATA;
     if (!(*input)->nb_chapters) return AVERROR_INVALIDDATA;
     for (unsigned i = 0; i < (*input)->nb_chapters; ++i) {
         AVChapter *chapter = (*input)->chapters[i];
@@ -39,6 +46,18 @@ static int merger_chapters(const char *path, AVFormatContext **input, CancelCont
             return AVERROR_INVALIDDATA;
     }
     return 0;
+}
+
+static const char *merger_type_name(enum AVMediaType type)
+{
+    switch (type) {
+        case AVMEDIA_TYPE_VIDEO: return "video";
+        case AVMEDIA_TYPE_AUDIO: return "audio";
+        case AVMEDIA_TYPE_SUBTITLE: return "subtitle";
+        case AVMEDIA_TYPE_DATA: return "data";
+        case AVMEDIA_TYPE_ATTACHMENT: return "attachment";
+        default: return "unknown";
+    }
 }
 
 static int merger_next(MergerInput *input, CancelContext *cancel)
@@ -98,12 +117,12 @@ static int merger_mux(const char **paths, int count, const int *sources, const i
     ret = avformat_alloc_output_context2(&output, NULL, "matroska", destination);
     if (ret < 0 || !output) { ret = AVERROR(ENOMEM); goto cleanup_merger; }
     output->interrupt_callback = (AVIOInterruptCB){is_cancelled, cancel};
+    av_dict_copy(&output->metadata, inputs[0].format->metadata, 0);
     for (int i = 0; i < selected; ++i) {
         int source = sources[i], index = streams[i];
         if (source < 0 || source >= count || index < 0 || (unsigned)index >= inputs[source].format->nb_streams) { ret = AVERROR(EINVAL); goto cleanup_merger; }
         if (inputs[source].map[index] >= 0) continue;
         AVStream *in = inputs[source].format->streams[index];
-        if (in->codecpar->codec_type != AVMEDIA_TYPE_VIDEO && in->codecpar->codec_type != AVMEDIA_TYPE_AUDIO && in->codecpar->codec_type != AVMEDIA_TYPE_SUBTITLE) { ret = AVERROR(EINVAL); goto cleanup_merger; }
         AVStream *out = avformat_new_stream(output, NULL);
         if (!out) { ret = AVERROR(ENOMEM); goto cleanup_merger; }
         if ((ret = avcodec_parameters_copy(out->codecpar, in->codecpar)) < 0) goto cleanup_merger;
@@ -112,7 +131,7 @@ static int merger_mux(const char **paths, int count, const int *sources, const i
         inputs[source].map[index] = out->index;
     }
     if (chapter_path) {
-        if ((ret = merger_chapters(chapter_path, &chapters, cancel)) < 0) goto cleanup_merger;
+        if ((ret = merger_chapters(chapter_path, &chapters, cancel, 0)) < 0) goto cleanup_merger;
         output->chapters = av_calloc(chapters->nb_chapters, sizeof(*output->chapters));
         if (!output->chapters) { ret = AVERROR(ENOMEM); goto cleanup_merger; }
         for (unsigned i = 0; i < chapters->nb_chapters; ++i) {
@@ -162,23 +181,26 @@ Java_io_github_maas3n_mattmux_AdvancedMergerNative_probe(JNIEnv *env, jobject th
     (*env)->ReleaseStringUTFChars(env, filename, path);
     jobjectArray result = NULL;
     if (ret >= 0) {
-        int count = 0;
-        for (unsigned i = 0; i < input->nb_streams; ++i) {
-            enum AVMediaType type = input->streams[i]->codecpar->codec_type;
-            if (type == AVMEDIA_TYPE_VIDEO || type == AVMEDIA_TYPE_AUDIO || type == AVMEDIA_TYPE_SUBTITLE) ++count;
-        }
+        int count = (int)input->nb_streams + (input->nb_chapters ? 1 : 0);
         result = (*env)->NewObjectArray(env, count, (*env)->FindClass(env, "java/lang/String"), NULL);
         int row = 0;
         for (unsigned i = 0; result && i < input->nb_streams; ++i) {
             AVStream *stream = input->streams[i]; AVCodecParameters *p = stream->codecpar;
-            if (p->codec_type != AVMEDIA_TYPE_VIDEO && p->codec_type != AVMEDIA_TYPE_AUDIO && p->codec_type != AVMEDIA_TYPE_SUBTITLE) continue;
             char language[128], title[256], layout[128] = "-", record[1024];
             metadata_field(stream->metadata, "language", language, sizeof(language)); metadata_field(stream->metadata, "title", title, sizeof(title));
+            if (p->codec_type == AVMEDIA_TYPE_ATTACHMENT && !strcmp(title, "-")) metadata_field(stream->metadata, "filename", title, sizeof(title));
             if (p->ch_layout.nb_channels > 0) av_channel_layout_describe(&p->ch_layout, layout, sizeof(layout));
-            snprintf(record, sizeof(record), "%u\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%s", i, track_type_name(p->codec_type), avcodec_get_name(p->codec_id), language, title, p->width, p->height, p->ch_layout.nb_channels, layout);
+            snprintf(record, sizeof(record), "%u\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%s", i, merger_type_name(p->codec_type), avcodec_get_name(p->codec_id), language, title, p->width, p->height, p->ch_layout.nb_channels, layout);
             jstring value = (*env)->NewStringUTF(env, record);
             if (!value) { ret = AVERROR(ENOMEM); break; }
             (*env)->SetObjectArrayElement(env, result, row++, value); (*env)->DeleteLocalRef(env, value);
+        }
+        if (result && input->nb_chapters) {
+            char record[256];
+            snprintf(record, sizeof(record), "-1\tchapters\t-\t-\t%u chapters\t0\t0\t0\t-", input->nb_chapters);
+            jstring value = (*env)->NewStringUTF(env, record);
+            if (!value) ret = AVERROR(ENOMEM);
+            else { (*env)->SetObjectArrayElement(env, result, row, value); (*env)->DeleteLocalRef(env, value); }
         }
     }
     avformat_close_input(&input);
@@ -191,9 +213,9 @@ Java_io_github_maas3n_mattmux_AdvancedMergerNative_validateChapters(JNIEnv *env,
 {
     CancelContext cancel = {env, thiz, (*env)->GetMethodID(env, (*env)->GetObjectClass(env, thiz), "isNativeCancelled", "()Z")};
     const char *path = (*env)->GetStringUTFChars(env, filename, NULL); if (!path) return NULL;
-    AVFormatContext *input = NULL; int ret = merger_chapters(path, &input, &cancel); avformat_close_input(&input);
+    AVFormatContext *input = NULL; int ret = merger_chapters(path, &input, &cancel, 1); avformat_close_input(&input);
     (*env)->ReleaseStringUTFChars(env, filename, path);
-    return ret < 0 ? (*env)->NewStringUTF(env, "Choose a valid FFMETADATA1 file containing chapters with valid start/end times") : NULL;
+    return ret < 0 ? (*env)->NewStringUTF(env, "Choose valid FFMETADATA1 metadata or an MKV containing chapters with valid start/end times") : NULL;
 }
 
 JNIEXPORT jstring JNICALL

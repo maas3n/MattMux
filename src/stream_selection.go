@@ -43,6 +43,12 @@ func trackOptionsFromProbe(probe ffprobeResult) []trackOption {
 }
 
 func (t trackOption) Label() string {
+	if t.Kind == "chapters" {
+		return "Chapters — " + t.Title
+	}
+	if t.Kind == "attachment" {
+		return fmt.Sprintf("Attachment #%d %s %s", t.Index, t.Codec, t.Title)
+	}
 	kind := t.Kind
 	switch t.Kind {
 	case "video":
