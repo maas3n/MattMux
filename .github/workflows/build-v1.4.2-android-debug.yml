@@ -104,6 +104,10 @@ jobs:
           ORG_GRADLE_PROJECT_MATTMUX_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
           ORG_GRADLE_PROJECT_MATTMUX_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
           ORG_GRADLE_PROJECT_MATTMUX_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+          # The DEBUG helper recompiles mattmux_jni.c after the normal Android
+          # native build. Reuse libudfread's installed headers for that extra
+          # compile so <udfread.h> resolves without requiring a host package.
+          CPATH: ${{ github.workspace }}/source/android/native/.work/install-arm64-v8a/include:${{ github.workspace }}/source/android/native/.work/install-arm64-v8a/include/udfread
         run: |
           set -uo pipefail
           build_log="${RUNNER_TEMP}/mattmux-v142-android-debug-build.log"
