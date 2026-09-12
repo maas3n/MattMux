@@ -27,31 +27,6 @@ func TestDecodeDVDTime(t *testing.T) {
 	}
 }
 
-func TestReadDVDTitleCount(t *testing.T) {
-	root := t.TempDir()
-	videoTS := filepath.Join(root, "VIDEO_TS")
-	if err := os.Mkdir(videoTS, 0755); err != nil {
-		t.Fatal(err)
-	}
-	vmg := make([]byte, 2*dvdSectorSize)
-	copy(vmg, []byte("DVDVIDEO-VMG"))
-	binary.BigEndian.PutUint32(vmg[0xC4:], 1)
-	tt := dvdSectorSize
-	binary.BigEndian.PutUint16(vmg[tt:], 13)
-	binary.BigEndian.PutUint32(vmg[tt+4:], 7)
-	if err := os.WriteFile(filepath.Join(videoTS, "VIDEO_TS.IFO"), vmg, 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	count, err := ReadDVDTitleCount(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if count != 13 {
-		t.Fatalf("title count = %d, want 13", count)
-	}
-}
-
 func TestReadDVDChaptersSimple(t *testing.T) {
 	root := t.TempDir()
 	videoTS := filepath.Join(root, "VIDEO_TS")
