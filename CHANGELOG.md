@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.3 — 2026-09-12
+
+- Add an **Advanced Merger** tab on Windows, Linux, Android, and ChromeOS with multiple-file selection, category-filtered video/audio/subtitle tracks, optional FFMETADATA1 chapters, output-folder and filename selection, and lossless muxing to MKV.
+- Accept FFmpeg-supported containers and elementary media inputs while exposing only the stream category requested by the corresponding Movie, Audio, or Subtitle input button.
+- Use explicit stream maps on desktop and equivalent native libav packet mapping on Android/ChromeOS, with cancellable jobs and no-overwrite output finalization.
+- Add real-FFmpeg integration coverage for mixed containers, raw H.264/MPEG-2/VOB, external AC-3/SRT inputs, chapter inclusion, cancellation, and stream-copy behavior.
+- Add native Windows tabs and Android/ChromeOS stream-copy merging through JNI.
+- Android/ChromeOS stages selected inputs and output in private temporary storage; select both IDX and SUB when adding VobSub subtitles.
+- Keep the Android/ChromeOS tab interface clear of status and navigation bars across phones, navigation modes, rotation, and resizable ChromeOS windows.
+
 ## 1.4.2 — 2026-09-11
 
 - Publish the signed universal APK under both `MattMux-1.4.2-Android.apk` for Android phones/tablets and `MattMux-1.4.2-ChromeOS.apk` for Chromebooks.

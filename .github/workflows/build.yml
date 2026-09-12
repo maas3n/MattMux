@@ -26,6 +26,9 @@ jobs:
           go-version: '1.27.1'
           cache: false
 
+      - name: Install FFmpeg for merger integration tests
+        run: choco install ffmpeg --no-progress -y
+
       - name: Test
         run: go test ./...
 

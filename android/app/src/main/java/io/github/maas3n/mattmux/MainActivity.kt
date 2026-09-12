@@ -30,6 +30,8 @@ class MainActivity : Activity(), BillingManager.Listener {
         private const val STATE_SELECTED_TRACKS = "selected_tracks"
     }
 
+    private lateinit var advancedMerger: AdvancedMergerPanel
+
     private val engine: RemuxEngine = AndroidNativeRemuxEngine()
     private var billing: BillingManager? = null
 
@@ -52,7 +54,17 @@ class MainActivity : Activity(), BillingManager.Listener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(buildUi())
+        val dvd = buildUi()
+        advancedMerger = AdvancedMergerPanel(this)
+        val host = android.widget.TabHost(this).apply { id = android.R.id.tabhost }
+        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val tabs = android.widget.TabWidget(this).apply { id = android.R.id.tabs }
+        val frame = android.widget.FrameLayout(this).apply { id = android.R.id.tabcontent }
+        layout.addView(tabs); layout.addView(frame, LinearLayout.LayoutParams(-1, 0, 1f)); host.addView(layout); host.setup()
+        applySystemBarInsets(layout, 0, 0, 0, 0)
+        host.addTab(host.newTabSpec("dvd").setIndicator("DVD Remux").setContent { dvd })
+        host.addTab(host.newTabSpec("merger").setIndicator("Advanced Merger").setContent { advancedMerger.view })
+        setContentView(host)
         restoreSelectionState(savedInstanceState)
 
         engine.setProgressListener { percent ->
@@ -77,6 +89,7 @@ class MainActivity : Activity(), BillingManager.Listener {
     }
 
     override fun onDestroy() {
+        if (::advancedMerger.isInitialized) advancedMerger.destroy()
         if (remuxRunning) engine.cancel()
         engine.setProgressListener(null)
         billing?.close()
@@ -98,6 +111,7 @@ class MainActivity : Activity(), BillingManager.Listener {
     @Deprecated("Uses the platform document picker result API for minSdk simplicity.")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (advancedMerger.onResult(requestCode, resultCode, data)) return
         if (resultCode != RESULT_OK) return
         val resultData = data ?: return
         val uri = resultData.data ?: return
@@ -146,7 +160,6 @@ class MainActivity : Activity(), BillingManager.Listener {
             orientation = LinearLayout.VERTICAL
             setPadding(horizontalPadding, topPadding, horizontalPadding, bottomPadding)
         }
-        applySystemBarInsets(root, horizontalPadding, topPadding, horizontalPadding, bottomPadding)
         root.addView(TextView(this).apply {
             text = "MattMux"
             textSize = 30f

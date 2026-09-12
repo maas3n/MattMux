@@ -25,7 +25,7 @@ func main() {
 	}
 	_, _, _ = procOleInitialize.Call(0)
 	defer procOleUninitialize.Call()
-	icc := INITCOMMONCONTROLSEX{DwSize: uint32(unsafe.Sizeof(INITCOMMONCONTROLSEX{})), DwICC: ICC_PROGRESS_CLASS | ICC_LISTVIEW_CLASSES}
+	icc := INITCOMMONCONTROLSEX{DwSize: uint32(unsafe.Sizeof(INITCOMMONCONTROLSEX{})), DwICC: ICC_PROGRESS_CLASS | ICC_LISTVIEW_CLASSES | 0x8}
 	procInitCommonControlsEx.Call(uintptr(unsafe.Pointer(&icc)))
 	if err := createMainWindow(); err != nil {
 		messageBox(0, "MattMux could not start", err.Error(), MB_OK|MB_ICONERROR)
@@ -74,7 +74,7 @@ func createMainWindow() error {
 	// child control to the monitor DPI; previously only the fonts were scaled,
 	// which caused clipping and overlap at 125%/150%/175% Windows scaling.
 	dpi := windowDPI(0)
-	winW, winH := scale96(820, dpi), scale96(615, dpi)
+	winW, winH := scale96(820, dpi), scale96(655, dpi)
 	style := uintptr(WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX)
 	hwnd, _, err := procCreateWindowExW.Call(WS_EX_CONTROLPARENT, uintptr(unsafe.Pointer(className)), uintptr(unsafe.Pointer(utf16Ptr(appName+" "+appVersion))), style, 0, 0, uintptr(winW), uintptr(winH), 0, 0, hInstance, 0)
 	if hwnd == 0 {
@@ -83,6 +83,7 @@ func createMainWindow() error {
 	app.hwnd = hwnd
 	createFonts(hwnd)
 	createControls(hwnd, hInstance)
+	createMergerWindowsControls(hwnd, hInstance)
 	centerWindow(hwnd, winW, winH)
 	procDragAcceptFiles.Call(hwnd, 1)
 	procShowWindow.Call(hwnd, SW_SHOW)
@@ -129,10 +130,11 @@ func createControls(hwnd, hInstance uintptr) {
 	dpi := windowDPI(hwnd)
 	s := func(v int32) int32 { return scale96(v, dpi) }
 	add := func(ex uint32, class, text string, style uint32, x, y, w, h int32, id int, font uintptr) uintptr {
-		c, _, _ := procCreateWindowExW.Call(uintptr(ex), uintptr(unsafe.Pointer(utf16Ptr(class))), uintptr(unsafe.Pointer(utf16Ptr(text))), uintptr(style), uintptr(s(x)), uintptr(s(y)), uintptr(s(w)), uintptr(s(h)), hwnd, uintptr(id), hInstance, 0)
+		c, _, _ := procCreateWindowExW.Call(uintptr(ex), uintptr(unsafe.Pointer(utf16Ptr(class))), uintptr(unsafe.Pointer(utf16Ptr(text))), uintptr(style), uintptr(s(x)), uintptr(s(y+40)), uintptr(s(w)), uintptr(s(h)), hwnd, uintptr(id), hInstance, 0)
 		if font != 0 {
 			procSendMessageW.Call(c, WM_SETFONT, font, 1)
 		}
+		mergerWindow.dvd = append(mergerWindow.dvd, c)
 		return c
 	}
 	add(0, "STATIC", "MattMux", WS_CHILD|WS_VISIBLE, 28, 22, 300, 42, 0, app.headerFont)
@@ -165,8 +167,27 @@ func createControls(hwnd, hInstance uintptr) {
 
 func windowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 	switch msg {
+	case mergerDoneMessage:
+		mergerWindow.pendingMu.Lock()
+		done := mergerWindow.pending
+		mergerWindow.pending = nil
+		mergerWindow.pendingMu.Unlock()
+		if done != nil {
+			done()
+		}
+		return 0
+	case 0x004e:
+		var header mergerNotifyHeader
+		kernel32.NewProc("RtlMoveMemory").Call(uintptr(unsafe.Pointer(&header)), lParam, unsafe.Sizeof(header))
+		if header.From == mergerWindow.tab && header.Code == -551 {
+			showMergerWindowsTab()
+			return 0
+		}
 	case WM_COMMAND:
 		id := int(wParam & 0xffff)
+		if handleWindowsMergerCommand(id) {
+			return 0
+		}
 		notify := uint16((wParam >> 16) & 0xffff)
 		switch id {
 		case idSourceEdit:
