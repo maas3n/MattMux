@@ -1,0 +1,122 @@
+name: Harden Advanced Merger release gates
+
+on:
+  push:
+    branches:
+      - feature/advanced-merger
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/advanced-merger
+          fetch-depth: 0
+
+      - name: Require merger tests in unified release
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('.github/workflows/release.yml')
+          s = p.read_text()
+
+          # Windows: validate merger with the exact verified FFmpeg/FFprobe payload
+          # that will be packaged, after the pinned runtime has been staged.
+          marker = '''          & (Join-Path $ffDest 'ffmpeg.exe') -hide_banner -demuxers | Select-String dvdvideo
+          if ($LASTEXITCODE -ne 0) { throw 'Bundled FFmpeg self-check failed' }
+
+      - name: Build Windows portable package
+'''
+          repl = '''          & (Join-Path $ffDest 'ffmpeg.exe') -hide_banner -demuxers | Select-String dvdvideo
+          if ($LASTEXITCODE -ne 0) { throw 'Bundled FFmpeg self-check failed' }
+
+      - name: Exercise Advanced Merger with packaged Windows FFmpeg
+        shell: pwsh
+        working-directory: src
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ffDir = Resolve-Path '..\\packaging\\installer\\bundled-tools\\ffmpeg-2026-09-08'
+          $env:PATH = "$ffDir;$env:PATH"
+          go test -run 'TestMerger' -count=1 -v ./...
+
+      - name: Build Windows portable package
+'''
+          if marker not in s:
+              raise SystemExit('Windows release insertion point not found')
+          s = s.replace(marker, repl, 1)
+
+          # Linux: install the host tools required by the same real-media/headless
+          # tests used by the Linux preview, and run them before packaging.
+          marker = '''          sudo apt-get install -y \\
+            gcc g++ cmake ninja-build curl xz-utils file \\
+            libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
+
+      - name: Verify Go module metadata
+'''
+          repl = '''          sudo apt-get install -y \\
+            gcc g++ cmake ninja-build curl xz-utils file ffmpeg xvfb \\
+            libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
+
+      - name: Test Advanced Merger with real media and headless UI
+        working-directory: src
+        run: go test -tags ci ./...
+
+      - name: Verify Go module metadata
+'''
+          if marker not in s:
+              raise SystemExit('Linux prerequisites insertion point not found')
+          s = s.replace(marker, repl, 1)
+
+          marker = '''          XDG_CACHE_HOME="$cache" "$standalone" --standalone-self-test
+          rm -rf "$cache"
+
+      - name: Create Linux checksums
+'''
+          repl = '''          XDG_CACHE_HOME="$cache" "$standalone" --standalone-self-test
+          rm -rf "$cache"
+
+      - name: Exercise packaged Linux FFmpeg and launch packaged GUI
+        run: |
+          set -euo pipefail
+          version='${{ needs.metadata.outputs.version }}'
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          dpkg-deb --extract "dist/linux-release/MattMux-$version-Linux-amd64.deb" "$tmp"
+          export PATH="$tmp/usr/lib/mattmux/ffmpeg-bin:$PATH"
+          (cd src && go test -tags cli -run TestMerger -count=1 -v)
+          set +e
+          xvfb-run -a timeout 8s "$tmp/usr/lib/mattmux/app/mattmux-bin" > "$tmp/gui.log" 2>&1
+          result=$?
+          set -e
+          cat "$tmp/gui.log"
+          test "$result" -eq 124
+
+      - name: Create Linux checksums
+'''
+          if marker not in s:
+              raise SystemExit('Linux packaged validation insertion point not found')
+          s = s.replace(marker, repl, 1)
+
+          p.write_text(s)
+          PY
+
+      - name: Check workflow diff
+        run: |
+          git diff --check
+          grep -F 'Exercise Advanced Merger with packaged Windows FFmpeg' .github/workflows/release.yml
+          grep -F 'Test Advanced Merger with real media and headless UI' .github/workflows/release.yml
+          grep -F 'Exercise packaged Linux FFmpeg and launch packaged GUI' .github/workflows/release.yml
+
+      - name: Commit hardening and remove helper
+        run: |
+          rm .github/workflows/harden-advanced-merger-release.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Require Advanced Merger tests in release builds"
+          git push origin HEAD:feature/advanced-merger
