@@ -33,6 +33,7 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Files]
 Source: "..\..\MattMux.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\mattmux-cli.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\src\MattMux.exe.manifest"; DestDir: "{app}"; DestName: "MattMux.exe.manifest"; Flags: ignoreversion
 Source: "..\..\src\MattMux.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\THIRD_PARTY.md"; DestDir: "{app}"; Flags: ignoreversion
