@@ -21,7 +21,7 @@ func (g *linuxGUI) buildAdvancedMerger() fyne.CanvasObject {
 	var checks []*widget.Check
 	list := container.NewVBox()
 	chapter := widget.NewEntry()
-	chapter.SetPlaceHolder("Optional FFMETADATA1 chapter file")
+	chapter.SetPlaceHolder("Optional chapter override: MKV or FFMETADATA1")
 	output := widget.NewEntry()
 	output.SetText(g.outputEntry.Text)
 	name := widget.NewEntry()
@@ -150,10 +150,10 @@ func (g *linuxGUI) buildAdvancedMerger() fyne.CanvasObject {
 		d.Resize(fyne.NewSize(680, 460))
 		d.Show()
 	}
-	movies := widget.NewButton("CHOOSE MOVIE FILES", func() { add("video") })
-	audio := widget.NewButton("CHOOSE AUDIO FILES", func() { add("audio") })
-	subs := widget.NewButton("CHOOSE SUBTITLE FILES", func() { add("subtitle") })
-	chapters := widget.NewButton("CHOOSE CHAPTER FILE", func() {
+	movies := widget.NewButton("CHOOSE MOVIE FILES", func() { add("all") })
+	audio := widget.NewButton("CHOOSE AUDIO FILES FROM MKV or RAW", func() { add("audio") })
+	subs := widget.NewButton("CHOOSE SUBTITLE FILES FROM MKV or RAW", func() { add("subtitle") })
+	chapters := widget.NewButton("CHOOSE CHAPTER FILE FROM MKV or RAW", func() {
 		dialog.ShowFileOpen(func(r fyne.URIReadCloser, err error) {
 			if err != nil {
 				dialog.ShowError(err, g.window)
@@ -225,5 +225,5 @@ func (g *linuxGUI) buildAdvancedMerger() fyne.CanvasObject {
 	controls = []fyne.Disableable{movies, audio, subs, chapters, folder, mux, clear, chapter, output, name}
 	baseControlCount = len(controls)
 	scroll := container.NewVScroll(list)
-	return container.NewBorder(container.NewVBox(container.NewGridWithColumns(3, movies, audio, subs), widget.NewLabel("Select Streams")), container.NewVBox(clear, container.NewBorder(nil, nil, nil, chapters, chapter), container.NewBorder(nil, nil, nil, folder, output), container.NewBorder(nil, nil, widget.NewLabel("Output filename"), nil, name), status, container.NewHBox(mux, cancelBtn)), nil, nil, scroll)
+	return container.NewBorder(container.NewVBox(container.NewVBox(movies, audio, subs), widget.NewLabel("Select Streams — choose one chapter set, or use the chapter override below")), container.NewVBox(clear, container.NewBorder(nil, nil, nil, chapters, chapter), container.NewBorder(nil, nil, nil, folder, output), container.NewBorder(nil, nil, widget.NewLabel("Output filename"), nil, name), status, container.NewHBox(mux, cancelBtn)), nil, nil, scroll)
 }
