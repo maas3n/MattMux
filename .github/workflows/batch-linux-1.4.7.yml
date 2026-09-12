@@ -1,0 +1,74 @@
+name: Batch 1.4.7 Linux validation
+
+on:
+  push:
+    branches:
+      - feature/batch-1.4.7
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  MATTMUX_CI_VERSION: '1.4.7-dev'
+
+jobs:
+  batch-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go 1.27.1
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.1'
+          cache: false
+
+      - name: Install Linux build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc g++ cmake ninja-build curl xz-utils file \
+            libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
+
+      - name: Verify module metadata
+        working-directory: src
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Test Linux GUI and batch core
+        working-directory: src
+        run: |
+          go test ./...
+          go vet ./...
+
+      - name: Test and build Linux CLI batch mode
+        working-directory: src
+        run: |
+          go test -tags cli ./...
+          go build -tags cli -trimpath -o /tmp/mattmux-cli .
+          /tmp/mattmux-cli --version
+          /tmp/mattmux-cli --help >/tmp/mattmux-help.txt 2>&1 || true
+          grep -F -- '--batch' /tmp/mattmux-help.txt
+
+      - name: Build Linux release packages
+        run: |
+          set -euo pipefail
+          bash packaging/linux/build-linux-release.sh "$MATTMUX_CI_VERSION"
+          bash packaging/linux/build-linux-standalone.sh "$MATTMUX_CI_VERSION"
+          test -x "dist/linux-release/MattMux-$MATTMUX_CI_VERSION-Linux-amd64Standalone"
+          test -f "dist/linux-release/MattMux-$MATTMUX_CI_VERSION-Linux-amd64.deb"
+          test -f "dist/linux-release/MattMux-$MATTMUX_CI_VERSION-Linux-amd64.tar.gz"
+
+      - name: Upload Linux validation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: MattMux-1.4.7-Linux-batch-validation
+          path: |
+            dist/linux-release/*.deb
+            dist/linux-release/*.tar.gz
+            dist/linux-release/*Standalone
+            dist/linux-release/SHA256SUMS.txt
+          if-no-files-found: error
