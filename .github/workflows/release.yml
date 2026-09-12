@@ -29,7 +29,7 @@ jobs:
       windows_numeric_version: ${{ steps.meta.outputs.windows_numeric_version }}
     steps:
       - name: Check out tagged source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
@@ -93,7 +93,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Check out tagged source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.metadata.outputs.tag }}
 
@@ -325,7 +325,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out tagged source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.metadata.outputs.tag }}
 
@@ -401,7 +401,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out tagged source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.metadata.outputs.tag }}
 
@@ -529,7 +529,7 @@ jobs:
       contents: write
     steps:
       - name: Check out tagged source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ needs.metadata.outputs.tag }}
