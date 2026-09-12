@@ -2,20 +2,20 @@
 
 **MattMux** remuxes DVD-Video titles and combines selected media streams into MKV **without transcoding**. Windows, Linux, and Android/ChromeOS are developed together from the single `main` branch and released under one shared product version.
 
-## Download MattMux 1.4.3
+## Download MattMux 1.4.4
 
-**MattMux 1.4.3** is the current unified release line. Windows, Linux, and Android/ChromeOS packages are built from the same tagged source commit and published together in one GitHub Release.
+**MattMux 1.4.4** is the current unified release line. Windows, Linux, and Android/ChromeOS packages are built from the same tagged source commit and published together in one GitHub Release.
 
-MattMux 1.4.3 adds the **Advanced Merger**, allowing selected video, audio, subtitle, and optional chapter data from multiple FFmpeg-supported inputs to be stream-copied into one MKV.
+MattMux 1.4.4 expands the **Advanced Merger** so movie/container inputs expose all discovered streams and embedded chapter sets, while the Audio and Subtitle buttons remain category-filtered. Chapters can come from an embedded movie chapter set or a dedicated MKV/FFMETADATA1 chapter source.
 
-[**Download MattMux 1.4.3**](https://github.com/maas3n/MattMux/releases/tag/v1.4.3)
+[**Download MattMux 1.4.4**](https://github.com/maas3n/MattMux/releases/tag/v1.4.4)
 
 | Platform | Recommended package | Other options |
 | --- | --- | --- |
-| Windows x64 | `MattMux-1.4.3-Windows-All-in-One.exe` | Setup EXE or Portable ZIP |
-| Linux amd64 | `MattMux-1.4.3-Linux-amd64Standalone` | Self-contained `.deb` or tarball |
-| Android phone / tablet | `MattMux-1.4.3-Android.apk` | Signed universal APK |
-| ChromeOS | `MattMux-1.4.3-ChromeOS.apk` | Byte-identical alias of the Android APK |
+| Windows x64 | `MattMux-1.4.4-Windows-All-in-One.exe` | Setup EXE or Portable ZIP |
+| Linux amd64 | `MattMux-1.4.4-Linux-amd64Standalone` | Self-contained `.deb` or tarball |
+| Android phone / tablet | `MattMux-1.4.4-Android.apk` | Signed universal APK |
+| ChromeOS | `MattMux-1.4.4-ChromeOS.apk` | Byte-identical alias of the Android APK |
 
 The release also includes source archives, third-party source/provenance files, per-platform SHA-256 manifests, and one combined `SHA256SUMS.txt`.
 
@@ -24,11 +24,11 @@ The release also includes source archives, third-party source/provenance files, 
 - DVD folder / `VIDEO_TS` / ISO input
 - Lossless stream-copy remuxing: no video or audio re-encoding
 - **Advanced Merger** for combining selected streams from multiple containers or elementary media files into MKV
-  - **CHOOSE MOVIE FILES** exposes only video streams
-  - **CHOOSE AUDIO FILES** exposes only audio streams
-  - **CHOOSE SUBTITLE FILES** exposes only subtitle streams
-  - optional FFMETADATA1 chapter file
-  - exact per-stream checkboxes and explicit mapping
+  - **CHOOSE MOVIE FILES** exposes every discovered stream plus a selectable embedded chapter set when present
+  - **CHOOSE AUDIO FILES FROM MKV or RAW** exposes only audio streams
+  - **CHOOSE SUBTITLE FILES FROM MKV or RAW** exposes only subtitle streams
+  - **CHOOSE CHAPTER FILE FROM MKV or RAW** accepts MKV chapters or valid `FFMETADATA1`
+  - exact per-stream checkboxes, explicit mapping, attachment/data support, and chapter-title preservation
   - see [`docs/ADVANCED_MERGER.md`](docs/ADVANCED_MERGER.md)
 - **Selectable video, audio, and subtitle tracks** from **Show Metadata** for DVD remuxing
   - every detected track is selected by default
@@ -49,7 +49,9 @@ The release also includes source archives, third-party source/provenance files, 
 
 Open the **Advanced Merger** tab to combine tracks from multiple sources into one MKV without transcoding. Inputs may be normal containers such as MKV, MP4, AVI, and others supported by the bundled FFmpeg runtime, or supported elementary media such as H.264, MPEG-2/VOB, AAC, AC-3, MP3, DTS, SRT, WebVTT, SUP, and similar formats.
 
-The input button controls which category is imported into **Select Streams**. For example, adding an MKV through **CHOOSE AUDIO FILES** exposes its audio tracks but not its video or subtitle tracks. Select the exact streams you want, optionally add a valid FFMETADATA1 chapter file, choose the destination, and press **MUX TO MKV**.
+**CHOOSE MOVIE FILES** adds every probed stream from each selected movie/container to **Select Streams**, including video, audio, subtitle, attachment/data streams and an embedded chapter-set row when chapters are present. The Audio and Subtitle buttons remain filtered so adding the same MKV through **CHOOSE AUDIO FILES FROM MKV or RAW** exposes only its audio streams, while **CHOOSE SUBTITLE FILES FROM MKV or RAW** exposes only subtitle streams.
+
+Embedded chapters can be selected from a movie input. Alternatively, **CHOOSE CHAPTER FILE FROM MKV or RAW** accepts either an MKV containing chapters or valid `FFMETADATA1`; a dedicated chapter source overrides selected movie chapters. Select the exact streams you want, choose the destination, and press **MUX TO MKV**.
 
 Android/ChromeOS stages selected documents and the in-progress output in private temporary storage because Storage Access Framework documents are not always directly seekable. For VobSub subtitles on Android/ChromeOS, select the matching `.idx` and `.sub` files together. See [`docs/ADVANCED_MERGER.md`](docs/ADVANCED_MERGER.md) for details.
 
@@ -108,29 +110,29 @@ Use unencrypted DVD-Video sources or media you are authorized to process. MattMu
 
 ### Windows
 
-Download one of these from the [MattMux 1.4.3 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.3):
+Download one of these from the [MattMux 1.4.4 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.4):
 
-- `MattMux-1.4.3-Windows-All-in-One.exe` — easiest single-file option
-- `MattMux-1.4.3-Windows-Setup.exe` — normal installer
-- `MattMux-1.4.3-Windows-Portable.zip` — portable package with bundled tools and portable data directory
+- `MattMux-1.4.4-Windows-All-in-One.exe` — easiest single-file option
+- `MattMux-1.4.4-Windows-Setup.exe` — normal installer
+- `MattMux-1.4.4-Windows-Portable.zip` — portable package with bundled tools and portable data directory
 
 ### Linux standalone
 
 ```bash
-chmod +x MattMux-1.4.3-Linux-amd64Standalone
-./MattMux-1.4.3-Linux-amd64Standalone
+chmod +x MattMux-1.4.4-Linux-amd64Standalone
+./MattMux-1.4.4-Linux-amd64Standalone
 ```
 
 ### Debian / Ubuntu
 
 ```bash
-sudo apt install ./MattMux-1.4.3-Linux-amd64.deb
+sudo apt install ./MattMux-1.4.4-Linux-amd64.deb
 mattmux
 ```
 
 ### Android / ChromeOS
 
-For Android phones/tablets, download `MattMux-1.4.3-Android.apk`. For Chromebooks, download `MattMux-1.4.3-ChromeOS.apk` from the [MattMux 1.4.3 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.3). They are the same persistently signed universal APK published under device-friendly filenames.
+For Android phones/tablets, download `MattMux-1.4.4-Android.apk`. For Chromebooks, download `MattMux-1.4.4-ChromeOS.apk` from the [MattMux 1.4.4 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.4). They are the same persistently signed universal APK published under device-friendly filenames.
 
 ### Output location behavior
 
@@ -188,13 +190,13 @@ See [`RELEASING.md`](RELEASING.md) for the full release policy.
 
 ## Release history
 
-MattMux **1.4.0** was the first unified release. MattMux **1.4.1** introduced persistent Android distribution signing plus the release-audit fixes. MattMux **1.4.2** added explicit Android phone/tablet and ChromeOS APK asset names for the same signed universal build. MattMux **1.4.3** adds the cross-platform Advanced Merger.
+MattMux **1.4.0** was the first unified release. MattMux **1.4.1** introduced persistent Android distribution signing plus the release-audit fixes. MattMux **1.4.2** added explicit Android phone/tablet and ChromeOS APK asset names for the same signed universal build. MattMux **1.4.3** introduced the cross-platform Advanced Merger. MattMux **1.4.4** expands it with all-stream movie imports, embedded chapter selection, MKV/FFMETADATA1 chapter overrides, and metadata preservation.
 
 MattMux previously used separate platform-specific development release lines. Those obsolete release entries and tags have been retired now that the unified release model is active.
 
 Their development remains preserved in the Git history. The repository also retains the `archive/pre-single-trunk-history` archive tag for earlier history.
 
-For current downloads, use the unified **MattMux 1.4.3** release. Future public releases will continue to use one shared version and one GitHub Release for all supported platforms.
+For current downloads, use the unified **MattMux 1.4.4** release. Future public releases will continue to use one shared version and one GitHub Release for all supported platforms.
 
 ## Third-party runtime tools
 

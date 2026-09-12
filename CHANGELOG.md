@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.4 — 2026-09-12
+
+- Update **CHOOSE MOVIE FILES** so movie/container inputs expose every probed stream in **Select Streams**, including video, audio, subtitle, attachment/data streams and an embedded chapter-set checkbox when chapters are present.
+- Keep **CHOOSE AUDIO FILES FROM MKV or RAW** and **CHOOSE SUBTITLE FILES FROM MKV or RAW** category-filtered so only the requested stream type is added from containers or raw/elementary inputs.
+- Allow chapters to come from a selected movie's embedded chapter set or from **CHOOSE CHAPTER FILE FROM MKV or RAW** using either an MKV containing chapters or a valid `FFMETADATA1` file; a dedicated chapter source overrides movie chapter selections.
+- Preserve chapter titles and stream metadata during desktop muxing, including attachment filenames, while keeping explicit stream maps and lossless stream copy.
+- Extend Android/ChromeOS native merger probing and muxing to the same all-stream movie behavior, embedded chapters, MKV/FFMETADATA1 chapter overrides, metadata copying, and attachment/data stream handling.
+- Add cross-platform regression coverage for embedded movie chapters, chapter-title preservation, all-stream movie imports, raw media inputs, package builds, and the exact Windows/Linux/Android release paths.
+
 ## 1.4.3 — 2026-09-12
 
 - Add an **Advanced Merger** tab on Windows, Linux, Android, and ChromeOS with multiple-file selection, category-filtered video/audio/subtitle tracks, optional FFMETADATA1 chapters, output-folder and filename selection, and lossless muxing to MKV.

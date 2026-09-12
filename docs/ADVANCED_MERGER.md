@@ -1,27 +1,41 @@
 # Advanced Merger
 
-Advanced Merger combines selected video, audio, subtitle, and optional chapter data into a new Matroska (`.mkv`) file without transcoding.
+Advanced Merger combines selected video, audio, subtitle, attachment/data, and optional chapter data into a new Matroska (`.mkv`) file without transcoding.
 
 The feature is available from the **Advanced Merger** tab. It is separate from the DVD-title remux workflow.
 
 ## Inputs
 
-- **CHOOSE MOVIE FILES** accepts containers and elementary video files understood by the bundled FFmpeg runtime. Only video streams discovered in these inputs are added to **Select Streams**.
-- **CHOOSE AUDIO FILES** accepts containers and elementary audio files understood by FFmpeg. Only audio streams are added to **Select Streams**.
-- **CHOOSE SUBTITLE FILES** accepts containers and subtitle files understood by FFmpeg. Only subtitle streams are added to **Select Streams**.
-- **CHOOSE CHAPTER FILE** accepts one FFmetadata chapter file. It must start with `;FFMETADATA1` and contain valid chapters.
+- **CHOOSE MOVIE FILES** accepts FFmpeg-supported containers and elementary media files. Every probed stream in these inputs is added to **Select Streams**: video, audio, subtitle, attachment/data/other streams, plus one selectable embedded chapter-set row when the source contains chapters.
+- **CHOOSE AUDIO FILES FROM MKV or RAW** accepts containers and elementary audio files understood by FFmpeg. Only audio streams are added to **Select Streams**.
+- **CHOOSE SUBTITLE FILES FROM MKV or RAW** accepts containers and subtitle files understood by FFmpeg. Only subtitle streams are added to **Select Streams**.
+- **CHOOSE CHAPTER FILE FROM MKV or RAW** accepts one chapter override source. The source may be a valid `FFMETADATA1` file or an MKV containing valid chapters.
 
-A source container may contain many kinds of streams. The button used to add it determines which stream category MattMux exposes. For example, adding the same MKV through **CHOOSE AUDIO FILES** exposes its audio tracks but not its video or subtitle tracks.
+Movie inputs intentionally differ from the filtered Audio and Subtitle buttons. For example, adding an MKV through **CHOOSE MOVIE FILES** can expose its video, audio, subtitle, attachment/data streams and embedded chapter set at the same time. Adding that same MKV through **CHOOSE AUDIO FILES FROM MKV or RAW** exposes only its audio tracks.
 
 Raw/elementary inputs are supported when the bundled FFmpeg runtime can demux them, including common H.264, MPEG-2/VOB, AAC, AC-3, MP3, DTS, SRT, WebVTT, SUP and similar formats.
 
 For VobSub on Android/ChromeOS, select the matching `.idx` and `.sub` files together so MattMux can stage the sidecar pair before probing.
 
-## Stream selection and output
+## Stream and chapter selection
 
-Every discovered matching stream is initially selected. Clear any checkbox you do not want in the output, choose the output folder, enter an `.mkv` filename, and press **MUX TO MKV**.
+Every discovered stream or chapter set is initially selected. Clear any checkbox you do not want in the output.
+
+Embedded chapters are represented as chapter-set checkboxes because chapters are container metadata rather than packet streams. When no dedicated chapter override is chosen, select at most one movie chapter set. If more than one movie chapter set is selected, MattMux asks you to choose only one.
+
+A chapter source chosen with **CHOOSE CHAPTER FILE FROM MKV or RAW** overrides selected embedded movie chapters. The dedicated picker intentionally accepts MKV or `FFMETADATA1`; movie inputs themselves may carry embedded chapters in other FFmpeg-supported containers such as MP4.
+
+At least one non-chapter stream must remain selected before muxing.
+
+## Output and metadata behavior
+
+Choose the output folder, enter an `.mkv` filename, and press **MUX TO MKV**.
 
 MattMux maps the exact selected input stream indexes and uses stream copy (`-c copy` on desktop, equivalent native libav packet copying on Android/ChromeOS). It does not intentionally re-encode video or audio. Desktop inputs use generated presentation timestamps (`-fflags +genpts`) before muxing.
+
+Desktop muxing preserves global metadata from the first media input and explicitly copies metadata for each selected stream. This includes stream language/title metadata and attachment filenames where present. Chapter titles are preserved when chapters are copied from either an embedded movie chapter set or the dedicated chapter source.
+
+Android/ChromeOS performs the equivalent selection through the native merger path, including attachment/data streams, container metadata, embedded chapters, and MKV/FFMETADATA1 chapter overrides.
 
 Existing output files are not overwritten. Cancel stops the active probe/copy/mux operation and partial operation-owned output is not promoted to the requested final filename.
 
@@ -36,9 +50,9 @@ The device needs enough free temporary space for the selected input copies plus 
 A selection equivalent to this FFmpeg command can be built through the UI:
 
 ```text
-ffmpeg -i input.mp4 -i input.mkv -i input.ac3 -i input.srt \
-  -map 1:v -map 0:a -map 2:a -map 1:s:0 -map 3:s \
-  -c copy output.mkv
+ffmpeg -i input2.mkv -i input.mp4 -i input.mkv -i input.ac3 -i input.srt \
+  -map 2:v -map 1:a -map 3:a -map 2:s:0 -map 4:s \
+  -map_chapters 0 -c copy output.mkv
 ```
 
-MattMux constructs its maps from the individual stream checkboxes rather than mapping every stream of a category automatically.
+MattMux constructs its maps from the individual stream checkboxes rather than mapping every stream of a category automatically. The chapter source is resolved separately from packet-stream maps so embedded chapters or a dedicated chapter override can be selected without treating chapters as ordinary streams.
