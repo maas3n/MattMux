@@ -92,8 +92,10 @@ func (g *linuxGUI) build() {
 	sourceRow := container.NewBorder(nil, nil, nil, container.NewHBox(g.dvdBtn, g.isoBtn), g.sourceEntry)
 	outputRow := container.NewBorder(nil, nil, nil, g.outputBtn, g.outputEntry)
 	titleRow := container.NewBorder(nil, nil, nil, container.NewHBox(g.scanBtn, g.metaBtn, aboutBtn), g.titleSelect)
+	timestampNotice := widget.NewLabel("Remux uses fixed timestamps (-fflags +genpts).")
+	timestampNotice.Wrapping = fyne.TextWrapWord
 	actions := container.NewHBox(layout.NewSpacer(), g.remuxBtn, g.cancelBtn)
-	g.window.SetContent(container.NewPadded(container.NewVBox(header, widget.NewSeparator(), widget.NewLabelWithStyle("Source", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), sourceRow, widget.NewLabel("Choose a DVD folder / VIDEO_TS structure or an ISO image."), widget.NewSeparator(), widget.NewLabelWithStyle("Destination", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), outputRow, widget.NewSeparator(), widget.NewLabelWithStyle("DVD Title", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), titleRow, g.trackSummary, g.preserve, widget.NewSeparator(), g.progress, g.status, layout.NewSpacer(), actions)))
+	g.window.SetContent(container.NewPadded(container.NewVBox(header, widget.NewSeparator(), widget.NewLabelWithStyle("Source", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), sourceRow, widget.NewLabel("Choose a DVD folder / VIDEO_TS structure or an ISO image."), widget.NewSeparator(), widget.NewLabelWithStyle("Destination", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), outputRow, widget.NewSeparator(), widget.NewLabelWithStyle("DVD Title", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), titleRow, g.trackSummary, g.preserve, widget.NewSeparator(), g.progress, g.status, layout.NewSpacer(), timestampNotice, actions)))
 }
 
 func (g *linuxGUI) chooseDVDFolder() {

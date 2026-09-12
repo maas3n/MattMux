@@ -120,23 +120,27 @@ func scanTitles(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	maxTitle := 99
+	if !strings.EqualFold(filepath.Ext(src), ".iso") {
+		count, countErr := ReadDVDTitleCount(src)
+		if countErr != nil {
+			return fmt.Errorf("Could not read DVD title table: %w", countErr)
+		}
+		maxTitle = count
+	}
+
 	var titles []titleInfo
-	misses := 0
-	for n := 1; n <= 99; n++ {
+	for n := 1; n <= maxTitle; n++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		setStatus(fmt.Sprintf("Scanning DVD title %d…", n))
-		setProgress(float64(n-1) / 99)
+		setStatus(fmt.Sprintf("Scanning DVD title %d of %d…", n, maxTitle))
+		setProgress(float64(n-1) / float64(maxTitle))
 		d, err := probeDuration(ctx, tools.ffprobe, src, n)
 		if err != nil {
-			misses++
-			if (len(titles) > 0 && misses >= 3) || (len(titles) == 0 && n >= 12) {
-				break
-			}
 			continue
 		}
-		misses = 0
 		titles = append(titles, titleInfo{Number: n, Duration: d})
 	}
 	if len(titles) == 0 {
@@ -306,7 +310,7 @@ func remuxSelected(ctx context.Context) error {
 		setStatus(fmt.Sprintf("Remuxing title %d to %s…", t.Number, filepath.Base(final)))
 	}
 	setProgress(0)
-	args := []string{"-hide_banner", "-nostdin", "-y", "-probesize", "100M", "-analyzeduration", "100M", "-f", "dvdvideo", "-title", strconv.Itoa(t.Number)}
+	args := []string{"-hide_banner", "-nostdin", "-y", "-fflags", "+genpts", "-probesize", "100M", "-analyzeduration", "100M", "-f", "dvdvideo", "-title", strconv.Itoa(t.Number)}
 	if preserveChapters {
 		args = append(args, "-preindex", "1")
 	}

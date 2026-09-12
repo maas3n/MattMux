@@ -49,6 +49,32 @@ type dvdPGC struct {
 	cellData     []byte // cells * 24 bytes
 }
 
+// ReadDVDTitleCount returns the number of global DVD titles declared by
+// VIDEO_TS.IFO's TT_SRPT table. It intentionally handles VIDEO_TS directory
+// sources only; ISO/UDF sources continue through the FFmpeg fallback scanner.
+func ReadDVDTitleCount(source string) (int, error) {
+	videoTS, err := findVideoTSDir(source)
+	if err != nil {
+		return 0, err
+	}
+	vmg, err := readIFO(filepath.Join(videoTS, "VIDEO_TS.IFO"), "DVDVIDEO-VMG")
+	if err != nil {
+		return 0, err
+	}
+	table, _, err := sectorTable(vmg, 0xC4)
+	if err != nil {
+		return 0, fmt.Errorf("TT_SRPT: %w", err)
+	}
+	n, err := be16(vmg, table)
+	if err != nil {
+		return 0, err
+	}
+	if n == 0 || n > 999 {
+		return 0, fmt.Errorf("TT_SRPT has invalid title count %d", n)
+	}
+	return int(n), nil
+}
+
 // ReadDVDChapters reads chapter timestamps directly from a VIDEO_TS directory.
 // It deliberately does not parse ISO/UDF images; use ffprobe as the fallback
 // for ISO sources and unusual/branching DVD authoring.
@@ -257,21 +283,53 @@ func mapGlobalTitle(vmg []byte, globalTitle int) (DVDTitleLocation, error) {
 
 func parseVTSPTTTable(vts []byte) ([][]dvdPTT, error) {
 	base, end, err := sectorTable(vts, 0xC8)
-	if err != nil { return nil, fmt.Errorf("VTS_PTT_SRPT: %w", err) }
-	n16, err := be16(vts, base); if err != nil { return nil, err }
+	if err != nil {
+		return nil, fmt.Errorf("VTS_PTT_SRPT: %w", err)
+	}
+	n16, err := be16(vts, base)
+	if err != nil {
+		return nil, err
+	}
 	n := int(n16)
-	if n == 0 || n > 999 { return nil, fmt.Errorf("VTS_PTT_SRPT has invalid title count %d", n) }
+	if n == 0 || n > 999 {
+		return nil, fmt.Errorf("VTS_PTT_SRPT has invalid title count %d", n)
+	}
 	offsetsEnd := base + 8 + n*4
-	if offsetsEnd > end { return nil, fmt.Errorf("VTS_PTT_SRPT offset table is truncated") }
+	if offsetsEnd > end {
+		return nil, fmt.Errorf("VTS_PTT_SRPT offset table is truncated")
+	}
 	offsets := make([]int, n)
-	for i := 0; i < n; i++ { rel, err := be32(vts, base+8+i*4); if err != nil { return nil, err }; offsets[i] = int(rel) }
+	for i := 0; i < n; i++ {
+		rel, err := be32(vts, base+8+i*4)
+		if err != nil {
+			return nil, err
+		}
+		offsets[i] = int(rel)
+	}
 	titles := make([][]dvdPTT, n)
 	for i := 0; i < n; i++ {
-		start := base + offsets[i]; stop := end; if i+1 < n { stop = base + offsets[i+1] }
-		if start < offsetsEnd || stop < start || stop > end || (stop-start)%4 != 0 { return nil, fmt.Errorf("VTS_PTT_SRPT title %d has invalid offsets", i+1) }
+		start := base + offsets[i]
+		stop := end
+		if i+1 < n {
+			stop = base + offsets[i+1]
+		}
+		if start < offsetsEnd || stop < start || stop > end || (stop-start)%4 != 0 {
+			return nil, fmt.Errorf("VTS_PTT_SRPT title %d has invalid offsets", i+1)
+		}
 		count := (stop - start) / 4
 		ptts := make([]dvdPTT, 0, count)
-		for j := 0; j < count; j++ { off := start + j*4; pgcn, err := be16(vts, off); if err != nil { return nil, err }; pgn, err := be16(vts, off+2); if err != nil { return nil, err }; ptts = append(ptts, dvdPTT{pgcn: pgcn, pgn: pgn}) }
+		for j := 0; j < count; j++ {
+			off := start + j*4
+			pgcn, err := be16(vts, off)
+			if err != nil {
+				return nil, err
+			}
+			pgn, err := be16(vts, off+2)
+			if err != nil {
+				return nil, err
+			}
+			ptts = append(ptts, dvdPTT{pgcn: pgcn, pgn: pgn})
+		}
 		titles[i] = ptts
 	}
 	return titles, nil
@@ -279,24 +337,64 @@ func parseVTSPTTTable(vts []byte) ([][]dvdPTT, error) {
 
 func parsePGC(vts []byte, pgcn uint16) (dvdPGC, error) {
 	var out dvdPGC
-	base, end, err := sectorTable(vts, 0xCC); if err != nil { return out, fmt.Errorf("VTS_PGCIT: %w", err) }
-	n, err := be16(vts, base); if err != nil { return out, err }
-	if pgcn < 1 || pgcn > n { return out, fmt.Errorf("%w: PGC %d is outside PGCI table (1..%d)", ErrNativeDVDChaptersUnsupported, pgcn, n) }
+	base, end, err := sectorTable(vts, 0xCC)
+	if err != nil {
+		return out, fmt.Errorf("VTS_PGCIT: %w", err)
+	}
+	n, err := be16(vts, base)
+	if err != nil {
+		return out, err
+	}
+	if pgcn < 1 || pgcn > n {
+		return out, fmt.Errorf("%w: PGC %d is outside PGCI table (1..%d)", ErrNativeDVDChaptersUnsupported, pgcn, n)
+	}
 	srp := base + 8 + (int(pgcn)-1)*8
-	if srp+8 > end { return out, fmt.Errorf("PGCI SRP %d is truncated", pgcn) }
-	rel, err := be32(vts, srp+4); if err != nil { return out, err }
+	if srp+8 > end {
+		return out, fmt.Errorf("PGCI SRP %d is truncated", pgcn)
+	}
+	rel, err := be32(vts, srp+4)
+	if err != nil {
+		return out, err
+	}
 	pgcBase := base + int(rel)
-	if pgcBase < base || pgcBase+0xEC > end { return out, fmt.Errorf("PGC %d header is outside PGCI", pgcn) }
-	out.programs = int(vts[pgcBase+0x02]); out.cells = int(vts[pgcBase+0x03]); out.stillTime = vts[pgcBase+0xA2]; out.playbackMode = vts[pgcBase+0xA3]
-	if out.programs < 1 || out.cells < 1 || out.programs > out.cells { return out, fmt.Errorf("PGC %d has invalid program/cell counts (%d/%d)", pgcn, out.programs, out.cells) }
-	programMapRel, err := be16(vts, pgcBase+0xE6); if err != nil { return out, err }
-	cellRel, err := be16(vts, pgcBase+0xE8); if err != nil { return out, err }
-	if programMapRel == 0 || cellRel == 0 { return out, fmt.Errorf("%w: PGC %d has no program map or cell playback table", ErrNativeDVDChaptersUnsupported, pgcn) }
-	pmStart := pgcBase + int(programMapRel); pmEnd := pmStart + out.programs; cellStart := pgcBase + int(cellRel); cellEnd := cellStart + out.cells*24
-	if pmStart < pgcBase || pmEnd > end || cellStart < pgcBase || cellEnd > end { return out, fmt.Errorf("PGC %d tables are truncated", pgcn) }
-	out.programMap = append([]byte(nil), vts[pmStart:pmEnd]...); out.cellData = append([]byte(nil), vts[cellStart:cellEnd]...)
+	if pgcBase < base || pgcBase+0xEC > end {
+		return out, fmt.Errorf("PGC %d header is outside PGCI", pgcn)
+	}
+	out.programs = int(vts[pgcBase+0x02])
+	out.cells = int(vts[pgcBase+0x03])
+	out.stillTime = vts[pgcBase+0xA2]
+	out.playbackMode = vts[pgcBase+0xA3]
+	if out.programs < 1 || out.cells < 1 || out.programs > out.cells {
+		return out, fmt.Errorf("PGC %d has invalid program/cell counts (%d/%d)", pgcn, out.programs, out.cells)
+	}
+	programMapRel, err := be16(vts, pgcBase+0xE6)
+	if err != nil {
+		return out, err
+	}
+	cellRel, err := be16(vts, pgcBase+0xE8)
+	if err != nil {
+		return out, err
+	}
+	if programMapRel == 0 || cellRel == 0 {
+		return out, fmt.Errorf("%w: PGC %d has no program map or cell playback table", ErrNativeDVDChaptersUnsupported, pgcn)
+	}
+	pmStart := pgcBase + int(programMapRel)
+	pmEnd := pmStart + out.programs
+	cellStart := pgcBase + int(cellRel)
+	cellEnd := cellStart + out.cells*24
+	if pmStart < pgcBase || pmEnd > end || cellStart < pgcBase || cellEnd > end {
+		return out, fmt.Errorf("PGC %d tables are truncated", pgcn)
+	}
+	out.programMap = append([]byte(nil), vts[pmStart:pmEnd]...)
+	out.cellData = append([]byte(nil), vts[cellStart:cellEnd]...)
 	prev := 0
-	for i, c := range out.programMap { cell := int(c); if cell < 1 || cell > out.cells || cell <= prev { return out, fmt.Errorf("PGC %d program %d has invalid entry cell %d", pgcn, i+1, cell) }; prev = cell }
+	for i, c := range out.programMap {
+		cell := int(c)
+		if cell < 1 || cell > out.cells || cell <= prev {
+			return out, fmt.Errorf("PGC %d program %d has invalid entry cell %d", pgcn, i+1, cell)
+		}
+		prev = cell
+	}
 	return out, nil
 }
 
@@ -305,7 +403,9 @@ func validatePGCCellStructure(pgc dvdPGC) error {
 		return fmt.Errorf("%w: PGC cell playback table has invalid size", ErrNativeDVDChaptersUnsupported)
 	}
 	programStart := make(map[int]bool, len(pgc.programMap))
-	for _, c := range pgc.programMap { programStart[int(c)] = true }
+	for _, c := range pgc.programMap {
+		programStart[int(c)] = true
+	}
 	angleBlock := false
 	for cell := 1; cell <= pgc.cells; cell++ {
 		flags := pgc.cellData[(cell-1)*24]
@@ -316,15 +416,25 @@ func validatePGCCellStructure(pgc dvdPGC) error {
 		}
 		switch blockType {
 		case 0:
-			if mode != 0 || angleBlock { return fmt.Errorf("%w: malformed DVD angle block at cell %d", ErrNativeDVDChaptersUnsupported, cell) }
+			if mode != 0 || angleBlock {
+				return fmt.Errorf("%w: malformed DVD angle block at cell %d", ErrNativeDVDChaptersUnsupported, cell)
+			}
 		case 1:
 			switch mode {
 			case 1:
-				if angleBlock { return fmt.Errorf("%w: nested DVD angle block at cell %d", ErrNativeDVDChaptersUnsupported, cell) }; angleBlock = true
+				if angleBlock {
+					return fmt.Errorf("%w: nested DVD angle block at cell %d", ErrNativeDVDChaptersUnsupported, cell)
+				}
+				angleBlock = true
 			case 2:
-				if !angleBlock { return fmt.Errorf("%w: orphan middle angle cell %d", ErrNativeDVDChaptersUnsupported, cell) }
+				if !angleBlock {
+					return fmt.Errorf("%w: orphan middle angle cell %d", ErrNativeDVDChaptersUnsupported, cell)
+				}
 			case 3:
-				if !angleBlock { return fmt.Errorf("%w: orphan last angle cell %d", ErrNativeDVDChaptersUnsupported, cell) }; angleBlock = false
+				if !angleBlock {
+					return fmt.Errorf("%w: orphan last angle cell %d", ErrNativeDVDChaptersUnsupported, cell)
+				}
+				angleBlock = false
 			default:
 				return fmt.Errorf("%w: invalid DVD angle block mode at cell %d", ErrNativeDVDChaptersUnsupported, cell)
 			}
@@ -332,69 +442,137 @@ func validatePGCCellStructure(pgc dvdPGC) error {
 			return fmt.Errorf("%w: unsupported DVD cell block type %d at cell %d", ErrNativeDVDChaptersUnsupported, blockType, cell)
 		}
 	}
-	if angleBlock { return fmt.Errorf("%w: unterminated DVD angle block", ErrNativeDVDChaptersUnsupported) }
+	if angleBlock {
+		return fmt.Errorf("%w: unterminated DVD angle block", ErrNativeDVDChaptersUnsupported)
+	}
 	return nil
 }
 
 func pgcProgramTimeline(pgc dvdPGC) ([]time.Duration, time.Duration, error) {
-	if err := validatePGCCellStructure(pgc); err != nil { return nil, 0, err }
+	if err := validatePGCCellStructure(pgc); err != nil {
+		return nil, 0, err
+	}
 	starts := make([]time.Duration, pgc.programs)
 	var total time.Duration
 	for p := 0; p < pgc.programs; p++ {
 		starts[p] = total
-		firstCell := int(pgc.programMap[p]); lastCell := pgc.cells
-		if p+1 < pgc.programs { lastCell = int(pgc.programMap[p+1]) - 1 }
-		if firstCell < 1 || lastCell < firstCell || lastCell > pgc.cells { return nil, 0, fmt.Errorf("invalid cell span for program %d", p+1) }
+		firstCell := int(pgc.programMap[p])
+		lastCell := pgc.cells
+		if p+1 < pgc.programs {
+			lastCell = int(pgc.programMap[p+1]) - 1
+		}
+		if firstCell < 1 || lastCell < firstCell || lastCell > pgc.cells {
+			return nil, 0, fmt.Errorf("invalid cell span for program %d", p+1)
+		}
 		for cell := firstCell; cell <= lastCell; cell++ {
 			entry := pgc.cellData[(cell-1)*24 : cell*24]
 			mode := entry[0] >> 6
-			if mode == 2 || mode == 3 { continue }
-			if entry[2] != 0 { return nil, 0, fmt.Errorf("%w: cell %d uses still-time semantics", ErrNativeDVDChaptersUnsupported, cell) }
-			d, err := decodeDVDTime(entry[4:8]); if err != nil { return nil, 0, fmt.Errorf("cell %d playback time: %w", cell, err) }
+			if mode == 2 || mode == 3 {
+				continue
+			}
+			if entry[2] != 0 {
+				return nil, 0, fmt.Errorf("%w: cell %d uses still-time semantics", ErrNativeDVDChaptersUnsupported, cell)
+			}
+			d, err := decodeDVDTime(entry[4:8])
+			if err != nil {
+				return nil, 0, fmt.Errorf("cell %d playback time: %w", cell, err)
+			}
 			total += d
 		}
 	}
-	if total <= 0 { return nil, 0, fmt.Errorf("%w: PGC duration is zero", ErrNativeDVDChaptersUnsupported) }
+	if total <= 0 {
+		return nil, 0, fmt.Errorf("%w: PGC duration is zero", ErrNativeDVDChaptersUnsupported)
+	}
 	return starts, total, nil
 }
 
 func decodeDVDTime(b []byte) (time.Duration, error) {
-	if len(b) < 4 { return 0, errors.New("DVD time field is truncated") }
-	hh, ok := decodeBCD(b[0]); if !ok { return 0, fmt.Errorf("invalid BCD hours 0x%02x", b[0]) }
-	mm, ok := decodeBCD(b[1]); if !ok || mm >= 60 { return 0, fmt.Errorf("invalid BCD minutes 0x%02x", b[1]) }
-	ss, ok := decodeBCD(b[2]); if !ok || ss >= 60 { return 0, fmt.Errorf("invalid BCD seconds 0x%02x", b[2]) }
-	frameByte := b[3]; rateCode := frameByte >> 6; frameTens := (frameByte >> 4) & 0x03; frameUnits := frameByte & 0x0F
-	if frameUnits > 9 { return 0, fmt.Errorf("invalid BCD frame byte 0x%02x", frameByte) }
+	if len(b) < 4 {
+		return 0, errors.New("DVD time field is truncated")
+	}
+	hh, ok := decodeBCD(b[0])
+	if !ok {
+		return 0, fmt.Errorf("invalid BCD hours 0x%02x", b[0])
+	}
+	mm, ok := decodeBCD(b[1])
+	if !ok || mm >= 60 {
+		return 0, fmt.Errorf("invalid BCD minutes 0x%02x", b[1])
+	}
+	ss, ok := decodeBCD(b[2])
+	if !ok || ss >= 60 {
+		return 0, fmt.Errorf("invalid BCD seconds 0x%02x", b[2])
+	}
+	frameByte := b[3]
+	rateCode := frameByte >> 6
+	frameTens := (frameByte >> 4) & 0x03
+	frameUnits := frameByte & 0x0F
+	if frameUnits > 9 {
+		return 0, fmt.Errorf("invalid BCD frame byte 0x%02x", frameByte)
+	}
 	frames := int(frameTens)*10 + int(frameUnits)
 	base := time.Duration(hh)*time.Hour + time.Duration(mm)*time.Minute + time.Duration(ss)*time.Second
 	switch rateCode {
 	case 1:
-		if frames >= 25 { return 0, fmt.Errorf("PAL frame %d is out of range", frames) }
+		if frames >= 25 {
+			return 0, fmt.Errorf("PAL frame %d is out of range", frames)
+		}
 		return base + time.Duration(int64(time.Second)*int64(frames)/25), nil
 	case 3:
-		if frames >= 30 { return 0, fmt.Errorf("NTSC frame %d is out of range", frames) }
+		if frames >= 30 {
+			return 0, fmt.Errorf("NTSC frame %d is out of range", frames)
+		}
 		return base + time.Duration(int64(time.Second)*int64(frames)/30), nil
 	case 0, 2:
-		if frames == 0 { return base, nil }
+		if frames == 0 {
+			return base, nil
+		}
 		return 0, fmt.Errorf("unsupported DVD frame-rate code %d with nonzero frame fraction", rateCode)
 	default:
 		panic("unreachable")
 	}
 }
 
-func decodeBCD(b byte) (int, bool) { hi, lo := b>>4, b&0x0F; if hi > 9 || lo > 9 { return 0, false }; return int(hi)*10 + int(lo), true }
+func decodeBCD(b byte) (int, bool) {
+	hi, lo := b>>4, b&0x0F
+	if hi > 9 || lo > 9 {
+		return 0, false
+	}
+	return int(hi)*10 + int(lo), true
+}
 
 func sectorTable(b []byte, pointerOff int) (int, int, error) {
-	sector, err := be32(b, pointerOff); if err != nil { return 0, 0, err }
-	if sector == 0 { return 0, 0, fmt.Errorf("sector pointer at 0x%X is zero", pointerOff) }
+	sector, err := be32(b, pointerOff)
+	if err != nil {
+		return 0, 0, err
+	}
+	if sector == 0 {
+		return 0, 0, fmt.Errorf("sector pointer at 0x%X is zero", pointerOff)
+	}
 	base64 := uint64(sector) * dvdSectorSize
-	if base64 > uint64(len(b)) || base64+8 > uint64(len(b)) { return 0, 0, fmt.Errorf("sector pointer at 0x%X points outside IFO", pointerOff) }
+	if base64 > uint64(len(b)) || base64+8 > uint64(len(b)) {
+		return 0, 0, fmt.Errorf("sector pointer at 0x%X points outside IFO", pointerOff)
+	}
 	base := int(base64)
-	endAddr, err := be32(b, base+4); if err != nil { return 0, 0, err }
+	endAddr, err := be32(b, base+4)
+	if err != nil {
+		return 0, 0, err
+	}
 	end64 := base64 + uint64(endAddr) + 1
-	if end64 > uint64(len(b)) || end64 < base64+8 { return 0, 0, fmt.Errorf("table at sector %d has invalid end address", sector) }
+	if end64 > uint64(len(b)) || end64 < base64+8 {
+		return 0, 0, fmt.Errorf("table at sector %d has invalid end address", sector)
+	}
 	return base, int(end64), nil
 }
 
-func be16(b []byte, off int) (uint16, error) { if off < 0 || off+2 > len(b) { return 0, fmt.Errorf("u16 read at 0x%X is outside IFO", off) }; return binary.BigEndian.Uint16(b[off : off+2]), nil }
-func be32(b []byte, off int) (uint32, error) { if off < 0 || off+4 > len(b) { return 0, fmt.Errorf("u32 read at 0x%X is outside IFO", off) }; return binary.BigEndian.Uint32(b[off : off+4]), nil }
+func be16(b []byte, off int) (uint16, error) {
+	if off < 0 || off+2 > len(b) {
+		return 0, fmt.Errorf("u16 read at 0x%X is outside IFO", off)
+	}
+	return binary.BigEndian.Uint16(b[off : off+2]), nil
+}
+func be32(b []byte, off int) (uint32, error) {
+	if off < 0 || off+4 > len(b) {
+		return 0, fmt.Errorf("u32 read at 0x%X is outside IFO", off)
+	}
+	return binary.BigEndian.Uint32(b[off : off+4]), nil
+}

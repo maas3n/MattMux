@@ -393,22 +393,26 @@ func scanTitles(ctx context.Context, src string, tools toolPaths, progress progr
 	if progress == nil {
 		progress = noopProgress
 	}
+
+	maxTitle := 99
+	if !strings.EqualFold(filepath.Ext(src), ".iso") {
+		count, countErr := ReadDVDTitleCount(src)
+		if countErr != nil {
+			return nil, fmt.Errorf("could not read DVD title table: %w", countErr)
+		}
+		maxTitle = count
+	}
+
 	var titles []titleInfo
-	misses := 0
-	for n := 1; n <= 99; n++ {
+	for n := 1; n <= maxTitle; n++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		progress(float64(n-1)/99, fmt.Sprintf("Scanning DVD title %d…", n))
+		progress(float64(n-1)/float64(maxTitle), fmt.Sprintf("Scanning DVD title %d of %d…", n, maxTitle))
 		d, err := probeDuration(ctx, tools.ffprobe, src, n)
 		if err != nil {
-			misses++
-			if (len(titles) > 0 && misses >= 3) || (len(titles) == 0 && n >= 12) {
-				break
-			}
 			continue
 		}
-		misses = 0
 		titles = append(titles, titleInfo{Number: n, Duration: d})
 	}
 	if len(titles) == 0 {
@@ -418,6 +422,7 @@ func scanTitles(ctx context.Context, src string, tools toolPaths, progress progr
 	progress(1, fmt.Sprintf("Found %d title(s).", len(titles)))
 	return titles, nil
 }
+
 func longestTitle(titles []titleInfo) (titleInfo, error) {
 	if len(titles) == 0 {
 		return titleInfo{}, errors.New("no titles")
@@ -431,9 +436,25 @@ func longestTitle(titles []titleInfo) (titleInfo, error) {
 	return best, nil
 }
 func probeDuration(ctx context.Context, ffprobe, src string, title int) (time.Duration, error) {
+	d, err := probeDurationOnce(ctx, ffprobe, src, title, false)
+	if err == nil {
+		return d, nil
+	}
+	// Some DVD titles do not expose a reliable duration until dvdvideo performs
+	// its NAV-packet pre-index pass. Retry immediately in this same scan action;
+	// users never need to press Scan Titles a second time.
+	return probeDurationOnce(ctx, ffprobe, src, title, true)
+}
+
+func probeDurationOnce(ctx context.Context, ffprobe, src string, title int, preindex bool) (time.Duration, error) {
 	child, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
-	out, err := runCommand(child, ffprobe, "-v", "error", "-probesize", "100M", "-analyzeduration", "100M", "-f", "dvdvideo", "-title", strconv.Itoa(title), "-i", src, "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1")
+	args := []string{"-v", "error", "-probesize", "100M", "-analyzeduration", "100M", "-f", "dvdvideo", "-title", strconv.Itoa(title)}
+	if preindex {
+		args = append(args, "-preindex", "1")
+	}
+	args = append(args, "-i", src, "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1")
+	out, err := runCommand(child, ffprobe, args...)
 	if err != nil {
 		return 0, err
 	}
@@ -445,6 +466,7 @@ func probeDuration(ctx context.Context, ffprobe, src string, title int) (time.Du
 	}
 	return 0, errors.New("no duration")
 }
+
 func probeStreams(ctx context.Context, ffprobe, src string, title int) (ffprobeResult, error) {
 	var r ffprobeResult
 	out, err := runCommand(ctx, ffprobe, "-v", "error", "-probesize", "100M", "-analyzeduration", "100M", "-f", "dvdvideo", "-title", strconv.Itoa(title), "-i", src, "-show_streams", "-of", "json")
@@ -602,7 +624,7 @@ func remuxTitle(ctx context.Context, src string, title titleInfo, outDir string,
 	if progress == nil {
 		progress = noopProgress
 	}
-	args := []string{"-hide_banner", "-nostdin", "-y", "-probesize", "100M", "-analyzeduration", "100M", "-f", "dvdvideo", "-title", strconv.Itoa(title.Number)}
+	args := []string{"-hide_banner", "-nostdin", "-y", "-fflags", "+genpts", "-probesize", "100M", "-analyzeduration", "100M", "-f", "dvdvideo", "-title", strconv.Itoa(title.Number)}
 	if preserve {
 		args = append(args, "-preindex", "1")
 	}
