@@ -49,32 +49,6 @@ type dvdPGC struct {
 	cellData     []byte // cells * 24 bytes
 }
 
-// ReadDVDTitleCount returns the number of global DVD titles declared by
-// VIDEO_TS.IFO's TT_SRPT table. It intentionally handles VIDEO_TS directory
-// sources only; ISO/UDF sources continue through the FFmpeg fallback scanner.
-func ReadDVDTitleCount(source string) (int, error) {
-	videoTS, err := findVideoTSDir(source)
-	if err != nil {
-		return 0, err
-	}
-	vmg, err := readIFO(filepath.Join(videoTS, "VIDEO_TS.IFO"), "DVDVIDEO-VMG")
-	if err != nil {
-		return 0, err
-	}
-	table, _, err := sectorTable(vmg, 0xC4)
-	if err != nil {
-		return 0, fmt.Errorf("TT_SRPT: %w", err)
-	}
-	n, err := be16(vmg, table)
-	if err != nil {
-		return 0, err
-	}
-	if n == 0 || n > 999 {
-		return 0, fmt.Errorf("TT_SRPT has invalid title count %d", n)
-	}
-	return int(n), nil
-}
-
 // ReadDVDChapters reads chapter timestamps directly from a VIDEO_TS directory.
 // It deliberately does not parse ISO/UDF images; use ffprobe as the fallback
 // for ISO sources and unusual/branching DVD authoring.
