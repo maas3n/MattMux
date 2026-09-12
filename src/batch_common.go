@@ -113,6 +113,18 @@ func batchFileExistsFold(dir, name string) bool {
 	return false
 }
 
+func batchOutputPath(movie batchMovie, outRoot string) string {
+	dir := movie.Dir
+	if outRoot != "" {
+		dir = outRoot
+	}
+	base := sanitizeFilename(movie.Name)
+	if base == "" {
+		base = "DVD"
+	}
+	return filepath.Join(dir, base+".mkv")
+}
+
 func runBatch(ctx context.Context, opts batchOptions, progress batchProgressFunc) (batchResult, error) {
 	return runBatchWithDeps(ctx, opts, progress, batchPlatformDeps())
 }
@@ -176,6 +188,17 @@ func runBatchWithDeps(ctx context.Context, opts batchOptions, progress batchProg
 		if outRoot != "" {
 			outDir = outRoot
 		}
+		desired := batchOutputPath(movie, outRoot)
+		if _, statErr := os.Stat(desired); statErr == nil {
+			existsErr := fmt.Errorf("output already exists: %s", desired)
+			result.Failures = append(result.Failures, batchFailure{Movie: movie.Name, Err: existsErr})
+			logger.Printf("[%d/%d] skipped %s: %v", index+1, len(movies), movie.Name, existsErr)
+			continue
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			result.Failures = append(result.Failures, batchFailure{Movie: movie.Name, Err: statErr})
+			logger.Printf("[%d/%d] output check failed %s: %v", index+1, len(movies), movie.Name, statErr)
+			continue
+		}
 		final, muxErr := deps.remuxTitle(ctx, movie.Source, best, outDir, tools, func(frac float64, status string) {
 			progress(base+span*(.30+frac*.70), fmt.Sprintf("[%d/%d] %s — %s", index+1, len(movies), movie.Name, status))
 		})
@@ -183,6 +206,15 @@ func runBatchWithDeps(ctx context.Context, opts batchOptions, progress batchProg
 			result.Failures = append(result.Failures, batchFailure{Movie: movie.Name, Err: muxErr})
 			logger.Printf("[%d/%d] remux failed %s: %v", index+1, len(movies), movie.Name, muxErr)
 			continue
+		}
+		if filepath.Clean(final) != filepath.Clean(desired) {
+			if moveErr := commitOutputNoReplace(final, desired); moveErr != nil {
+				moveErr = fmt.Errorf("could not place completed MKV at %s: %w; completed MKV retained at %s", desired, moveErr, final)
+				result.Failures = append(result.Failures, batchFailure{Movie: movie.Name, Err: moveErr})
+				logger.Printf("[%d/%d] final placement failed %s: %v", index+1, len(movies), movie.Name, moveErr)
+				continue
+			}
+			final = desired
 		}
 		result.Completed++
 		result.Outputs = append(result.Outputs, final)
