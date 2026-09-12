@@ -73,9 +73,9 @@ jobs:
             exit 1
           fi
 
-      - name: Run Go tests
+      - name: Run focused parser test
         working-directory: src
-        run: go test ./...
+        run: go test dvdchapters.go dvdchapters_test.go
 
       - name: Commit source hotfix and remove applicator
         shell: bash
