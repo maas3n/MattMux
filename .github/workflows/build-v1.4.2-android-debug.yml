@@ -86,6 +86,12 @@ jobs:
           grep -Fq 'dvdnav_get_number_of_titles' source/.build-v142-android-debug.sh
           grep -Fq 'dvdnav_describe_title_chapters(nav, title - 1' source/.build-v142-android-debug.sh
 
+      - name: Upload reconstructed DEBUG helper
+        uses: actions/upload-artifact@v4
+        with:
+          name: MattMux-1.4.2-Android-DEBUG-helper
+          path: source/.build-v142-android-debug.sh
+
       - name: Host FFmpeg PATH check (non-fatal for Android DEBUG)
         shell: bash
         run: |
@@ -104,9 +110,6 @@ jobs:
           ORG_GRADLE_PROJECT_MATTMUX_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
           ORG_GRADLE_PROJECT_MATTMUX_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
           ORG_GRADLE_PROJECT_MATTMUX_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
-          # The DEBUG helper rebuilds the per-ABI prefix for libdvdread/libdvdnav.
-          # Use the libudfread source headers created by the normal Android build;
-          # that source tree survives the DEBUG prefix replacement.
           CPATH: ${{ github.workspace }}/source/android/native/.work/libudfread/src:${{ github.workspace }}/source/android/native/.work/install-arm64-v8a/include:${{ github.workspace }}/source/android/native/.work/install-arm64-v8a/include/udfread
         run: |
           set -uo pipefail
@@ -126,8 +129,6 @@ jobs:
             fi
           fi
 
-          # A false host-FFmpeg PATH error is only ignorable when the actual
-          # Android output was still produced. Never publish a missing/broken APK.
           test -s dist/MattMux-1.4.2-Android-DEBUG.apk
           test -s dist/MattMux-1.4.2-Android-DEBUG.apk.sha256
 
