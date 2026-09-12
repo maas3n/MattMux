@@ -2,20 +2,20 @@
 
 **MattMux** remuxes DVD-Video titles and combines selected media streams into MKV **without transcoding**. Windows, Linux, and Android/ChromeOS are developed together from the single `main` branch and released under one shared product version.
 
-## Download MattMux 1.4.6
+## Download MattMux 1.4.7
 
-**MattMux 1.4.6** is the current unified release line. Windows, Linux, and Android/ChromeOS packages are built from the same tagged source commit and published together in one GitHub Release.
+**MattMux 1.4.7** adds one-click DVD collection batching on Windows and Linux. Android/ChromeOS behavior is unchanged from 1.4.6; the unified tag still builds all supported platform packages from the same source commit.
 
-MattMux 1.4.6 keeps the 1.4.5 FFmpeg `dvdvideo`/`libdvdread`/`libdvdnav` title scanner and updates Windows/Linux mux input handling. DVD remuxes and Advanced Merger inputs now always use `-analyzeduration 100M -probesize 100M -fflags +genpts`, while **Start Remux** no longer enables `-preindex 1` before muxing.
+The new desktop **BATCH** tab accepts a folder whose immediate children are movie-title folders containing `VIDEO_TS` subfolders. MattMux scans each DVD through FFmpeg `dvdvideo` (`libdvdread`/`libdvdnav`), automatically chooses the longest readable title, includes every stream and chapters, and always uses `-analyzeduration 100M -probesize 100M -fflags +genpts` for the remux input.
 
-[**Download MattMux 1.4.6**](https://github.com/maas3n/MattMux/releases/tag/v1.4.6)
+[**Download MattMux 1.4.7**](https://github.com/maas3n/MattMux/releases/tag/v1.4.7)
 
 | Platform | Recommended package | Other options |
 | --- | --- | --- |
-| Windows x64 | `MattMux-1.4.6-Windows-All-in-One.exe` | Setup EXE or Portable ZIP |
-| Linux amd64 | `MattMux-1.4.6-Linux-amd64Standalone` | Self-contained `.deb` or tarball |
-| Android phone / tablet | `MattMux-1.4.6-Android.apk` | Signed universal APK |
-| ChromeOS | `MattMux-1.4.6-ChromeOS.apk` | Byte-identical alias of the Android APK |
+| Windows x64 | `MattMux-1.4.7-Windows-All-in-One.exe` | Setup EXE or Portable ZIP; Setup/Portable include `mattmux-cli.exe` |
+| Linux amd64 | `MattMux-1.4.7-Linux-amd64Standalone` | Self-contained `.deb` or tarball; packaged CLI included |
+| Android phone / tablet | `MattMux-1.4.7-Android.apk` | Signed universal APK; behavior unchanged from 1.4.6 |
+| ChromeOS | `MattMux-1.4.7-ChromeOS.apk` | Byte-identical alias of the Android APK |
 
 The release also includes source archives, third-party source/provenance files, per-platform SHA-256 manifests, and one combined `SHA256SUMS.txt`.
 
@@ -23,6 +23,14 @@ The release also includes source archives, third-party source/provenance files, 
 
 - DVD folder / `VIDEO_TS` / ISO input
 - Lossless stream-copy remuxing: no video or audio re-encoding
+- Desktop **BATCH** tab on Windows and Linux
+  - **ONECLICK BATCH MUX BUTTON** processes every immediate `Movie Title/VIDEO_TS` folder in the selected collection
+  - title discovery uses FFmpeg `dvdvideo` backed by `libdvdread`/`libdvdnav`; MattMux does not restore its old `ReadDVDTitleCount()` scanner
+  - automatically selects the longest readable DVD title
+  - includes all streams and chapters with `-c copy`
+  - always applies `-analyzeduration 100M -probesize 100M -fflags +genpts`
+  - completed MKVs go into their matching movie-title folders by default, or into one optional common output folder
+  - Windows and Linux CLI batch mode supports an optional log file
 - **Advanced Merger** for combining selected streams from multiple containers or elementary media files into MKV
   - **CHOOSE MOVIE FILES** exposes every discovered stream plus a selectable embedded chapter set when present
   - **CHOOSE AUDIO FILES FROM MKV or RAW** exposes only audio streams
@@ -40,12 +48,44 @@ The release also includes source archives, third-party source/provenance files, 
 - Windows/Linux DVD remux and Advanced Merger inputs always use `-analyzeduration 100M -probesize 100M -fflags +genpts`; DVD **Start Remux** does not pre-index before muxing
 - Optional DVD chapter preservation
 - Native Go IFO chapter parser on desktop with FFprobe fallback
-- Cancelable scans, metadata reads, remuxes, and Advanced Merger jobs
+- Cancelable scans, metadata reads, remuxes, Advanced Merger jobs, and desktop batch jobs
 - Unique operation-owned temporary outputs with validated, no-overwrite finalization on desktop
 - Pinned and SHA-256-verified third-party runtime tools
-- Windows installer, portable ZIP, and one-file All-in-One EXE
+- Windows installer, portable ZIP, one-file All-in-One EXE, and packaged batch CLI
 - Linux self-contained `.deb`, tarball, CLI, GUI, and one-file standalone executable
 - Android/ChromeOS native FFmpeg/libudfread remux and merger paths with dedicated parity tests
+
+## BATCH
+
+Open the **BATCH** tab on Windows or Linux and choose a collection folder laid out like this:
+
+```text
+Movies/
+├── Movie One/
+│   └── VIDEO_TS/
+│       ├── VIDEO_TS.IFO
+│       └── ...
+├── Movie Two/
+│   └── VIDEO_TS/
+│       ├── VIDEO_TS.IFO
+│       └── ...
+└── Movie Three/
+    └── VIDEO_TS/
+        ├── VIDEO_TS.IFO
+        └── ...
+```
+
+Click **ONECLICK BATCH MUX BUTTON** after choosing the collection. MattMux processes each immediate movie folder independently. It scans candidate titles through FFmpeg's `dvdvideo` demuxer, which uses `libdvdread`/`libdvdnav`, chooses the longest readable title, then performs a lossless all-stream MKV remux. The batch remux input always receives `-analyzeduration 100M -probesize 100M -fflags +genpts`.
+
+Leave the BATCH output field blank to place the completed MKV inside the corresponding movie-title folder. Choose an output folder to collect all completed MKVs in one destination instead. Existing output files are not overwritten.
+
+The Linux CLI and the Windows `mattmux-cli.exe` support the same batch interface:
+
+```bash
+mattmux-cli --batch --log=/my/folder/for/mattmux-batch.log /folder/containing/Movietitles /folder/for/finished/remuxes
+```
+
+`--log` is optional. The output-root argument is also optional; when it is omitted, each completed MKV is written into its corresponding movie-title folder.
 
 ## Advanced Merger
 
@@ -112,33 +152,34 @@ Use unencrypted DVD-Video sources or media you are authorized to process. MattMu
 
 ### Windows
 
-Download one of these from the [MattMux 1.4.6 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.6):
+Download one of these from the [MattMux 1.4.7 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.7):
 
-- `MattMux-1.4.6-Windows-All-in-One.exe` — easiest single-file option
-- `MattMux-1.4.6-Windows-Setup.exe` — normal installer
-- `MattMux-1.4.6-Windows-Portable.zip` — portable package with bundled tools and portable data directory
+- `MattMux-1.4.7-Windows-All-in-One.exe` — easiest single-file GUI option
+- `MattMux-1.4.7-Windows-Setup.exe` — normal installer; includes `mattmux-cli.exe`
+- `MattMux-1.4.7-Windows-Portable.zip` — portable GUI + `mattmux-cli.exe` with bundled tools and portable data directory
 
 ### Linux standalone
 
 ```bash
-chmod +x MattMux-1.4.6-Linux-amd64Standalone
-./MattMux-1.4.6-Linux-amd64Standalone
+chmod +x MattMux-1.4.7-Linux-amd64Standalone
+./MattMux-1.4.7-Linux-amd64Standalone
 ```
 
 ### Debian / Ubuntu
 
 ```bash
-sudo apt install ./MattMux-1.4.6-Linux-amd64.deb
+sudo apt install ./MattMux-1.4.7-Linux-amd64.deb
 mattmux
+mattmux-cli --version
 ```
 
 ### Android / ChromeOS
 
-For Android phones/tablets, download `MattMux-1.4.6-Android.apk`. For Chromebooks, download `MattMux-1.4.6-ChromeOS.apk` from the [MattMux 1.4.6 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.6). They are the same persistently signed universal APK published under device-friendly filenames.
+For Android phones/tablets, download `MattMux-1.4.7-Android.apk`. For Chromebooks, download `MattMux-1.4.7-ChromeOS.apk` from the [MattMux 1.4.7 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.7). They are the same persistently signed universal APK; 1.4.7 does not change Android/ChromeOS product behavior from 1.4.6.
 
 ### Output location behavior
 
-The Windows and Linux desktop GUIs default to the user's Videos directory (or home) and remember the chosen output folder. `mattmux-cli remux` instead writes to the current working directory when `--output` is omitted. The Windows All-in-One launcher may use its extraction directory as the child working directory, so the GUI output field remains authoritative.
+The Windows and Linux desktop GUIs default to the user's Videos directory (or home) and remember the chosen output folder. `mattmux-cli remux` instead writes to the current working directory when `--output` is omitted. BATCH has separate output behavior: omit its output root to write each MKV into its corresponding movie-title folder, or supply an output root to collect completed MKVs in one folder. The Windows All-in-One launcher may use its extraction directory as the child working directory, so the GUI output field remains authoritative.
 
 ## Build from source
 
@@ -192,13 +233,13 @@ See [`RELEASING.md`](RELEASING.md) for the full release policy.
 
 ## Release history
 
-MattMux **1.4.0** was the first unified release. MattMux **1.4.1** introduced persistent Android distribution signing plus the release-audit fixes. MattMux **1.4.2** added explicit Android phone/tablet and ChromeOS APK asset names for the same signed universal build. MattMux **1.4.3** introduced the cross-platform Advanced Merger. MattMux **1.4.4** expanded it with all-stream movie imports, embedded chapter selection, MKV/FFMETADATA1 chapter overrides, and metadata preservation. MattMux **1.4.5** changes Windows/Linux title scanning to rely entirely on FFmpeg `dvdvideo` with `libdvdread`/`libdvdnav` for title discovery. MattMux **1.4.6** makes robust 100M analyze/probe limits plus generated timestamps unconditional for Windows/Linux mux inputs and removes DVD remux pre-indexing while retaining the 1.4.5 libdvdread/libdvdnav title scanner.
+MattMux **1.4.0** was the first unified release. MattMux **1.4.1** introduced persistent Android distribution signing plus the release-audit fixes. MattMux **1.4.2** added explicit Android phone/tablet and ChromeOS APK asset names for the same signed universal build. MattMux **1.4.3** introduced the cross-platform Advanced Merger. MattMux **1.4.4** expanded it with all-stream movie imports, embedded chapter selection, MKV/FFMETADATA1 chapter overrides, and metadata preservation. MattMux **1.4.5** changes Windows/Linux title scanning to rely entirely on FFmpeg `dvdvideo` with `libdvdread`/`libdvdnav` for title discovery. MattMux **1.4.6** makes robust 100M analyze/probe limits plus generated timestamps unconditional for Windows/Linux mux inputs and removes DVD remux pre-indexing while retaining the 1.4.5 libdvdread/libdvdnav title scanner. MattMux **1.4.7** adds desktop one-click BATCH processing plus the matching Windows/Linux CLI batch interface.
 
 MattMux previously used separate platform-specific development release lines. Those obsolete release entries and tags have been retired now that the unified release model is active.
 
 Their development remains preserved in the Git history. The repository also retains the `archive/pre-single-trunk-history` archive tag for earlier history.
 
-For current downloads, use the unified **MattMux 1.4.6** release. Future public releases will continue to use one shared version and one GitHub Release for all supported platforms.
+For current downloads, use the unified **MattMux 1.4.7** release. Future public releases will continue to use one shared version and one GitHub Release for all supported platforms.
 
 ## Third-party runtime tools
 
