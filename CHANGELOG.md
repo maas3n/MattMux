@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.4.6 — 2026-09-12
+
+- Keep the 1.4.5 Windows/Linux **Scan Titles** implementation unchanged: title discovery remains entirely on FFmpeg `dvdvideo` with `libdvdread`/`libdvdnav`, and MattMux's old `ReadDVDTitleCount()` parser stays removed.
+- Make Windows/Linux DVD remux inputs always use `-analyzeduration 100M -probesize 100M -fflags +genpts`.
+- Remove `-preindex 1` from the Windows/Linux **Start Remux** command so remuxing starts immediately instead of pre-indexing the DVD when chapter preservation is enabled; chapter mapping remains controlled by the existing Preserve chapters option.
+- Apply the same `-analyzeduration 100M -probesize 100M -fflags +genpts` input policy to every Windows/Linux Advanced Merger media input and separate chapter input.
+- Android/ChromeOS behavior is unchanged from 1.4.5.
+
+## 1.4.5 — 2026-09-12
+
+- Hotfix Windows and Linux **Scan Titles** so both DVD folders/`VIDEO_TS` sources and ISO images are discovered through FFmpeg's `dvdvideo` demuxer, which uses `libdvdread` for DVD structure parsing and `libdvdnav` for navigation.
+- Remove MattMux's desktop `ReadDVDTitleCount()`/TT_SRPT title-count parser from the scan path; candidate title numbers 1–99 are now validated by the same `dvdvideo`/`libdvdread`/`libdvdnav` path on both desktop platforms.
+- Keep the native desktop IFO chapter parser unchanged for chapter metadata; this hotfix only changes **Scan Titles** title discovery.
+- Android/ChromeOS behavior is unchanged from 1.4.4.
+
 ## 1.4.4 — 2026-09-12
 
 - Update **CHOOSE MOVIE FILES** so movie/container inputs expose every probed stream in **Select Streams**, including video, audio, subtitle, attachment/data streams and an embedded chapter-set checkbox when chapters are present.

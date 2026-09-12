@@ -394,14 +394,11 @@ func scanTitles(ctx context.Context, src string, tools toolPaths, progress progr
 		progress = noopProgress
 	}
 
+	// FFmpeg's dvdvideo demuxer accepts title numbers 1..99 and uses
+	// libdvdread/libdvdnav as its source of truth. Deliberately probe the full
+	// title-number range instead of parsing VIDEO_TS.IFO in MattMux. This keeps
+	// folder and ISO title discovery on the same libdvdread/libdvdnav path.
 	maxTitle := 99
-	if !strings.EqualFold(filepath.Ext(src), ".iso") {
-		count, countErr := ReadDVDTitleCount(src)
-		if countErr != nil {
-			return nil, fmt.Errorf("could not read DVD title table: %w", countErr)
-		}
-		maxTitle = count
-	}
 
 	var titles []titleInfo
 	for n := 1; n <= maxTitle; n++ {
@@ -624,11 +621,9 @@ func remuxTitle(ctx context.Context, src string, title titleInfo, outDir string,
 	if progress == nil {
 		progress = noopProgress
 	}
-	args := []string{"-hide_banner", "-nostdin", "-y", "-fflags", "+genpts", "-probesize", "100M", "-analyzeduration", "100M", "-f", "dvdvideo", "-title", strconv.Itoa(title.Number)}
-	if preserve {
-		args = append(args, "-preindex", "1")
-	}
-	args = append(args, "-i", src)
+	progress(0, fmt.Sprintf("Remuxing title %d with fixed timestamps…", title.Number))
+	args := []string{"-hide_banner", "-nostdin", "-y"}
+	args = appendDesktopDVDInput(args, title.Number, src)
 	mapArgs, mapErr := ffmpegStreamMapArgs(streamIndexes)
 	if mapErr != nil {
 		return "", mapErr
@@ -669,7 +664,7 @@ func remuxTitle(ctx context.Context, src string, title titleInfo, outDir string,
 				if ratio > .995 {
 					ratio = .995
 				}
-				progress(ratio, fmt.Sprintf("Remuxing title %d… %d%%", title.Number, int(ratio*100)))
+				progress(ratio, fmt.Sprintf("Remuxing title %d with fixed timestamps… %d%%", title.Number, int(ratio*100)))
 			}
 		}
 	}

@@ -146,7 +146,7 @@ func mergerArgs(streams []mergerStream, chapters, output string) ([]string, erro
 		}
 		if _, ok := inputs[s.Path]; !ok {
 			inputs[s.Path] = len(inputs)
-			args = append(args, "-fflags", "+genpts", "-i", s.Path)
+			args = appendDesktopRobustInput(args, s.Path)
 		}
 	}
 	chapterIndex := -1
@@ -155,7 +155,7 @@ func mergerArgs(streams []mergerStream, chapters, output string) ([]string, erro
 			chapterIndex = index
 		} else {
 			chapterIndex = len(inputs)
-			args = append(args, "-i", chapters)
+			args = appendDesktopRobustInput(args, chapters)
 		}
 	}
 	seen := map[string]bool{}
