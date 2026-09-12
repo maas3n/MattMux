@@ -121,14 +121,11 @@ func scanTitles(ctx context.Context) error {
 		return err
 	}
 
+	// FFmpeg's dvdvideo demuxer accepts title numbers 1..99 and uses
+	// libdvdread/libdvdnav as its source of truth. Deliberately probe the full
+	// title-number range instead of parsing VIDEO_TS.IFO in MattMux. This keeps
+	// folder and ISO title discovery on the same libdvdread/libdvdnav path.
 	maxTitle := 99
-	if !strings.EqualFold(filepath.Ext(src), ".iso") {
-		count, countErr := ReadDVDTitleCount(src)
-		if countErr != nil {
-			return fmt.Errorf("Could not read DVD title table: %w", countErr)
-		}
-		maxTitle = count
-	}
 
 	var titles []titleInfo
 	for n := 1; n <= maxTitle; n++ {
