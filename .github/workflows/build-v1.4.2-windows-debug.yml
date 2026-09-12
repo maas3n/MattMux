@@ -35,24 +35,18 @@ jobs:
 
           p = Path('src/app_windows_2.go')
           s = p.read_text(encoding='utf-8')
-          old = '''\tmaxTitle := 99
-          \tif !strings.EqualFold(filepath.Ext(src), ".iso") {
-          \t\tcount, countErr := ReadDVDTitleCount(src)
-          \t\tif countErr != nil {
-          \t\t\treturn fmt.Errorf("Could not read DVD title table: %w", countErr)
-          \t\t}
-          \t\tmaxTitle = count
-          \t}
-          '''
-          new = '''\t// DEBUG BUILD: deliberately do not use MattMux ReadDVDTitleCount().
-          \t// Probe DVD title numbers through FFprobe's dvdvideo demuxer instead.
-          \t// The bundled GPL FFmpeg dvdvideo path is backed by libdvdnav/libdvdread.
+          start = s.find('\tmaxTitle := 99')
+          if start < 0:
+              raise SystemExit('maxTitle scan block start was not found')
+          end = s.find('\n\tvar titles []titleInfo', start)
+          if end < 0:
+              raise SystemExit('maxTitle scan block end was not found')
+          replacement = '''\t// DEBUG BUILD: discover title numbers only through FFprobe dvdvideo.
+          \t// dvdvideo in the bundled GPL FFmpeg uses libdvdnav/libdvdread.
           \tconst maxTitle = 99
           \tsetStatus("DEBUG: scanning titles through FFmpeg dvdvideo (libdvdnav/libdvdread)…")
           '''
-          if old not in s:
-              raise SystemExit('expected ReadDVDTitleCount block was not found')
-          s = s.replace(old, new, 1)
+          s = s[:start] + replacement + s[end:]
           s = s.replace('setStatus(fmt.Sprintf("Scanning DVD title %d of %d…", n, maxTitle))',
                         'setStatus(fmt.Sprintf("DEBUG dvdvideo/libdvdnav/libdvdread: scanning DVD title %d of %d…", n, maxTitle))', 1)
           p.write_text(s, encoding='utf-8', newline='')
@@ -65,8 +59,8 @@ jobs:
           p.write_text(s.replace(old, 'appVersion = "1.4.2-DEBUG"', 1), encoding='utf-8', newline='')
           '@ | python -
 
-          if (Select-String -LiteralPath .\src\app_windows_2.go -Pattern 'ReadDVDTitleCount' -Quiet) {
-            throw 'DEBUG scan still references ReadDVDTitleCount'
+          if (Select-String -LiteralPath .\src\app_windows_2.go -Pattern 'ReadDVDTitleCount\s*\(' -Quiet) {
+            throw 'DEBUG scan still calls ReadDVDTitleCount'
           }
           if (-not (Select-String -LiteralPath .\src\app_windows_4.go -Pattern '"-f", "dvdvideo"' -Quiet)) {
             throw 'dvdvideo probe path is missing'
