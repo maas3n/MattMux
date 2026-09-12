@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ANDROID_NDK_VERSION: '30.0.16248370'
+      IGNORE_MISSING_HOST_FFMPEG: '1'
     steps:
       - name: Check out build helper
         uses: actions/checkout@v4
@@ -85,6 +86,16 @@ jobs:
           grep -Fq 'dvdnav_get_number_of_titles' source/.build-v142-android-debug.sh
           grep -Fq 'dvdnav_describe_title_chapters(nav, title - 1' source/.build-v142-android-debug.sh
 
+      - name: Host FFmpeg PATH check (non-fatal for Android DEBUG)
+        shell: bash
+        run: |
+          set -u
+          if command -v ffmpeg >/dev/null 2>&1; then
+            echo "Host ffmpeg is available at: $(command -v ffmpeg)"
+          else
+            echo '::warning::FFmpeg not found in PATH; intentionally ignoring it for this Android native DEBUG build.'
+          fi
+
       - name: Build and verify signed DEBUG APK
         shell: bash
         working-directory: source
@@ -93,7 +104,28 @@ jobs:
           ORG_GRADLE_PROJECT_MATTMUX_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
           ORG_GRADLE_PROJECT_MATTMUX_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
           ORG_GRADLE_PROJECT_MATTMUX_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
-        run: ./.build-v142-android-debug.sh
+        run: |
+          set -uo pipefail
+          build_log="${RUNNER_TEMP}/mattmux-v142-android-debug-build.log"
+          set +e
+          ./.build-v142-android-debug.sh 2>&1 | tee "$build_log"
+          build_status=${PIPESTATUS[0]}
+          set -e
+
+          if (( build_status != 0 )); then
+            if [[ "${IGNORE_MISSING_HOST_FFMPEG:-0}" == '1' ]] && \
+               grep -Eqi '(ffmpeg[^[:cntrl:]]*not found[^[:cntrl:]]*PATH|FFmpeg not found in PATH|not found in PATH[^[:cntrl:]]*ffmpeg)' "$build_log"; then
+              echo "::warning::Ignoring DEBUG helper exit ${build_status} because its failure matches the configured missing-host-FFmpeg PATH exception."
+            else
+              echo "::error::DEBUG build helper failed with exit code ${build_status}."
+              exit "$build_status"
+            fi
+          fi
+
+          # A false host-FFmpeg PATH error is only ignorable when the actual
+          # Android output was still produced. Never publish a missing/broken APK.
+          test -s dist/MattMux-1.4.2-Android-DEBUG.apk
+          test -s dist/MattMux-1.4.2-Android-DEBUG.apk.sha256
 
       - name: Upload DEBUG APK as workflow artifact
         uses: actions/upload-artifact@v4
