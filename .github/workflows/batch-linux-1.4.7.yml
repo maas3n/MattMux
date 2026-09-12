@@ -29,7 +29,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            gcc g++ cmake ninja-build curl xz-utils file \
+            gcc g++ cmake ninja-build curl xz-utils file ffmpeg dvdauthor \
             libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
 
       - name: Verify module metadata
@@ -61,6 +61,70 @@ jobs:
           test -x "dist/linux-release/MattMux-$MATTMUX_CI_VERSION-Linux-amd64Standalone"
           test -f "dist/linux-release/MattMux-$MATTMUX_CI_VERSION-Linux-amd64.deb"
           test -f "dist/linux-release/MattMux-$MATTMUX_CI_VERSION-Linux-amd64.tar.gz"
+
+      - name: Real VIDEO_TS one-click batch integration
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/mattmux-batch-e2e"
+          root="$work/movies"
+          movie="$root/Integration Movie"
+          out="$work/out"
+          log="$work/batch.log"
+          mkdir -p "$movie" "$out"
+
+          # Author two real DVD titles. Title 2 is deliberately longer, and both
+          # titles carry one MPEG-2 video stream plus two AC-3 audio streams.
+          make_title() {
+            seconds="$1"
+            dest="$2"
+            ffmpeg -hide_banner -loglevel error -y \
+              -f lavfi -i "testsrc2=size=720x480:rate=30000/1001" \
+              -f lavfi -i "sine=frequency=440:sample_rate=48000" \
+              -f lavfi -i "sine=frequency=880:sample_rate=48000" \
+              -t "$seconds" \
+              -map 0:v:0 -map 1:a:0 -map 2:a:0 \
+              -c:v mpeg2video -pix_fmt yuv420p -r 30000/1001 -g 18 \
+              -b:v 2500k -maxrate 7000k -bufsize 1835008 \
+              -c:a ac3 -ar 48000 -b:a 192k \
+              -f dvd "$dest"
+          }
+          make_title 1 "$work/short.mpg"
+          make_title 3 "$work/long.mpg"
+          cat >"$work/dvd.xml" <<EOF
+          <dvdauthor dest="$movie">
+            <vmgm />
+            <titleset>
+              <titles>
+                <pgc><vob file="$work/short.mpg" /></pgc>
+                <pgc><vob file="$work/long.mpg" /></pgc>
+              </titles>
+            </titleset>
+          </dvdauthor>
+          EOF
+          dvdauthor -x "$work/dvd.xml" >/tmp/dvdauthor.log 2>&1
+          test -s "$movie/VIDEO_TS/VIDEO_TS.IFO"
+
+          deb="dist/linux-release/MattMux-$MATTMUX_CI_VERSION-Linux-amd64.deb"
+          pkg="$work/pkg"
+          dpkg-deb --extract "$deb" "$pkg"
+          cli="$pkg/usr/lib/mattmux/app/mattmux-cli-bin"
+          ffprobe="$pkg/usr/lib/mattmux/ffmpeg-bin/ffprobe"
+          ffmpeg_private="$pkg/usr/lib/mattmux/ffmpeg-bin/ffmpeg"
+          test -x "$cli"
+          test -x "$ffprobe"
+          "$ffmpeg_private" -hide_banner -demuxers 2>/dev/null | grep -F dvdvideo
+
+          PATH="$pkg/usr/lib/mattmux/ffmpeg-bin:$pkg/usr/lib/mattmux/mediainfo-bin:$PATH" \
+            "$cli" --batch --log="$log" "$root" "$out"
+          final="$out/Integration Movie.mkv"
+          test -s "$final"
+          grep -F 'selected longest title 2' "$log"
+
+          # The remux must contain every media stream from the DVD title.
+          video_count="$("$ffprobe" -v error -select_streams v -show_entries stream=index -of csv=p=0 "$final" | wc -l)"
+          audio_count="$("$ffprobe" -v error -select_streams a -show_entries stream=index -of csv=p=0 "$final" | wc -l)"
+          test "$video_count" -eq 1
+          test "$audio_count" -eq 2
 
       - name: Upload Linux validation artifacts
         uses: actions/upload-artifact@v4
