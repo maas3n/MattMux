@@ -73,7 +73,7 @@ jobs:
               -f lavfi -i "sine=frequency=880:sample_rate=48000" \
               -t "$seconds" \
               -map 0:v:0 -map 1:a:0 -map 2:a:0 \
-              -c:v mpeg2video -pix_fmt yuv420p -r 30000/1001 -g 18 \
+              -c:v mpeg2video -pix_fmt yuv420p -r 30000/1001 -g 18 -aspect 4:3 \
               -b:v 2500k -maxrate 7000k -bufsize 1835008 \
               -c:a ac3 -ar 48000 -b:a 192k \
               -f dvd "$dest"
@@ -84,7 +84,7 @@ jobs:
 
           echo 'Authoring a real VIDEO_TS with two DVD titles...'
           cat >"$work/dvd.xml" <<EOF
-          <dvdauthor dest="$movie">
+          <dvdauthor dest="$movie" format="ntsc">
             <vmgm />
             <titleset>
               <titles>
