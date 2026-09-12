@@ -25,8 +25,6 @@ jobs:
           p = Path('.github/workflows/release.yml')
           s = p.read_text()
 
-          # Windows: validate merger with the exact verified FFmpeg/FFprobe payload
-          # that will be packaged, after the pinned runtime has been staged.
           marker = '''          & (Join-Path $ffDest 'ffmpeg.exe') -hide_banner -demuxers | Select-String dvdvideo
           if ($LASTEXITCODE -ne 0) { throw 'Bundled FFmpeg self-check failed' }
 
@@ -50,8 +48,6 @@ jobs:
               raise SystemExit('Windows release insertion point not found')
           s = s.replace(marker, repl, 1)
 
-          # Linux: install the host tools required by the same real-media/headless
-          # tests used by the Linux preview, and run them before packaging.
           marker = '''          sudo apt-get install -y \\
             gcc g++ cmake ninja-build curl xz-utils file \\
             libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
@@ -83,7 +79,7 @@ jobs:
       - name: Exercise packaged Linux FFmpeg and launch packaged GUI
         run: |
           set -euo pipefail
-          version='${{ needs.metadata.outputs.version }}'
+          version='__VERSION_EXPR__'
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
           dpkg-deb --extract "dist/linux-release/MattMux-$version-Linux-amd64.deb" "$tmp"
@@ -98,6 +94,7 @@ jobs:
 
       - name: Create Linux checksums
 '''
+          repl = repl.replace('__VERSION_EXPR__', '$' + '{{ needs.metadata.outputs.version }}')
           if marker not in s:
               raise SystemExit('Linux packaged validation insertion point not found')
           s = s.replace(marker, repl, 1)
