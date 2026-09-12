@@ -19,86 +19,29 @@ jobs:
           fetch-depth: 0
 
       - name: Require merger tests in unified release
+        env:
+          WIN_MARKER_B64: ICAgICAgICAgICYgKEpvaW4tUGF0aCAkZmZEZXN0ICdmZm1wZWcuZXhlJykgLWhpZGVfYmFubmVyIC1kZW11eGVycyB8IFNlbGVjdC1TdHJpbmcgZHZkdmlkZW8KICAgICAgICAgIGlmICgkTEFTVEVYSVRDT0RFIC1uZSAwKSB7IHRocm93ICdCdW5kbGVkIEZGbXBlZyBzZWxmLWNoZWNrIGZhaWxlZCcgfQoKICAgICAgLSBuYW1lOiBCdWlsZCBXaW5kb3dzIHBvcnRhYmxlIHBhY2thZ2UK
+          WIN_REPL_B64: ICAgICAgICAgICYgKEpvaW4tUGF0aCAkZmZEZXN0ICdmZm1wZWcuZXhlJykgLWhpZGVfYmFubmVyIC1kZW11eGVycyB8IFNlbGVjdC1TdHJpbmcgZHZkdmlkZW8KICAgICAgICAgIGlmICgkTEFTVEVYSVRDT0RFIC1uZSAwKSB7IHRocm93ICdCdW5kbGVkIEZGbXBlZyBzZWxmLWNoZWNrIGZhaWxlZCcgfQoKICAgICAgLSBuYW1lOiBFeGVyY2lzZSBBZHZhbmNlZCBNZXJnZXIgd2l0aCBwYWNrYWdlZCBXaW5kb3dzIEZGbXBlZwogICAgICAgIHNoZWxsOiBwd3NoCiAgICAgICAgd29ya2luZy1kaXJlY3Rvcnk6IHNyYwogICAgICAgIHJ1bjogfAogICAgICAgICAgJEVycm9yQWN0aW9uUHJlZmVyZW5jZSA9ICdTdG9wJwogICAgICAgICAgJGZmRGlyID0gUmVzb2x2ZS1QYXRoICcuLlxwYWNrYWdpbmdcaW5zdGFsbGVyXGJ1bmRsZWQtdG9vbHNcZmZtcGVnLTIwMjYtMDktMDgnCiAgICAgICAgICAkZW52OlBBVEggPSAiJGZmRGlyOyRlbnY6UEFUSCIKICAgICAgICAgIGdvIHRlc3QgLXJ1biAnVGVzdE1lcmdlcicgLWNvdW50PTEgLXYgLi8uLi4KCiAgICAgIC0gbmFtZTogQnVpbGQgV2luZG93cyBwb3J0YWJsZSBwYWNrYWdlCg==
+          LIN_MARKER_B64: ICAgICAgICAgIHN1ZG8gYXB0LWdldCBpbnN0YWxsIC15IFwKICAgICAgICAgICAgZ2NjIGcrKyBjbWFrZSBuaW5qYS1idWlsZCBjdXJsIHh6LXV0aWxzIGZpbGUgXAogICAgICAgICAgICBsaWJnbDEtbWVzYS1kZXYgeG9yZy1kZXYgbGlid2F5bGFuZC1kZXYgbGlieGtiY29tbW9uLWRldgoKICAgICAgLSBuYW1lOiBWZXJpZnkgR28gbW9kdWxlIG1ldGFkYXRhCg==
+          LIN_REPL_B64: ICAgICAgICAgIHN1ZG8gYXB0LWdldCBpbnN0YWxsIC15IFwKICAgICAgICAgICAgZ2NjIGcrKyBjbWFrZSBuaW5qYS1idWlsZCBjdXJsIHh6LXV0aWxzIGZpbGUgZmZtcGVnIHh2ZmIgXAogICAgICAgICAgICBsaWJnbDEtbWVzYS1kZXYgeG9yZy1kZXYgbGlid2F5bGFuZC1kZXYgbGlieGtiY29tbW9uLWRldgoKICAgICAgLSBuYW1lOiBUZXN0IEFkdmFuY2VkIE1lcmdlciB3aXRoIHJlYWwgbWVkaWEgYW5kIGhlYWRsZXNzIFVJCiAgICAgICAgd29ya2luZy1kaXJlY3Rvcnk6IHNyYwogICAgICAgIHJ1bjogZ28gdGVzdCAtdGFncyBjaSAuLy4uLgoKICAgICAgLSBuYW1lOiBWZXJpZnkgR28gbW9kdWxlIG1ldGFkYXRhCg==
+          LIN2_MARKER_B64: ICAgICAgICAgIFhER19DQUNIRV9IT01FPSIkY2FjaGUiICIkc3RhbmRhbG9uZSIgLS1zdGFuZGFsb25lLXNlbGYtdGVzdAogICAgICAgICAgcm0gLXJmICIkY2FjaGUiCgogICAgICAtIG5hbWU6IENyZWF0ZSBMaW51eCBjaGVja3N1bXMK
+          LIN2_REPL_B64: ICAgICAgICAgIFhER19DQUNIRV9IT01FPSIkY2FjaGUiICIkc3RhbmRhbG9uZSIgLS1zdGFuZGFsb25lLXNlbGYtdGVzdAogICAgICAgICAgcm0gLXJmICIkY2FjaGUiCgogICAgICAtIG5hbWU6IEV4ZXJjaXNlIHBhY2thZ2VkIExpbnV4IEZGbXBlZyBhbmQgbGF1bmNoIHBhY2thZ2VkIEdVSQogICAgICAgIHJ1bjogfAogICAgICAgICAgc2V0IC1ldW8gcGlwZWZhaWwKICAgICAgICAgIHZlcnNpb249JyR7eyBuZWVkcy5tZXRhZGF0YS5vdXRwdXRzLnZlcnNpb24gfX0nCiAgICAgICAgICB0bXA9IiQobWt0ZW1wIC1kKSIKICAgICAgICAgIHRyYXAgJ3JtIC1yZiAiJHRtcCInIEVYSVQKICAgICAgICAgIGRwa2ctZGViIC0tZXh0cmFjdCAiZGlzdC9saW51eC1yZWxlYXNlL01hdHRNdXgtJHZlcnNpb24tTGludXgtYW1kNjQuZGViIiAiJHRtcCIKICAgICAgICAgIGV4cG9ydCBQQVRIPSIkdG1wL3Vzci9saWIvbWF0dG11eC9mZm1wZWctYmluOiRQQVRIIgogICAgICAgICAgKGNkIHNyYyAmJiBnbyB0ZXN0IC10YWdzIGNsaSAtcnVuIFRlc3RNZXJnZXIgLWNvdW50PTEgLXYpCiAgICAgICAgICBzZXQgK2UKICAgICAgICAgIHh2ZmItcnVuIC1hIHRpbWVvdXQgOHMgIiR0bXAvdXNyL2xpYi9tYXR0bXV4L2FwcC9tYXR0bXV4LWJpbiIgPiAiJHRtcC9ndWkubG9nIiAyPiYxCiAgICAgICAgICByZXN1bHQ9JD8KICAgICAgICAgIHNldCAtZQogICAgICAgICAgY2F0ICIkdG1wL2d1aS5sb2ciCiAgICAgICAgICB0ZXN0ICIkcmVzdWx0IiAtZXEgMTI0CgogICAgICAtIG5hbWU6IENyZWF0ZSBMaW51eCBjaGVja3N1bXMK
         run: |
           python3 - <<'PY'
+          import base64, os
           from pathlib import Path
           p = Path('.github/workflows/release.yml')
           s = p.read_text()
-
-          marker = '''          & (Join-Path $ffDest 'ffmpeg.exe') -hide_banner -demuxers | Select-String dvdvideo
-          if ($LASTEXITCODE -ne 0) { throw 'Bundled FFmpeg self-check failed' }
-
-      - name: Build Windows portable package
-'''
-          repl = '''          & (Join-Path $ffDest 'ffmpeg.exe') -hide_banner -demuxers | Select-String dvdvideo
-          if ($LASTEXITCODE -ne 0) { throw 'Bundled FFmpeg self-check failed' }
-
-      - name: Exercise Advanced Merger with packaged Windows FFmpeg
-        shell: pwsh
-        working-directory: src
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $ffDir = Resolve-Path '..\\packaging\\installer\\bundled-tools\\ffmpeg-2026-09-08'
-          $env:PATH = "$ffDir;$env:PATH"
-          go test -run 'TestMerger' -count=1 -v ./...
-
-      - name: Build Windows portable package
-'''
-          if marker not in s:
-              raise SystemExit('Windows release insertion point not found')
-          s = s.replace(marker, repl, 1)
-
-          marker = '''          sudo apt-get install -y \\
-            gcc g++ cmake ninja-build curl xz-utils file \\
-            libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
-
-      - name: Verify Go module metadata
-'''
-          repl = '''          sudo apt-get install -y \\
-            gcc g++ cmake ninja-build curl xz-utils file ffmpeg xvfb \\
-            libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
-
-      - name: Test Advanced Merger with real media and headless UI
-        working-directory: src
-        run: go test -tags ci ./...
-
-      - name: Verify Go module metadata
-'''
-          if marker not in s:
-              raise SystemExit('Linux prerequisites insertion point not found')
-          s = s.replace(marker, repl, 1)
-
-          marker = '''          XDG_CACHE_HOME="$cache" "$standalone" --standalone-self-test
-          rm -rf "$cache"
-
-      - name: Create Linux checksums
-'''
-          repl = '''          XDG_CACHE_HOME="$cache" "$standalone" --standalone-self-test
-          rm -rf "$cache"
-
-      - name: Exercise packaged Linux FFmpeg and launch packaged GUI
-        run: |
-          set -euo pipefail
-          version='__VERSION_EXPR__'
-          tmp="$(mktemp -d)"
-          trap 'rm -rf "$tmp"' EXIT
-          dpkg-deb --extract "dist/linux-release/MattMux-$version-Linux-amd64.deb" "$tmp"
-          export PATH="$tmp/usr/lib/mattmux/ffmpeg-bin:$PATH"
-          (cd src && go test -tags cli -run TestMerger -count=1 -v)
-          set +e
-          xvfb-run -a timeout 8s "$tmp/usr/lib/mattmux/app/mattmux-bin" > "$tmp/gui.log" 2>&1
-          result=$?
-          set -e
-          cat "$tmp/gui.log"
-          test "$result" -eq 124
-
-      - name: Create Linux checksums
-'''
-          repl = repl.replace('__VERSION_EXPR__', '$' + '{{ needs.metadata.outputs.version }}')
-          if marker not in s:
-              raise SystemExit('Linux packaged validation insertion point not found')
-          s = s.replace(marker, repl, 1)
-
+          for left, right, label in [
+              ('WIN_MARKER_B64', 'WIN_REPL_B64', 'Windows packaged merger gate'),
+              ('LIN_MARKER_B64', 'LIN_REPL_B64', 'Linux real-media merger gate'),
+              ('LIN2_MARKER_B64', 'LIN2_REPL_B64', 'Linux packaged merger gate'),
+          ]:
+              marker = base64.b64decode(os.environ[left]).decode()
+              repl = base64.b64decode(os.environ[right]).decode()
+              if marker not in s:
+                  raise SystemExit(label + ' insertion point not found')
+              s = s.replace(marker, repl, 1)
           p.write_text(s)
           PY
 
