@@ -26,6 +26,8 @@ def probe(file):
 r=probe(p/'merged.mkv')
 assert [s['codec_name'] for s in r['streams']]==['mpeg4','pcm_s16le','subrip','ac3','subrip'],r
 assert len(r['chapters'])==1 and r['chapters'][0]['tags']['title']=='Opening',r
+embedded=probe(p/'embedded-chapters.mkv')
+assert len(embedded['chapters'])==1 and embedded['chapters'][0]['tags']['title']=='Opening',embedded
 assert not probe(p/'no-chapters.mkv')['chapters']
 def hashes(file,stream):
     r=json.loads(subprocess.check_output(['ffprobe','-v','error','-select_streams',str(stream),'-show_packets','-show_data_hash','sha256','-of','json',str(file)]))
