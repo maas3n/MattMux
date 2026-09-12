@@ -53,7 +53,7 @@ func createMergerWindowsControls(hwnd, hInstance uintptr) {
 		item := mergerTabItem{Mask: 1, Text: utf16Ptr(label)}
 		procSendMessageW.Call(mergerWindow.tab, 0x133e, uintptr(i), uintptr(unsafe.Pointer(&item)))
 	}
-	for i, label := range []string{"CHOOSE MOVIE FILES", "CHOOSE AUDIO FILES", "CHOOSE SUBTITLE FILES"} {
+	for i, label := range []string{"CHOOSE MOVIE FILES", "CHOOSE AUDIO FILES FROM MKV or RAW", "CHOOSE SUBTITLE FILES FROM MKV or RAW"} {
 		add("BUTTON", label, BS_PUSHBUTTON, 28+int32(i)*258, 52, 250, 34, mergerFirstID+i)
 	}
 	add("STATIC", "Select Streams", 0, 28, 94, 750, 22, 0)
@@ -62,8 +62,8 @@ func createMergerWindowsControls(hwnd, hInstance uintptr) {
 	col := LVCOLUMNW{Mask: LVCF_WIDTH | LVCF_TEXT, Cx: scale96(725, dpi), PszText: utf16Ptr("File / stream")}
 	procSendMessageW.Call(mergerWindow.list, LVM_INSERTCOLUMNW, 0, uintptr(unsafe.Pointer(&col)))
 	add("BUTTON", "Clear streams", BS_PUSHBUTTON, 28, 365, 130, 28, mergerFirstID+3)
-	mergerWindow.chapter = add("EDIT", "", WS_BORDER|ES_AUTOHSCROLL, 28, 405, 500, 28, 0)
-	add("BUTTON", "CHOOSE CHAPTER FILE", BS_PUSHBUTTON, 538, 403, 240, 32, mergerFirstID+4)
+	mergerWindow.chapter = add("EDIT", "", WS_BORDER|ES_AUTOHSCROLL, 28, 405, 430, 28, 0)
+	add("BUTTON", "CHOOSE CHAPTER FILE FROM MKV or RAW", BS_PUSHBUTTON, 468, 403, 310, 32, mergerFirstID+4)
 	mergerWindow.output = add("EDIT", loadSettings().OutputDir, WS_BORDER|ES_AUTOHSCROLL, 28, 445, 500, 28, 0)
 	if getText(mergerWindow.output) == "" {
 		setText(mergerWindow.output, defaultOutputDir())
@@ -71,7 +71,7 @@ func createMergerWindowsControls(hwnd, hInstance uintptr) {
 	add("BUTTON", "CHOOSE OUTPUT FOLDER", BS_PUSHBUTTON, 538, 443, 240, 32, mergerFirstID+5)
 	add("STATIC", "Output filename", 0, 28, 487, 120, 24, 0)
 	mergerWindow.name = add("EDIT", "merged.mkv", WS_BORDER|ES_AUTOHSCROLL, 155, 484, 623, 28, 0)
-	mergerWindow.status = add("STATIC", "Choose files and select streams. Chapters are optional (FFMETADATA1).", 0, 28, 522, 750, 38, 0)
+	mergerWindow.status = add("STATIC", "Choose files and select streams. Chapters are optional (MKV or FFMETADATA1).", 0, 28, 522, 750, 38, 0)
 	add("BUTTON", "MUX TO MKV", BS_PUSHBUTTON, 488, 574, 180, 34, mergerFirstID+6)
 	mergerWindow.cancelBtn = add("BUTTON", "Cancel", BS_PUSHBUTTON, 680, 574, 98, 34, mergerFirstID+7)
 	procEnableWindow.Call(mergerWindow.cancelBtn, 0)
@@ -181,7 +181,7 @@ func handleWindowsMergerCommand(id int) bool {
 	}
 	switch id - mergerFirstID {
 	case 0, 1, 2:
-		kind := []string{"video", "audio", "subtitle"}[id-mergerFirstID]
+		kind := []string{"all", "audio", "subtitle"}[id-mergerFirstID]
 		paths := browseMergerFiles(app.hwnd, true)
 		if len(paths) == 0 {
 			return true
