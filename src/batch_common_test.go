@@ -64,7 +64,12 @@ func TestRunBatchSelectsLongestAndDefaultsOutputToMovieFolder(t *testing.T) {
 			if outDir != src {
 				t.Fatalf("output dir = %q; want movie folder %q", outDir, src)
 			}
-			out := filepath.Join(outDir, filepath.Base(src)+".mkv")
+			// Simulate the ordinary DVD remux naming rule for title > 1. BATCH
+			// must normalize this to the movie-folder name after the remux.
+			out := filepath.Join(outDir, filepath.Base(src)+"-title-07.mkv")
+			if err := os.WriteFile(out, []byte("mkv"), 0644); err != nil {
+				t.Fatal(err)
+			}
 			remuxed = append(remuxed, out)
 			return out, nil
 		},
@@ -82,12 +87,20 @@ func TestRunBatchSelectsLongestAndDefaultsOutputToMovieFolder(t *testing.T) {
 	if result.Outputs[0] != filepath.Join(movieA, "Movie A.mkv") || result.Outputs[1] != filepath.Join(movieB, "Movie B.mkv") {
 		t.Fatalf("outputs = %#v", result.Outputs)
 	}
+	for _, output := range result.Outputs {
+		if _, err := os.Stat(output); err != nil {
+			t.Fatalf("normalized output missing: %s: %v", output, err)
+		}
+	}
 }
 
 func TestRunBatchUsesChosenOutputRoot(t *testing.T) {
 	root := t.TempDir()
 	makeBatchMovie(t, root, "Movie")
 	outRoot := filepath.Join(t.TempDir(), "finished")
+	if err := os.MkdirAll(outRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
 	deps := batchDeps{
 		ensureTools: func(context.Context, batchProgressFunc) (toolPaths, error) { return toolPaths{}, nil },
 		scanTitles: func(context.Context, string, toolPaths, batchProgressFunc) ([]titleInfo, error) {
@@ -97,7 +110,11 @@ func TestRunBatchUsesChosenOutputRoot(t *testing.T) {
 			if outDir != outRoot {
 				t.Fatalf("output dir = %q; want %q", outDir, outRoot)
 			}
-			return filepath.Join(outDir, "Movie.mkv"), nil
+			out := filepath.Join(outDir, "Movie-title-02.mkv")
+			if err := os.WriteFile(out, []byte("mkv"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			return out, nil
 		},
 	}
 	result, err := runBatchWithDeps(context.Background(), batchOptions{InputRoot: root, OutputRoot: outRoot}, nil, deps)
@@ -106,5 +123,12 @@ func TestRunBatchUsesChosenOutputRoot(t *testing.T) {
 	}
 	if result.Completed != 1 {
 		t.Fatalf("completed = %d; want 1", result.Completed)
+	}
+	want := filepath.Join(outRoot, "Movie.mkv")
+	if len(result.Outputs) != 1 || result.Outputs[0] != want {
+		t.Fatalf("outputs = %#v; want %q", result.Outputs, want)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("normalized common-root output missing: %v", err)
 	}
 }
