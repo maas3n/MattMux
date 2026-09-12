@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — Advanced Merger (Linux validation)
+
+- Add an Advanced Merger tab with multiple-file selection, category-filtered
+  video/audio/subtitle tracks, optional FFMETADATA1 chapters, output folder
+  and filename selection, and lossless muxing to MKV.
+- Use explicit stream maps, cancellable jobs, and no-overwrite output finalization.
+- Add real-FFmpeg integration tests and a Linux-only preview package workflow.
+- Windows and Android parity and validation remain release gates for 1.4.3.
+
 ## 1.4.2 — 2026-09-11
 
 - Publish the signed universal APK under both `MattMux-1.4.2-Android.apk` for Android phones/tablets and `MattMux-1.4.2-ChromeOS.apk` for Chromebooks.
