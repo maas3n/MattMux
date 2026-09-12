@@ -53,23 +53,14 @@ jobs:
           /tmp/mattmux-cli --help >/tmp/mattmux-help.txt 2>&1 || true
           grep -F -- '--batch' /tmp/mattmux-help.txt
 
-      - name: Build Linux release packages
-        run: |
-          set -euo pipefail
-          bash packaging/linux/build-linux-release.sh "$MATTMUX_CI_VERSION"
-          bash packaging/linux/build-linux-standalone.sh "$MATTMUX_CI_VERSION"
-          test -x "dist/linux-release/MattMux-$MATTMUX_CI_VERSION-Linux-amd64Standalone"
-          test -f "dist/linux-release/MattMux-$MATTMUX_CI_VERSION-Linux-amd64.deb"
-          test -f "dist/linux-release/MattMux-$MATTMUX_CI_VERSION-Linux-amd64.tar.gz"
-
-      - name: Real VIDEO_TS one-click batch integration
+      - name: Author real two-title VIDEO_TS fixture
         run: |
           set -euo pipefail
           work="$RUNNER_TEMP/mattmux-batch-e2e"
           root="$work/movies"
           movie="$root/Integration Movie"
           out="$work/out"
-          log="$work/batch.log"
+          rm -rf "$work"
           mkdir -p "$movie" "$out"
 
           echo 'Creating DVD-compliant MPEG program streams...'
@@ -92,8 +83,6 @@ jobs:
           make_title 3 "$work/long.mpg"
 
           echo 'Authoring a real VIDEO_TS with two DVD titles...'
-          # Separate titlesets give us two globally addressable DVD titles while
-          # keeping the fixture simple and standards-compliant.
           cat >"$work/dvd.xml" <<EOF
           <dvdauthor dest="$movie">
             <vmgm />
@@ -116,7 +105,25 @@ jobs:
           fi
           find "$movie" -maxdepth 2 -type f -printf '%P\n' | sort
           test -s "$movie/VIDEO_TS/VIDEO_TS.IFO"
+          test -s "$movie/VIDEO_TS/VTS_01_0.IFO"
+          test -s "$movie/VIDEO_TS/VTS_02_0.IFO"
 
+      - name: Build Linux release packages
+        run: |
+          set -euo pipefail
+          bash packaging/linux/build-linux-release.sh "$MATTMUX_CI_VERSION"
+          bash packaging/linux/build-linux-standalone.sh "$MATTMUX_CI_VERSION"
+          test -x "dist/linux-release/MattMux-$MATTMUX_CI_VERSION-Linux-amd64Standalone"
+          test -f "dist/linux-release/MattMux-$MATTMUX_CI_VERSION-Linux-amd64.deb"
+          test -f "dist/linux-release/MattMux-$MATTMUX_CI_VERSION-Linux-amd64.tar.gz"
+
+      - name: Real VIDEO_TS one-click batch integration
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/mattmux-batch-e2e"
+          root="$work/movies"
+          out="$work/out"
+          log="$work/batch.log"
           deb="dist/linux-release/MattMux-$MATTMUX_CI_VERSION-Linux-amd64.deb"
           pkg="$work/pkg"
           dpkg-deb --extract "$deb" "$pkg"
