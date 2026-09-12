@@ -20,7 +20,7 @@ func TestMergerExplicitMaps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"-hide_banner", "-nostdin", "-y", "-fflags", "+genpts", "-i", "one.mkv", "-fflags", "+genpts", "-i", "two.mp4", "-i", "chapters.txt", "-map", "0:2", "-map_metadata:s:0", "0:s:2", "-map", "1:1", "-map_metadata:s:1", "1:s:1", "-map", "0:5", "-map_metadata:s:2", "0:s:5", "-map_metadata", "0", "-map_chapters", "2", "-c", "copy", "-f", "matroska", "out.mkv"}
+	want := []string{"-hide_banner", "-nostdin", "-y", "-analyzeduration", "100M", "-probesize", "100M", "-fflags", "+genpts", "-i", "one.mkv", "-analyzeduration", "100M", "-probesize", "100M", "-fflags", "+genpts", "-i", "two.mp4", "-analyzeduration", "100M", "-probesize", "100M", "-fflags", "+genpts", "-i", "chapters.txt", "-map", "0:2", "-map_metadata:s:0", "0:s:2", "-map", "1:1", "-map_metadata:s:1", "1:s:1", "-map", "0:5", "-map_metadata:s:2", "0:s:5", "-map_metadata", "0", "-map_chapters", "2", "-c", "copy", "-f", "matroska", "out.mkv"}
 	if !reflect.DeepEqual(args, want) {
 		t.Fatalf("args = %q", args)
 	}

@@ -31,7 +31,7 @@ At least one non-chapter stream must remain selected before muxing.
 
 Choose the output folder, enter an `.mkv` filename, and press **MUX TO MKV**.
 
-MattMux maps the exact selected input stream indexes and uses stream copy (`-c copy` on desktop, equivalent native libav packet copying on Android/ChromeOS). It does not intentionally re-encode video or audio. Desktop inputs use generated presentation timestamps (`-fflags +genpts`) before muxing.
+MattMux maps the exact selected input stream indexes and uses stream copy (`-c copy` on desktop, equivalent native libav packet copying on Android/ChromeOS). It does not intentionally re-encode video or audio. On Windows and Linux, every Advanced Merger input is opened with `-analyzeduration 100M -probesize 100M -fflags +genpts` before muxing so damaged or timestamp-irregular sources get the same robust input handling as DVD remuxes.
 
 Desktop muxing preserves global metadata from the first media input and explicitly copies metadata for each selected stream. This includes stream language/title metadata and attachment filenames where present. Chapter titles are preserved when chapters are copied from either an embedded movie chapter set or the dedicated chapter source.
 

@@ -301,17 +301,10 @@ func remuxSelected(ctx context.Context) error {
 	}
 	defer os.Remove(partial)
 	preserveChapters := isChecked(app.preserveChapters)
-	if preserveChapters {
-		setStatus(fmt.Sprintf("Indexing chapters, then remuxing title %d to %s…", t.Number, filepath.Base(final)))
-	} else {
-		setStatus(fmt.Sprintf("Remuxing title %d to %s…", t.Number, filepath.Base(final)))
-	}
+	setStatus(fmt.Sprintf("Remuxing title %d with fixed timestamps to %s…", t.Number, filepath.Base(final)))
 	setProgress(0)
-	args := []string{"-hide_banner", "-nostdin", "-y", "-fflags", "+genpts", "-probesize", "100M", "-analyzeduration", "100M", "-f", "dvdvideo", "-title", strconv.Itoa(t.Number)}
-	if preserveChapters {
-		args = append(args, "-preindex", "1")
-	}
-	args = append(args, "-i", src)
+	args := []string{"-hide_banner", "-nostdin", "-y"}
+	args = appendDesktopDVDInput(args, t.Number, src)
 	selected, hasSelection := windowsSelectedTrackIndexes(src, t.Number)
 	mapArgs, mapErr := ffmpegStreamMapArgs(nil)
 	if hasSelection {
@@ -359,7 +352,7 @@ func remuxSelected(ctx context.Context) error {
 					ratio = .995
 				}
 				setProgress(ratio)
-				setStatus(fmt.Sprintf("Remuxing title %d… %d%%", t.Number, int(ratio*100)))
+				setStatus(fmt.Sprintf("Remuxing title %d with fixed timestamps… %d%%", t.Number, int(ratio*100)))
 			}
 		}
 	}

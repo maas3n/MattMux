@@ -621,11 +621,9 @@ func remuxTitle(ctx context.Context, src string, title titleInfo, outDir string,
 	if progress == nil {
 		progress = noopProgress
 	}
-	args := []string{"-hide_banner", "-nostdin", "-y", "-fflags", "+genpts", "-probesize", "100M", "-analyzeduration", "100M", "-f", "dvdvideo", "-title", strconv.Itoa(title.Number)}
-	if preserve {
-		args = append(args, "-preindex", "1")
-	}
-	args = append(args, "-i", src)
+	progress(0, fmt.Sprintf("Remuxing title %d with fixed timestamps…", title.Number))
+	args := []string{"-hide_banner", "-nostdin", "-y"}
+	args = appendDesktopDVDInput(args, title.Number, src)
 	mapArgs, mapErr := ffmpegStreamMapArgs(streamIndexes)
 	if mapErr != nil {
 		return "", mapErr
@@ -666,7 +664,7 @@ func remuxTitle(ctx context.Context, src string, title titleInfo, outDir string,
 				if ratio > .995 {
 					ratio = .995
 				}
-				progress(ratio, fmt.Sprintf("Remuxing title %d… %d%%", title.Number, int(ratio*100)))
+				progress(ratio, fmt.Sprintf("Remuxing title %d with fixed timestamps… %d%%", title.Number, int(ratio*100)))
 			}
 		}
 	}
