@@ -95,6 +95,22 @@ func showMergerWindowsTab() {
 		procShowWindow.Call(c, show)
 	}
 	showWindowsBatchTab(selected)
+	redrawWindowsTabPage()
+}
+
+func redrawWindowsTabPage() {
+	// The three tab pages are sibling child controls of the same top-level window.
+	// Hiding a page can otherwise leave stale pixels from the previous page until
+	// Windows happens to repaint the parent. Force a complete erase/redraw after
+	// every tab change so hidden controls cannot visually bleed into the new page.
+	redrawWindow := user32.NewProc("RedrawWindow")
+	const (
+		rdwInvalidate  = 0x0001
+		rdwErase       = 0x0004
+		rdwAllChildren = 0x0080
+		rdwUpdateNow   = 0x0100
+	)
+	redrawWindow.Call(app.hwnd, 0, 0, rdwInvalidate|rdwErase|rdwAllChildren|rdwUpdateNow)
 }
 
 func browseMergerFiles(owner uintptr, multiple bool) []string {
