@@ -211,7 +211,6 @@ func windowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 				if p := browseISO(hwnd); p != "" {
 					setSource(p)
 				}
-			}
 		case idOutputBtn:
 			if !app.busy.Load() {
 				if p := browseFolder(hwnd, "Choose where MattMux should save the MKV"); p != "" {
@@ -229,7 +228,7 @@ func windowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 				}
 			}
 		case idScanBtn:
-			startAsync("Scanning DVD titles…", scanTitles)
+			startAsync("Scanning DVD titles through FFmpeg dvdvideo/libdvdread/libdvdnav…", discoverWindowsDVDTitlesViaDVDVideo)
 		case idMetaBtn:
 			startAsync("Reading title metadata…", showMetadata)
 		case idRemuxBtn:
