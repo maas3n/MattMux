@@ -111,7 +111,7 @@ func setBusyUI(busy bool) {
 	procEnableWindow.Call(app.cancelBtn, 1-enabled)
 }
 
-func scanTitles(ctx context.Context) error {
+func discoverDVDTitlesViaDVDVideo(ctx context.Context) error {
 	src, err := currentSource()
 	if err != nil {
 		return err
@@ -134,7 +134,7 @@ func scanTitles(ctx context.Context) error {
 		}
 		setStatus(fmt.Sprintf("Scanning DVD title %d of %d…", n, maxTitle))
 		setProgress(float64(n-1) / float64(maxTitle))
-		d, err := probeDuration(ctx, tools.ffprobe, src, n)
+		d, err := readDVDVideoTitleDuration(ctx, tools.ffprobe, src, n)
 		if err != nil {
 			continue
 		}

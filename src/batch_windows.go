@@ -20,8 +20,8 @@ func batchPlatformDeps() batchDeps {
 			}
 			return tools, err
 		},
-		scanTitles: batchScanTitlesWindows,
-		remuxTitle: batchRemuxTitleWindows,
+		discoverDVDTitlesViaDVDVideo: batchScanTitlesWindows,
+		remuxTitle:                   batchRemuxTitleWindows,
 	}
 }
 
@@ -36,7 +36,7 @@ func batchScanTitlesWindows(ctx context.Context, src string, tools toolPaths, pr
 			return nil, err
 		}
 		progress(float64(n-1)/99.0, fmt.Sprintf("Scanning DVD title %d of 99 through dvdvideo/libdvdread/libdvdnav…", n))
-		d, err := probeDuration(ctx, tools.ffprobe, src, n)
+		d, err := readDVDVideoTitleDuration(ctx, tools.ffprobe, src, n)
 		if err != nil {
 			continue
 		}
