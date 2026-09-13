@@ -1,4 +1,4 @@
-name: Publish v1.4.8 tag
+name: Publish v1.4.8 tag and dispatch release
 
 on:
   push:
@@ -7,12 +7,13 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
-  create-tag:
+  publish:
     runs-on: ubuntu-latest
     steps:
-      - name: Create immutable v1.4.8 tag at verified release commit
+      - name: Verify immutable tag and dispatch unified release
         env:
           GH_TOKEN: ${{ github.token }}
           TARGET_SHA: 2074d74ee8f69ed080db2374f44acaac066f2d95
@@ -26,11 +27,26 @@ jobs:
             exit 1
           fi
 
-          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
-            echo "Tag ${RELEASE_TAG} already exists; refusing to move or recreate it." >&2
-            exit 1
+          if tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" --jq '.object.sha' 2>/dev/null)"; then
+            if [[ "$tag_sha" != "$TARGET_SHA" ]]; then
+              echo "Tag ${RELEASE_TAG} exists at unexpected commit $tag_sha" >&2
+              exit 1
+            fi
+            echo "Verified existing ${RELEASE_TAG} at ${TARGET_SHA}."
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${RELEASE_TAG}" \
+              -f sha="$TARGET_SHA"
           fi
 
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
-            -f ref="refs/tags/${RELEASE_TAG}" \
-            -f sha="$TARGET_SHA"
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "Release ${RELEASE_TAG} already exists; nothing to dispatch."
+            exit 0
+          fi
+
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/workflows/release.yml/dispatches" \
+            --input - <<JSON
+          {"ref":"main","inputs":{"tag":"${RELEASE_TAG}"}}
+          JSON
+
+          echo "Dispatched unified release workflow for ${RELEASE_TAG}."
