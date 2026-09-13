@@ -64,7 +64,10 @@ func createMainWindow() error {
 	className := utf16Ptr("MattMuxWindowClass")
 	cursor, _, _ := procLoadCursorW.Call(0, 32512)
 	icon := loadAppIcon()
-	bg, _, _ := procGetStockObject.Call(5)
+	// Use the system control background. Stock object 5 is NULL_BRUSH, which
+	// leaves old tab pixels untouched even when RedrawWindow requests erasure.
+	const colorBtnFace = 15
+	bg, _, _ := user32.NewProc("GetSysColorBrush").Call(colorBtnFace)
 	wc := WNDCLASSEX{CbSize: uint32(unsafe.Sizeof(WNDCLASSEX{})), LpfnWndProc: syscall.NewCallback(windowProc), HInstance: hInstance, HIcon: icon, HCursor: cursor, HbrBackground: bg, HIconSm: icon, LpszClassName: className}
 	if r, _, err := procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc))); r == 0 {
 		return fmt.Errorf("RegisterClassExW failed: %v", err)
