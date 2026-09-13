@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.8 — 2026-09-13
+
+- Fix Windows native-tab repainting so switching among **DVD Remux**, **Advanced Merger**, and **BATCH** no longer leaves stale controls or apparent duplicate buttons behind.
+- Rename the desktop BATCH action from **ONECLICK BATCH MUX BUTTON** to **ONECLICK BATCH** on Windows and Linux, including the matching instruction text.
+- Remove the legacy MattMux desktop `scanTitles()` / `probeDuration()` naming and wrapper structure from Windows/Linux GUI, CLI, and BATCH title discovery; candidate titles are discovered through FFprobe's `dvdvideo` demuxer backed by `libdvdread`/`libdvdnav`, with an automatic `-preindex 1` retry when needed.
+- Keep the separate native IFO chapter parser only for chapter metadata; it is not used for DVD title discovery.
+- Keep Android/ChromeOS product behavior unchanged from 1.4.7.
+
 ## 1.4.7 — 2026-09-12
 
 - Add a desktop **BATCH** tab on Windows and Linux with a **ONECLICK BATCH MUX BUTTON** for collections laid out as `Movie Title/VIDEO_TS/VIDEO_TS.IFO`.
