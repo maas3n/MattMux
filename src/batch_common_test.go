@@ -54,7 +54,7 @@ func TestRunBatchSelectsLongestAndDefaultsOutputToMovieFolder(t *testing.T) {
 		ensureTools: func(context.Context, batchProgressFunc) (toolPaths, error) {
 			return toolPaths{ffmpeg: "ffmpeg", ffprobe: "ffprobe"}, nil
 		},
-		scanTitles: func(_ context.Context, src string, _ toolPaths, _ batchProgressFunc) ([]titleInfo, error) {
+		discoverDVDTitlesViaDVDVideo: func(_ context.Context, src string, _ toolPaths, _ batchProgressFunc) ([]titleInfo, error) {
 			return []titleInfo{{Number: 1, Duration: time.Minute}, {Number: 7, Duration: 2 * time.Hour}}, nil
 		},
 		remuxTitle: func(_ context.Context, src string, title titleInfo, outDir string, _ toolPaths, _ batchProgressFunc) (string, error) {
@@ -103,7 +103,7 @@ func TestRunBatchUsesChosenOutputRoot(t *testing.T) {
 	}
 	deps := batchDeps{
 		ensureTools: func(context.Context, batchProgressFunc) (toolPaths, error) { return toolPaths{}, nil },
-		scanTitles: func(context.Context, string, toolPaths, batchProgressFunc) ([]titleInfo, error) {
+		discoverDVDTitlesViaDVDVideo: func(context.Context, string, toolPaths, batchProgressFunc) ([]titleInfo, error) {
 			return []titleInfo{{Number: 2, Duration: time.Hour}}, nil
 		},
 		remuxTitle: func(_ context.Context, _ string, _ titleInfo, outDir string, _ toolPaths, _ batchProgressFunc) (string, error) {

@@ -126,7 +126,7 @@ func cliScan(ctx context.Context, args []string) {
 	}
 	src := fs.Arg(0)
 	tools := mustTools(ctx, false)
-	titles, err := scanTitles(ctx, src, tools, cliStatus)
+	titles, err := discoverDVDTitlesViaDVDVideo(ctx, src, tools, cliStatus)
 	fatalIf(err)
 	best, _ := longestTitle(titles)
 	fmt.Printf("%-7s %-12s %s\n", "TITLE", "DURATION", "DEFAULT")
@@ -188,11 +188,11 @@ func mustResolveTitle(ctx context.Context, src string, requested int, tools tool
 		fatalIf(fmt.Errorf("title must be >= 0"))
 	}
 	if requested > 0 {
-		d, err := probeDuration(ctx, tools.ffprobe, src, requested)
+		d, err := readDVDVideoTitleDuration(ctx, tools.ffprobe, src, requested)
 		fatalIf(err)
 		return titleInfo{Number: requested, Duration: d}
 	}
-	titles, err := scanTitles(ctx, src, tools, cliStatus)
+	titles, err := discoverDVDTitlesViaDVDVideo(ctx, src, tools, cliStatus)
 	fatalIf(err)
 	best, err := longestTitle(titles)
 	fatalIf(err)

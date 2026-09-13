@@ -229,7 +229,7 @@ func windowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 				}
 			}
 		case idScanBtn:
-			startAsync("Scanning DVD titles…", scanTitles)
+			startAsync("Scanning DVD titles through FFmpeg dvdvideo/libdvdread/libdvdnav…", discoverDVDTitlesViaDVDVideo)
 		case idMetaBtn:
 			startAsync("Reading title metadata…", showMetadata)
 		case idRemuxBtn:

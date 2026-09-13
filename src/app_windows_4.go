@@ -74,17 +74,20 @@ func secondsTextDuration(s string) (time.Duration, error) {
 	return time.Duration(f * float64(time.Second)), nil
 }
 
-func probeDuration(ctx context.Context, ffprobe, src string, title int) (time.Duration, error) {
-	d, err := probeDurationOnce(ctx, ffprobe, src, title, false)
+// readDVDVideoTitleDuration delegates title timing entirely to FFprobe's
+// dvdvideo demuxer. dvdvideo is backed by libdvdread/libdvdnav in the pinned
+// desktop FFmpeg build; MattMux does not parse DVD title timing itself.
+func readDVDVideoTitleDuration(ctx context.Context, ffprobe, src string, title int) (time.Duration, error) {
+	d, err := readDVDVideoTitleDurationAttempt(ctx, ffprobe, src, title, false)
 	if err == nil {
 		return d, nil
 	}
-	// Retry automatically with dvdvideo pre-indexing in this same Scan Titles
-	// action. The user never has to press the scan button twice.
-	return probeDurationOnce(ctx, ffprobe, src, title, true)
+	// Some discs need dvdvideo's NAV-packet pre-index pass before duration is
+	// available. The retry is still the same libdvdread/libdvdnav dvdvideo path.
+	return readDVDVideoTitleDurationAttempt(ctx, ffprobe, src, title, true)
 }
 
-func probeDurationOnce(ctx context.Context, ffprobe, src string, title int, preindex bool) (time.Duration, error) {
+func readDVDVideoTitleDurationAttempt(ctx context.Context, ffprobe, src string, title int, preindex bool) (time.Duration, error) {
 	childCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
 	args := []string{"-v", "error", "-probesize", "100M", "-analyzeduration", "100M", "-f", "dvdvideo", "-title", strconv.Itoa(title)}

@@ -214,7 +214,7 @@ func (g *linuxGUI) scan(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	titles, err := scanTitles(ctx, src, tools, g.progressCallback())
+	titles, err := discoverDVDTitlesViaDVDVideo(ctx, src, tools, g.progressCallback())
 	if err != nil {
 		return err
 	}

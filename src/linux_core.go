@@ -385,7 +385,7 @@ func fileExistsFold(dir, name string) bool {
 	return false
 }
 
-func scanTitles(ctx context.Context, src string, tools toolPaths, progress progressFunc) ([]titleInfo, error) {
+func discoverDVDTitlesViaDVDVideo(ctx context.Context, src string, tools toolPaths, progress progressFunc) ([]titleInfo, error) {
 	src, err := normalizeSource(src)
 	if err != nil {
 		return nil, err
@@ -406,7 +406,7 @@ func scanTitles(ctx context.Context, src string, tools toolPaths, progress progr
 			return nil, err
 		}
 		progress(float64(n-1)/float64(maxTitle), fmt.Sprintf("Scanning DVD title %d of %d…", n, maxTitle))
-		d, err := probeDuration(ctx, tools.ffprobe, src, n)
+		d, err := readDVDVideoTitleDuration(ctx, tools.ffprobe, src, n)
 		if err != nil {
 			continue
 		}
@@ -432,18 +432,18 @@ func longestTitle(titles []titleInfo) (titleInfo, error) {
 	}
 	return best, nil
 }
-func probeDuration(ctx context.Context, ffprobe, src string, title int) (time.Duration, error) {
-	d, err := probeDurationOnce(ctx, ffprobe, src, title, false)
+func readDVDVideoTitleDuration(ctx context.Context, ffprobe, src string, title int) (time.Duration, error) {
+	d, err := readDVDVideoTitleDurationAttempt(ctx, ffprobe, src, title, false)
 	if err == nil {
 		return d, nil
 	}
 	// Some DVD titles do not expose a reliable duration until dvdvideo performs
 	// its NAV-packet pre-index pass. Retry immediately in this same scan action;
 	// users never need to press Scan Titles a second time.
-	return probeDurationOnce(ctx, ffprobe, src, title, true)
+	return readDVDVideoTitleDurationAttempt(ctx, ffprobe, src, title, true)
 }
 
-func probeDurationOnce(ctx context.Context, ffprobe, src string, title int, preindex bool) (time.Duration, error) {
+func readDVDVideoTitleDurationAttempt(ctx context.Context, ffprobe, src string, title int, preindex bool) (time.Duration, error) {
 	child, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
 	args := []string{"-v", "error", "-probesize", "100M", "-analyzeduration", "100M", "-f", "dvdvideo", "-title", strconv.Itoa(title)}

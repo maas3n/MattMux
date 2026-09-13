@@ -117,7 +117,7 @@ func runBatch(ctx context.Context, root, outputRoot string, logWriter io.Writer)
 		}
 		fmt.Fprintf(os.Stderr, "[%d/%d] Scanning %s through dvdvideo/libdvdread/libdvdnav...\n", i+1, len(movies), m.name)
 		logger.Printf("[%d/%d] scanning %s", i+1, len(movies), m.name)
-		titles := scanTitles(ctx, ffprobe, m.source)
+		titles := discoverDVDTitlesViaDVDVideo(ctx, ffprobe, m.source)
 		if len(titles) == 0 {
 			msg := m.name + ": no readable DVD titles"
 			failures = append(failures, msg)
@@ -239,15 +239,15 @@ func hasDVDVideo(ctx context.Context, ffmpeg string) bool {
 	return err == nil && strings.Contains(string(out), "dvdvideo")
 }
 
-func scanTitles(ctx context.Context, ffprobe, src string) []title {
+func discoverDVDTitlesViaDVDVideo(ctx context.Context, ffprobe, src string) []title {
 	var titles []title
 	for n := 1; n <= 99; n++ {
 		if ctx.Err() != nil {
 			break
 		}
-		d, err := probeDuration(ctx, ffprobe, src, n, false)
+		d, err := readDVDVideoTitleDuration(ctx, ffprobe, src, n, false)
 		if err != nil {
-			d, err = probeDuration(ctx, ffprobe, src, n, true)
+			d, err = readDVDVideoTitleDuration(ctx, ffprobe, src, n, true)
 		}
 		if err == nil && d > 0 {
 			titles = append(titles, title{number: n, duration: d})
@@ -256,7 +256,7 @@ func scanTitles(ctx context.Context, ffprobe, src string) []title {
 	return titles
 }
 
-func probeDuration(ctx context.Context, ffprobe, src string, n int, preindex bool) (time.Duration, error) {
+func readDVDVideoTitleDuration(ctx context.Context, ffprobe, src string, n int, preindex bool) (time.Duration, error) {
 	args := []string{"-v", "error", "-analyzeduration", "100M", "-probesize", "100M"}
 	if preindex {
 		args = append(args, "-preindex", "1")

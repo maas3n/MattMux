@@ -41,9 +41,9 @@ type batchResult struct {
 }
 
 type batchDeps struct {
-	ensureTools func(context.Context, batchProgressFunc) (toolPaths, error)
-	scanTitles  func(context.Context, string, toolPaths, batchProgressFunc) ([]titleInfo, error)
-	remuxTitle  func(context.Context, string, titleInfo, string, toolPaths, batchProgressFunc) (string, error)
+	ensureTools                  func(context.Context, batchProgressFunc) (toolPaths, error)
+	discoverDVDTitlesViaDVDVideo func(context.Context, string, toolPaths, batchProgressFunc) ([]titleInfo, error)
+	remuxTitle                   func(context.Context, string, titleInfo, string, toolPaths, batchProgressFunc) (string, error)
 }
 
 func discoverBatchMovies(root string) ([]batchMovie, error) {
@@ -169,7 +169,7 @@ func runBatchWithDeps(ctx context.Context, opts batchOptions, progress batchProg
 		base := float64(index) / float64(len(movies))
 		span := 1.0 / float64(len(movies))
 		logger.Printf("[%d/%d] scanning %s", index+1, len(movies), movie.Name)
-		titles, scanErr := deps.scanTitles(ctx, movie.Source, tools, func(frac float64, status string) {
+		titles, scanErr := deps.discoverDVDTitlesViaDVDVideo(ctx, movie.Source, tools, func(frac float64, status string) {
 			progress(base+span*(frac*.30), fmt.Sprintf("[%d/%d] %s — %s", index+1, len(movies), movie.Name, status))
 		})
 		if scanErr != nil {
