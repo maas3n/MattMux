@@ -20,12 +20,12 @@ func batchPlatformDeps() batchDeps {
 			}
 			return tools, err
 		},
-		discoverDVDTitlesViaDVDVideo: batchScanTitlesWindows,
+		discoverDVDTitlesViaDVDVideo: batchDiscoverDVDTitlesViaDVDVideoWindows,
 		remuxTitle:                   batchRemuxTitleWindows,
 	}
 }
 
-func batchScanTitlesWindows(ctx context.Context, src string, tools toolPaths, progress batchProgressFunc) ([]titleInfo, error) {
+func batchDiscoverDVDTitlesViaDVDVideoWindows(ctx context.Context, src string, tools toolPaths, progress batchProgressFunc) ([]titleInfo, error) {
 	src, err := normalizeSource(src)
 	if err != nil {
 		return nil, err
