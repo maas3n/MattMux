@@ -20,7 +20,7 @@ func (g *linuxGUI) buildBatch() fyne.CanvasObject {
 	output := widget.NewEntry()
 	output.SetPlaceHolder("Optional — blank writes each MKV into its movie title folder")
 	progress := widget.NewProgressBar()
-	status := widget.NewLabel("Choose the movie collection folder, then click ONECLICK BATCH MUX BUTTON.")
+	status := widget.NewLabel("Choose the movie collection folder, then click ONECLICK BATCH.")
 	status.Wrapping = fyne.TextWrapWord
 
 	chooseInput := widget.NewButton("CHOOSE MOVIE FOLDER", func() {
@@ -49,7 +49,7 @@ func (g *linuxGUI) buildBatch() fyne.CanvasObject {
 	})
 
 	cancel := widget.NewButton("Cancel", g.cancelCurrent)
-	oneClick := widget.NewButton("ONECLICK BATCH MUX BUTTON", func() {
+	oneClick := widget.NewButton("ONECLICK BATCH", func() {
 		root := strings.TrimSpace(input.Text)
 		if root == "" {
 			dialog.ShowInformation("Choose a movie folder", "Choose the folder containing the movie title folders first.", g.window)
