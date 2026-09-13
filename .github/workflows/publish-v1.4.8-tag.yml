@@ -1,0 +1,36 @@
+name: Publish v1.4.8 tag
+
+on:
+  push:
+    branches:
+      - release-publish-1.4.8
+
+permissions:
+  contents: write
+
+jobs:
+  create-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create immutable v1.4.8 tag at verified release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: 2074d74ee8f69ed080db2374f44acaac066f2d95
+          RELEASE_TAG: v1.4.8
+        run: |
+          set -euo pipefail
+
+          main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          if [[ "$main_sha" != "$TARGET_SHA" ]]; then
+            echo "main moved from verified release commit: expected $TARGET_SHA, got $main_sha" >&2
+            exit 1
+          fi
+
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "Tag ${RELEASE_TAG} already exists; refusing to move or recreate it." >&2
+            exit 1
+          fi
+
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/tags/${RELEASE_TAG}" \
+            -f sha="$TARGET_SHA"
