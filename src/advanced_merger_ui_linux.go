@@ -28,6 +28,9 @@ func (g *linuxGUI) buildAdvancedMerger() fyne.CanvasObject {
 	name.SetText("merged.mkv")
 	status := widget.NewLabel("Choose files, then select the streams to include.")
 	status.Wrapping = fyne.TextWrapWord
+	activity := widget.NewProgressBarInfinite()
+	activity.Stop()
+	activity.Hide()
 	var controls []fyne.Disableable
 	var baseControlCount int
 	var cancel context.CancelFunc
@@ -48,6 +51,8 @@ func (g *linuxGUI) buildAdvancedMerger() fyne.CanvasObject {
 		}
 		cancelBtn.Enable()
 		status.SetText(label)
+		activity.Show()
+		activity.Start()
 		ctx, c := context.WithCancel(context.Background())
 		cancel = c
 		go func() {
@@ -60,6 +65,8 @@ func (g *linuxGUI) buildAdvancedMerger() fyne.CanvasObject {
 					control.Enable()
 				}
 				cancelBtn.Disable()
+				activity.Stop()
+				activity.Hide()
 				if err != nil {
 					status.SetText(err.Error())
 					dialog.ShowError(err, g.window)
@@ -151,8 +158,8 @@ func (g *linuxGUI) buildAdvancedMerger() fyne.CanvasObject {
 		d.Show()
 	}
 	movies := widget.NewButton("CHOOSE MOVIE FILES", func() { add("all") })
-	audio := widget.NewButton("CHOOSE AUDIO FILES FROM MKV or RAW", func() { add("audio") })
-	subs := widget.NewButton("CHOOSE SUBTITLE FILES FROM MKV or RAW", func() { add("subtitle") })
+	audio := widget.NewButton("CHOOSE AUDIO STREAMS FROM MKV or RAW", func() { add("audio") })
+	subs := widget.NewButton("CHOOSE SUBTITLE STREAMS FROM MKV or RAW", func() { add("subtitle") })
 	chapters := widget.NewButton("CHOOSE CHAPTER FILE FROM MKV or RAW", func() {
 		dialog.ShowFileOpen(func(r fyne.URIReadCloser, err error) {
 			if err != nil {
@@ -225,5 +232,5 @@ func (g *linuxGUI) buildAdvancedMerger() fyne.CanvasObject {
 	controls = []fyne.Disableable{movies, audio, subs, chapters, folder, mux, clear, chapter, output, name}
 	baseControlCount = len(controls)
 	scroll := container.NewVScroll(list)
-	return container.NewBorder(container.NewVBox(container.NewVBox(movies, audio, subs), widget.NewLabel("Select Streams — choose one chapter set, or use the chapter override below")), container.NewVBox(clear, container.NewBorder(nil, nil, nil, chapters, chapter), container.NewBorder(nil, nil, nil, folder, output), container.NewBorder(nil, nil, widget.NewLabel("Output filename"), nil, name), status, container.NewHBox(mux, cancelBtn)), nil, nil, scroll)
+	return container.NewBorder(container.NewVBox(container.NewVBox(movies, audio, subs), widget.NewLabel("Select Streams — choose one chapter set, or use the chapter override below")), container.NewVBox(clear, container.NewBorder(nil, nil, nil, chapters, chapter), container.NewBorder(nil, nil, nil, folder, output), container.NewBorder(nil, nil, widget.NewLabel("Output filename"), nil, name), status, activity, container.NewHBox(mux, cancelBtn)), nil, nil, scroll)
 }
