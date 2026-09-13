@@ -8,7 +8,9 @@
 
 [**Download MattMux 1.4.8**](https://github.com/maas3n/MattMux/releases/tag/v1.4.8)
 
-The public `v1.4.8` release is built from commit `2074d74ee8f69ed080db2374f44acaac066f2d95` and includes Windows, Linux, Android, and ChromeOS packages from the same release source.
+**Windows 1.4.8 tab-switching hotfix:** the Setup, All-in-One, and Portable downloads now include the corrected background painting from [PR #48](https://github.com/maas3n/MattMux/pull/48). If you downloaded Windows 1.4.8 before this hotfix notice, download it again and replace or reinstall it. The version remains 1.4.8.
+
+The original `v1.4.8` tag and source archive remain at `2074d74ee8f69ed080db2374f44acaac066f2d95`. At the user's request, the Windows packages were rebuilt in place from `d570327918b537482bc0bf653ddd0cdd8e662c89`; their corresponding source is attached to the release as `MattMux-1.4.8-Windows-Hotfix-Source.tar.gz`. Windows and combined SHA-256 manifests are updated. Linux and Android/ChromeOS packages are unchanged.
 
 | Platform | Recommended package | Other options |
 | --- | --- | --- |
