@@ -1,0 +1,104 @@
+name: Prepare 1.4.8 release notes
+
+on:
+  push:
+    branches:
+      - release/1.4.8
+    paths:
+      - .github/workflows/prepare-release-1.4.8.yml
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/1.4.8
+          fetch-depth: 0
+      - name: Update release documentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          changelog = Path('CHANGELOG.md')
+          c = changelog.read_text(encoding='utf-8')
+          header = '# Changelog\n\n'
+          assert c.startswith(header)
+          notes = '''## 1.4.8 — 2026-09-13
+
+          - Fix Windows native-tab repainting so switching among **DVD Remux**, **Advanced Merger**, and **BATCH** no longer leaves stale controls or apparent duplicate buttons behind.
+          - Rename the desktop BATCH action from **ONECLICK BATCH MUX BUTTON** to **ONECLICK BATCH** on Windows and Linux, including the matching instruction text.
+          - Remove the legacy MattMux desktop `scanTitles()` / `probeDuration()` naming and wrapper structure from Windows/Linux GUI, CLI, and BATCH title discovery; candidate titles are discovered through FFprobe's `dvdvideo` demuxer backed by `libdvdread`/`libdvdnav`, with an automatic `-preindex 1` retry when needed.
+          - Keep the separate native IFO chapter parser only for chapter metadata; it is not used for DVD title discovery.
+          - Keep Android/ChromeOS product behavior unchanged from 1.4.7.
+
+          '''
+          notes = '\n'.join(line[10:] if line.startswith('          ') else line for line in notes.splitlines()) + '\n'
+          if '## 1.4.8 — 2026-09-13' not in c:
+              c = header + notes + c[len(header):]
+          changelog.write_text(c, encoding='utf-8')
+
+          readme = Path('README.md')
+          r = readme.read_text(encoding='utf-8')
+
+          start = r.index('## Download MattMux 1.4.7')
+          end = r.index('## Highlights', start)
+          download = '''## Download MattMux 1.4.8
+
+          **MattMux 1.4.8** is a desktop hotfix/refactor release for Windows and Linux. It fixes Windows tab repaint ghosting, shortens the BATCH action label to **ONECLICK BATCH**, and makes the Windows/Linux DVD title-discovery path explicitly FFmpeg `dvdvideo`-based with the legacy MattMux `scanTitles()` / `probeDuration()` wrappers removed. Android/ChromeOS behavior is unchanged from 1.4.7.
+
+          [**Download MattMux 1.4.8**](https://github.com/maas3n/MattMux/releases/tag/v1.4.8)
+
+          | Platform | Recommended package | Other options |
+          | --- | --- | --- |
+          | Windows x64 | `MattMux-1.4.8-Windows-All-in-One.exe` | Setup EXE or Portable ZIP; Setup/Portable include `mattmux-cli.exe` |
+          | Linux amd64 | `MattMux-1.4.8-Linux-amd64Standalone` | Self-contained `.deb` or tarball; packaged CLI included |
+          | Android phone / tablet | `MattMux-1.4.8-Android.apk` | Signed universal APK; behavior unchanged from 1.4.7 |
+          | ChromeOS | `MattMux-1.4.8-ChromeOS.apk` | Byte-identical alias of the Android APK |
+
+          The release also includes source archives, third-party source/provenance files, per-platform SHA-256 manifests, and one combined `SHA256SUMS.txt`.
+
+          '''
+          download = '\n'.join(line[10:] if line.startswith('          ') else line for line in download.splitlines()) + '\n'
+          r = r[:start] + download + r[end:]
+
+          r = r.replace('**ONECLICK BATCH MUX BUTTON** processes every immediate `Movie Title/VIDEO_TS` folder', '**ONECLICK BATCH** processes every immediate `Movie Title/VIDEO_TS` folder')
+          r = r.replace('Click **ONECLICK BATCH MUX BUTTON** after choosing the collection.', 'Click **ONECLICK BATCH** after choosing the collection.')
+          old_scan = '- Windows/Linux **Scan Titles** probes DVD title numbers through FFmpeg `dvdvideo` (`libdvdread` + `libdvdnav`) for both folders and ISOs; MattMux no longer parses the DVD title count itself'
+          new_scan = '- Windows/Linux **Scan Titles** discovers candidate DVD titles through FFprobe `dvdvideo` (`libdvdread` + `libdvdnav`) for both folders and ISOs; the legacy MattMux `scanTitles()` / `probeDuration()` wrappers are removed from title discovery'
+          assert old_scan in r
+          r = r.replace(old_scan, new_scan)
+
+          quick_start = r.index('## Quick start')
+          output_behavior = r.index('### Output location behavior', quick_start)
+          q = r[quick_start:output_behavior]
+          q = q.replace('MattMux 1.4.7 release', 'MattMux 1.4.8 release')
+          q = q.replace('/tag/v1.4.7', '/tag/v1.4.8')
+          q = q.replace('MattMux-1.4.7-', 'MattMux-1.4.8-')
+          q = q.replace('1.4.7 does not change Android/ChromeOS product behavior from 1.4.6.', '1.4.8 does not change Android/ChromeOS product behavior from 1.4.7.')
+          r = r[:quick_start] + q + r[output_behavior:]
+
+          hist_old = 'MattMux **1.4.7** adds desktop one-click BATCH processing plus the matching Windows/Linux CLI batch interface.'
+          hist_new = hist_old + ' MattMux **1.4.8** fixes Windows tab repaint ghosting, renames the BATCH action to **ONECLICK BATCH**, and removes the legacy desktop `scanTitles()` / `probeDuration()` wrapper structure while keeping title discovery on FFmpeg `dvdvideo` with `libdvdread`/`libdvdnav`.'
+          assert hist_old in r
+          r = r.replace(hist_old, hist_new)
+          r = r.replace('For current downloads, use the unified **MattMux 1.4.7** release.', 'For current downloads, use the unified **MattMux 1.4.8** release.')
+
+          readme.write_text(r, encoding='utf-8')
+          PY
+          git rm .github/workflows/prepare-release-1.4.8.yml
+      - name: Commit release preparation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Prepare MattMux 1.4.8 release'
+          git push origin HEAD:release/1.4.8
