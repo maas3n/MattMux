@@ -15,13 +15,19 @@ import (
 const mergerFirstID = 7100
 const mergerDoneMessage = WM_APP + 30
 
+const (
+	mergerPBSMarquee    = 0x00000008
+	mergerPBMSetMarquee = 0x040A
+)
+
 var mergerWindow struct {
-	tab, list, chapter, output, name, status uintptr
-	dvd, controls                            []uintptr
-	cancelBtn                                uintptr
-	streams                                  []mergerStream
-	pendingMu                                sync.Mutex
-	pending                                  func()
+	tab, list, chapter, output, name, status, progress uintptr
+	dvd, controls                                      []uintptr
+	cancelBtn                                          uintptr
+	progressActive                                     bool
+	streams                                            []mergerStream
+	pendingMu                                          sync.Mutex
+	pending                                            func()
 }
 
 type mergerTabItem struct {
@@ -53,9 +59,11 @@ func createMergerWindowsControls(hwnd, hInstance uintptr) {
 		item := mergerTabItem{Mask: 1, Text: utf16Ptr(label)}
 		procSendMessageW.Call(mergerWindow.tab, 0x133e, uintptr(i), uintptr(unsafe.Pointer(&item)))
 	}
-	for i, label := range []string{"CHOOSE MOVIE FILES", "CHOOSE AUDIO FILES FROM MKV or RAW", "CHOOSE SUBTITLE FILES FROM MKV or RAW"} {
-		add("BUTTON", label, BS_PUSHBUTTON, 28+int32(i)*258, 52, 250, 34, mergerFirstID+i)
-	}
+	// Keep the short movie button compact so the two stream-specific actions get
+	// enough width to remain centered and readable at Windows DPI scaling levels.
+	add("BUTTON", "CHOOSE MOVIE FILES", BS_PUSHBUTTON, 28, 52, 200, 34, mergerFirstID)
+	add("BUTTON", "CHOOSE AUDIO STREAMS FROM MKV or RAW", BS_PUSHBUTTON, 236, 52, 266, 34, mergerFirstID+1)
+	add("BUTTON", "CHOOSE SUBTITLE STREAMS FROM MKV or RAW", BS_PUSHBUTTON, 510, 52, 268, 34, mergerFirstID+2)
 	add("STATIC", "Select Streams", 0, 28, 94, 750, 22, 0)
 	mergerWindow.list = add("SysListView32", "", WS_BORDER|LVS_REPORT|LVS_SHOWSELALWAYS, 28, 120, 750, 235, 0)
 	procSendMessageW.Call(mergerWindow.list, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, LVS_EX_CHECKBOXES|LVS_EX_FULLROWSELECT)
@@ -71,11 +79,32 @@ func createMergerWindowsControls(hwnd, hInstance uintptr) {
 	add("BUTTON", "CHOOSE OUTPUT FOLDER", BS_PUSHBUTTON, 538, 443, 240, 32, mergerFirstID+5)
 	add("STATIC", "Output filename", 0, 28, 487, 120, 24, 0)
 	mergerWindow.name = add("EDIT", "merged.mkv", WS_BORDER|ES_AUTOHSCROLL, 155, 484, 623, 28, 0)
-	mergerWindow.status = add("STATIC", "Choose files and select streams. Chapters are optional (MKV or FFMETADATA1).", 0, 28, 522, 750, 38, 0)
+	mergerWindow.status = add("STATIC", "Choose files and select streams. Chapters are optional (MKV or FFMETADATA1).", 0, 28, 522, 750, 24, 0)
+	// Use the same native Windows progress-control family as DVD Remux. Advanced
+	// Merger cannot know an exact percentage for arbitrary stream-copy inputs, so
+	// show the native marquee while an operation is active instead of a fake value.
+	mergerWindow.progress, _, _ = procCreateWindowExW.Call(0, uintptr(unsafe.Pointer(utf16Ptr("msctls_progress32"))), 0, uintptr(WS_CHILD|mergerPBSMarquee), uintptr(scale96(28, dpi)), uintptr(scale96(550, dpi)), uintptr(scale96(750, dpi)), uintptr(scale96(16, dpi)), hwnd, 0, hInstance, 0)
 	add("BUTTON", "MUX TO MKV", BS_PUSHBUTTON, 488, 574, 180, 34, mergerFirstID+6)
 	mergerWindow.cancelBtn = add("BUTTON", "Cancel", BS_PUSHBUTTON, 680, 574, 98, 34, mergerFirstID+7)
 	procEnableWindow.Call(mergerWindow.cancelBtn, 0)
 	createBatchWindowsControls(hwnd, hInstance)
+}
+
+func setWindowsMergerProgress(active bool) {
+	mergerWindow.progressActive = active
+	if mergerWindow.progress == 0 {
+		return
+	}
+	if active {
+		procSendMessageW.Call(mergerWindow.progress, mergerPBMSetMarquee, 1, 30)
+		selected, _, _ := procSendMessageW.Call(mergerWindow.tab, 0x130b, 0, 0)
+		if selected == 1 {
+			procShowWindow.Call(mergerWindow.progress, SW_SHOW)
+		}
+		return
+	}
+	procSendMessageW.Call(mergerWindow.progress, mergerPBMSetMarquee, 0, 0)
+	procShowWindow.Call(mergerWindow.progress, 0)
 }
 
 func showMergerWindowsTab() {
@@ -94,6 +123,11 @@ func showMergerWindowsTab() {
 		}
 		procShowWindow.Call(c, show)
 	}
+	progressShow := uintptr(0)
+	if selected == 1 && mergerWindow.progressActive {
+		progressShow = SW_SHOW
+	}
+	procShowWindow.Call(mergerWindow.progress, progressShow)
 	showWindowsBatchTab(selected)
 	redrawWindowsTabPage()
 }
@@ -160,6 +194,7 @@ func runWindowsMerger(label string, work func(context.Context) (func(), error)) 
 	procEnableWindow.Call(mergerWindow.cancelBtn, 1)
 	procEnableWindow.Call(mergerWindow.tab, 0)
 	setText(mergerWindow.status, label)
+	setWindowsMergerProgress(true)
 	go func() {
 		done, err := work(ctx)
 		cancel()
@@ -169,6 +204,7 @@ func runWindowsMerger(label string, work func(context.Context) (func(), error)) 
 			app.cancel = nil
 			app.cancelMu.Unlock()
 			app.busy.Store(false)
+			setWindowsMergerProgress(false)
 			for _, c := range mergerWindow.controls {
 				procEnableWindow.Call(c, 1)
 			}
