@@ -1,3 +1,4 @@
+# retry after fixing Windows callback syntax
 name: Apply dvdvideo title-discovery refactor
 
 on:
@@ -54,7 +55,10 @@ jobs:
           for path in changed:
               print('  ' + path)
           PY
-          gofmt -w $(git diff --name-only -- 'src/*.go' 'src/**/*.go' | tr '\n' ' ')
+          changed_go="$(git diff --name-only -- 'src/*.go' 'src/**/*.go')"
+          if [[ -n "$changed_go" ]]; then
+            gofmt -w $changed_go
+          fi
           git rm .github/workflows/apply-dvdvideo-title-refactor.yml
       - name: Commit refactor
         shell: bash
