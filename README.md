@@ -2,11 +2,13 @@
 
 **MattMux** remuxes DVD-Video titles and combines selected media streams into MKV **without transcoding**. Windows, Linux, and Android/ChromeOS are developed together from the single `main` branch and released under one shared product version.
 
-## Download MattMux 1.4.8
+## Latest stable release: MattMux 1.4.8
 
-**MattMux 1.4.8** is a desktop hotfix/refactor release for Windows and Linux. It fixes Windows tab repaint ghosting, shortens the BATCH action label to **ONECLICK BATCH**, and makes the Windows/Linux DVD title-discovery path explicitly FFmpeg `dvdvideo`-based with the legacy MattMux `scanTitles()` / `probeDuration()` wrappers removed. Android/ChromeOS behavior is unchanged from 1.4.7.
+**MattMux 1.4.8 is the current public stable release.** It is a desktop hotfix/refactor release for Windows and Linux. It fixes Windows tab repaint ghosting, shortens the BATCH action label to **ONECLICK BATCH**, and makes the Windows/Linux DVD title-discovery path explicitly FFmpeg `dvdvideo`-based with the legacy MattMux `scanTitles()` / `probeDuration()` wrappers removed. Android/ChromeOS behavior is unchanged from 1.4.7.
 
 [**Download MattMux 1.4.8**](https://github.com/maas3n/MattMux/releases/tag/v1.4.8)
+
+The public `v1.4.8` release is built from commit `2074d74ee8f69ed080db2374f44acaac066f2d95` and includes Windows, Linux, Android, and ChromeOS packages from the same release source.
 
 | Platform | Recommended package | Other options |
 | --- | --- | --- |
