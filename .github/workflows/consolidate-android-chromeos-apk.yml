@@ -1,0 +1,140 @@
+name: One-time Android ChromeOS APK consolidation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/consolidate-android-chromeos-apk.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  consolidate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Update future publishing and docs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def exact(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'Expected text not found in {path}: {old!r}')
+              p.write_text(text.replace(old, new), encoding='utf-8')
+
+          # Only alter the Android artifact preparation lines in the unified workflow.
+          p = Path('.github/workflows/release.yml')
+          text = p.read_text(encoding='utf-8')
+          for line in [
+              '          cp "$APK" "dist/android-release/MattMux-$version-ChromeOS.apk"\n',
+              '          test -s "dist/android-release/MattMux-$version-ChromeOS.apk"\n',
+              '          cmp --silent "dist/android-release/MattMux-$version-Android.apk" "dist/android-release/MattMux-$version-ChromeOS.apk"\n',
+          ]:
+              if line not in text:
+                  raise SystemExit(f'Expected Android workflow line not found: {line!r}')
+              text = text.replace(line, '')
+          p.write_text(text, encoding='utf-8')
+
+          # README: advertise one universal Android-named APK for both device classes.
+          exact('README.md',
+                '| Android phone / tablet | `MattMux-1.4.8-Android.apk` | Signed universal APK; behavior unchanged from 1.4.7 |\n| ChromeOS | `MattMux-1.4.8-ChromeOS.apk` | Byte-identical alias of the Android APK |',
+                '| Android / ChromeOS | `MattMux-1.4.8-Android.apk` | One signed universal APK for Android phones/tablets and Chromebooks with Android app support |')
+          exact('README.md',
+                '- The `Android.apk` and `ChromeOS.apk` release assets are the same signed universal APK under device-friendly names',
+                '- The single `Android.apk` release asset is the signed universal APK for Android phones/tablets and Chromebooks with Android app support')
+          exact('README.md',
+                'For Android phones/tablets, download `MattMux-1.4.8-Android.apk`. For Chromebooks, download `MattMux-1.4.8-ChromeOS.apk` from the [MattMux 1.4.8 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.8). They are the same persistently signed universal APK; 1.4.8 does not change Android/ChromeOS product behavior from 1.4.7.',
+                'For Android phones/tablets and Chromebooks with Android app support, download `MattMux-1.4.8-Android.apk` from the [MattMux 1.4.8 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.8). It is the single persistently signed universal APK for both Android and ChromeOS; 1.4.8 does not change Android/ChromeOS product behavior from 1.4.7.')
+
+          exact('RELEASING.md',
+                '- `MattMux-<version>-Android.apk`\n- `MattMux-<version>-ChromeOS.apk`',
+                '- `MattMux-<version>-Android.apk` — universal APK for Android phones/tablets and Chromebooks with Android app support')
+          exact('RELEASING.md',
+                'The Android and ChromeOS APK filenames are byte-identical aliases of the same persistently signed universal APK. The separate names make the intended device class obvious without maintaining separate Android builds.',
+                '`MattMux-<version>-Android.apk` is the single persistently signed universal APK for both Android phones/tablets and Chromebooks with Android app support.')
+          exact('RELEASING.md',
+                '5. builds one signed universal Android APK and publishes byte-identical Android/ChromeOS filename aliases;',
+                '5. builds one signed universal `MattMux-<version>-Android.apk` for both Android and ChromeOS;')
+
+          exact('android/README.md',
+                'This directory contains the experimental Android/ChromeOS frontend for MattMux. Android/ChromeOS follows the unified MattMux release line; the current published unified release is **1.4.2** (`v1.4.2`). MattMux 1.4.1 was the first GitHub APK release using the persistent MattMux distribution-signing key; 1.4.2 publishes that same signed universal APK under explicit Android and ChromeOS filenames.\n\nFor GitHub releases, use `MattMux-<version>-Android.apk` on Android phones/tablets and `MattMux-<version>-ChromeOS.apk` on Chromebooks. The two files are byte-for-byte identical aliases of one universal APK.',
+                'This directory contains the experimental Android/ChromeOS frontend for MattMux. Android/ChromeOS follows the unified MattMux release line. GitHub releases publish one persistently signed universal APK named `MattMux-<version>-Android.apk`.\n\nUse `MattMux-<version>-Android.apk` on Android phones/tablets and on Chromebooks with Android app support. The same APK supports both Android and ChromeOS; no separate ChromeOS APK is required.')
+          PY
+
+          # Guardrail: changes to release.yml must mention ChromeOS.apk only in removed lines.
+          git diff -- .github/workflows/release.yml
+          if git diff -- .github/workflows/release.yml | grep -E '^[+-].*(Windows|Linux)' | grep -v '^[-+]+++'; then
+            echo 'Unexpected Windows/Linux workflow modification detected' >&2
+            exit 1
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/release.yml README.md RELEASING.md android/README.md
+          git diff --cached --check
+          git commit -m 'Use one universal APK for Android and ChromeOS'
+          git push origin HEAD:main
+
+      - name: Clean only Android ChromeOS assets in v1.4.9
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          tag='v1.4.9'
+          chrome='MattMux-1.4.9-ChromeOS.apk'
+          work="$RUNNER_TEMP/mattmux-apk-cleanup"
+          mkdir -p "$work"
+
+          # Capture Windows/Linux asset ids, names, sizes and digests before cleanup.
+          gh api "repos/$repo/releases/tags/$tag" --jq '.assets[] | select(.name|test("Windows|Linux")) | [.id,.name,.size,.digest] | @tsv' | sort > "$work/desktop-before.tsv"
+
+          gh release download "$tag" --repo "$repo" --pattern 'SHA256SUMS-Android.txt' --pattern 'SHA256SUMS.txt' --dir "$work"
+          for manifest in "$work/SHA256SUMS-Android.txt" "$work/SHA256SUMS.txt"; do
+            test -s "$manifest"
+            grep -F "$chrome" "$manifest" >/dev/null
+            grep -Fv "$chrome" "$manifest" > "$manifest.new"
+            mv "$manifest.new" "$manifest"
+          done
+          gh release upload "$tag" --repo "$repo" "$work/SHA256SUMS-Android.txt" "$work/SHA256SUMS.txt" --clobber
+
+          gh api "repos/$repo/releases/tags/$tag" > "$work/release.json"
+          python3 - "$work/release.json" "$work/notes.md" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding='utf-8'))
+          body = (data.get('body') or '').rstrip()
+          note = ('### Android / ChromeOS\n\n'
+                  'Download `MattMux-1.4.9-Android.apk` for Android phones/tablets and Chromebooks with Android app support. '
+                  'It is the single universal APK for both Android and ChromeOS; no separate ChromeOS APK is required.')
+          if note not in body:
+              body += '\n\n' + note
+          open(sys.argv[2], 'w', encoding='utf-8').write(body + '\n')
+          PY
+          gh release edit "$tag" --repo "$repo" --notes-file "$work/notes.md"
+
+          asset_id="$(gh api "repos/$repo/releases/tags/$tag" --jq ".assets[] | select(.name == \"$chrome\") | .id")"
+          test -n "$asset_id"
+          gh api --method DELETE "repos/$repo/releases/assets/$asset_id"
+
+          # Verify the Android APK remains and the duplicate is gone.
+          gh api "repos/$repo/releases/tags/$tag" --jq '.assets[].name' | grep -Fx 'MattMux-1.4.9-Android.apk'
+          if gh api "repos/$repo/releases/tags/$tag" --jq '.assets[].name' | grep -Fx "$chrome"; then
+            echo 'ChromeOS duplicate still exists' >&2
+            exit 1
+          fi
+
+          # Verify every Windows/Linux release asset is byte-metadata-identical and untouched.
+          gh api "repos/$repo/releases/tags/$tag" --jq '.assets[] | select(.name|test("Windows|Linux")) | [.id,.name,.size,.digest] | @tsv' | sort > "$work/desktop-after.tsv"
+          diff -u "$work/desktop-before.tsv" "$work/desktop-after.tsv"
