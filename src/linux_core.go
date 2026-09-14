@@ -502,18 +502,11 @@ func probeChapters(ctx context.Context, ffprobe, src string, title int) ([]DVDCh
 	return chs, nil
 }
 func detectChapters(ctx context.Context, ffprobe, src string, title int) ([]DVDChapter, string, error) {
-	_, chs, nativeErr := ReadDVDChapters(src, title)
-	if nativeErr == nil && len(chs) > 0 {
-		return chs, "native DVD IFO parser", nil
-	}
 	chs, err := probeChapters(ctx, ffprobe, src, title)
 	if err != nil {
-		if nativeErr != nil {
-			return nil, "", fmt.Errorf("native parser: %v; FFmpeg fallback: %w", nativeErr, err)
-		}
 		return nil, "", err
 	}
-	return chs, "FFmpeg dvdvideo pre-index", nil
+	return chs, "FFmpeg dvdvideo/libdvdread/libdvdnav pre-index", nil
 }
 func secondsTextDuration(s string) (time.Duration, error) {
 	f, err := strconv.ParseFloat(strings.TrimSpace(s), 64)

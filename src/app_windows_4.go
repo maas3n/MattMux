@@ -19,21 +19,11 @@ import (
 )
 
 func detectChapters(ctx context.Context, ffprobe, src string, title int) ([]DVDChapter, string, error) {
-	_, chapters, nativeErr := ReadDVDChapters(src, title)
-	if nativeErr == nil && len(chapters) > 0 {
-		return chapters, "native DVD IFO parser", nil
-	}
-	if nativeErr != nil {
-		log.Printf("native chapter parser fallback: title=%d source=%q err=%v", title, src, nativeErr)
-	}
 	chapters, err := probeChapters(ctx, ffprobe, src, title)
 	if err != nil {
-		if nativeErr != nil {
-			return nil, "", fmt.Errorf("native parser: %v; FFmpeg fallback: %w", nativeErr, err)
-		}
 		return nil, "", err
 	}
-	return chapters, "FFmpeg dvdvideo pre-index", nil
+	return chapters, "FFmpeg dvdvideo/libdvdread/libdvdnav pre-index", nil
 }
 
 func probeChapters(ctx context.Context, ffprobe, src string, title int) ([]DVDChapter, error) {

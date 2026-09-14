@@ -48,7 +48,7 @@ The release also includes source archives, third-party source/provenance files, 
 - Windows/Linux **Scan Titles** discovers candidate DVD titles through FFprobe `dvdvideo` (`libdvdread` + `libdvdnav`) for both folders and ISOs; the legacy MattMux `scanTitles()` / `probeDuration()` wrappers are removed from title discovery
 - Windows/Linux DVD remux and Advanced Merger inputs always use `-analyzeduration 100M -probesize 100M -fflags +genpts`; DVD **Start Remux** does not pre-index before muxing
 - Optional DVD chapter preservation
-- Native Go IFO chapter parser on desktop with FFprobe fallback
+- DVD chapter metadata on Windows/Linux comes only from FFprobe `dvdvideo` backed by `libdvdread` + `libdvdnav`; MattMux does not parse DVD IFO bytes
 - Cancelable scans, metadata reads, remuxes, Advanced Merger jobs, and desktop batch jobs
 - Unique operation-owned temporary outputs with validated, no-overwrite finalization on desktop
 - Pinned and SHA-256-verified third-party runtime tools
