@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class AdvancedMergerPanel(private val activity: Activity) {
     companion object { const val FIRST_REQUEST = 8100 }
     private val native = AdvancedMergerNative()
+    private val dvdEngine = AndroidNativeRemuxEngine()
     private val root = File(activity.cacheDir, "merger-${System.nanoTime()}").apply { mkdirs() }
     private val controls = mutableListOf<View>()
     private val sources = linkedMapOf<Uri, File>()
@@ -34,17 +35,17 @@ class AdvancedMergerPanel(private val activity: Activity) {
     private val outputLabel = TextView(activity).apply { text = "Choose output folder" }
     private val filename = EditText(activity).apply { setSingleLine(); setText("merged.mkv") }
     private val streamList = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
-    private val cancelButton = Button(activity).apply { text = "Cancel"; isEnabled = false; setOnClickListener { native.cancelled.set(true) } }
+    private val cancelButton = Button(activity).apply { text = "Cancel"; isEnabled = false; setOnClickListener { native.cancelled.set(true); dvdEngine.cancel() } }
     val view: View
 
     init {
         val padding = (24 * activity.resources.displayMetrics.density).toInt()
         val content = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(padding, padding, padding, padding) }
         fun button(label: String, action: () -> Unit) { content.addView(Button(activity).apply { text = label; setOnClickListener { action() }; controls += this }) }
-        button("CHOOSE MOVIE FILES") { choose(0) }
+        button("CHOOSE MOVIE FILES / DVD ISO") { choose(0) }
         button("CHOOSE AUDIO FILES FROM MKV or RAW") { choose(1) }
         button("CHOOSE SUBTITLE FILES FROM MKV or RAW") { choose(2) }
-        content.addView(TextView(activity).apply { text = "Select Streams — movie inputs include every stream and embedded chapters" })
+        content.addView(TextView(activity).apply { text = "Select Streams — movie inputs include every stream and embedded chapters. DVD ISO inputs are first staged losslessly from the longest DVD title using the native DVD engine." })
         content.addView(streamList)
         button("Clear streams") { selections.clear(); streamList.removeAllViews() }
         button("CHOOSE CHAPTER FILE FROM MKV or RAW") { choose(3) }
@@ -79,9 +80,9 @@ class AdvancedMergerPanel(private val activity: Activity) {
         if (uris.isEmpty()) data.data?.let { uris += it }
         if (uris.isEmpty()) return true
         val kind = request - FIRST_REQUEST
-        run("Preparing input copies…") {
-            // Copy the whole batch before probing: IDX can then find a selected SUB sidecar.
-            val files = uris.map { uri -> sources[uri] ?: copyInput(uri).also { sources[uri] = it } }
+        run("Preparing inputs…") {
+            // Copy ordinary inputs before probing. Movie ISO inputs are losslessly staged through the native DVD engine first.
+            val files = uris.map { uri -> sources[uri] ?: prepareInput(uri, kind).also { sources[uri] = it } }
             if (kind == 3) {
                 val file = files.single()
                 native.validateChapters(file.absolutePath)?.let { error(it) }
@@ -111,10 +112,29 @@ class AdvancedMergerPanel(private val activity: Activity) {
         return true
     }
 
-    private fun copyInput(uri: Uri): File {
-        val name = activity.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+    private fun prepareInput(uri: Uri, kind: Int): File {
+        val name = displayName(uri)
+        if (kind == 0 && name.endsWith(".iso", ignoreCase = true)) {
+            check(dvdEngine.isAvailable) { dvdEngine.unavailableReason ?: "Native DVD engine unavailable" }
+            val stem = name.dropLast(4).trim().ifBlank { "DVD" }
+            val safeStem = stem.replace(Regex("[^A-Za-z0-9._ -]"), "_")
+            val staged = File(root, "$safeStem-dvd-title.mkv")
+            require(!staged.exists()) { "Two movie inputs resolve to the same staged DVD title name: ${staged.name}" }
+            activity.runOnUiThread { status.text = "Reading DVD ISO and staging the longest title: $name" }
+            val title = dvdEngine.remuxTitleToFile(activity, uri, staged, requestedTitle = null, preserveChapters = true)
+            activity.runOnUiThread { status.text = "DVD ISO title $title staged for Advanced Merger" }
+            return staged
+        }
+        return copyInput(uri, name)
+    }
+
+    private fun displayName(uri: Uri): String =
+        activity.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
             if (it.moveToFirst()) it.getString(0) else null
         } ?: "input-${sources.size}"
+
+    private fun copyInput(uri: Uri, providedName: String? = null): File {
+        val name = providedName ?: displayName(uri)
         require(name == File(name).name && name != "." && name != "..") { "Invalid input filename" }
         // Avoid silently pairing two unrelated sources with the same basename.
         val file = File(root, name)
@@ -187,7 +207,7 @@ class AdvancedMergerPanel(private val activity: Activity) {
         }.start()
     }
 
-    fun destroy() { destroyed = true; native.cancelled.set(true); if (!busy) root.deleteRecursively() }
+    fun destroy() { destroyed = true; native.cancelled.set(true); dvdEngine.cancel(); if (!busy) root.deleteRecursively() }
 }
 
 class AdvancedMergerNative {

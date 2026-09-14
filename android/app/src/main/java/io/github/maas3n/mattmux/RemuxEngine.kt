@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
 import android.os.ParcelFileDescriptor
+import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.ReentrantLock
 
@@ -162,6 +163,52 @@ class AndroidNativeRemuxEngine : RemuxEngine {
         try {
             check(!cancelled.get()) { "Remux cancelled" }
             return remuxLocked(context, sourceUri, outputTreeUri, requestedTitle, selectedStreamIndexes, preserveChapters)
+        } finally {
+            cancelled.set(false)
+            remuxLock.unlock()
+        }
+    }
+
+    /** Losslessly materializes one DVD title into an app-private MKV for internal consumers. */
+    internal fun remuxTitleToFile(
+        context: Context,
+        sourceUri: Uri,
+        outputFile: File,
+        requestedTitle: Int? = null,
+        preserveChapters: Boolean = true,
+    ): Int {
+        check(isAvailable) { unavailableReason ?: "Remux engine unavailable" }
+        require(requestedTitle == null || requestedTitle > 0) { "DVD title must be greater than zero" }
+        check(remuxLock.tryLock()) { "Another native operation is still stopping. Try again shortly." }
+        try {
+            check(!cancelled.get()) { "Remux cancelled" }
+            outputFile.parentFile?.mkdirs()
+            if (outputFile.exists()) check(outputFile.delete()) { "Could not replace temporary merger input" }
+            openTitle(context, sourceUri, requestedTitle).use { title ->
+                ParcelFileDescriptor.open(
+                    outputFile,
+                    ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_READ_WRITE,
+                ).use { output ->
+                    val fds = IntArray(title.vobs.size) { title.vobs[it].fd }
+                    val starts = LongArray(title.plan.cells.size) { title.plan.cells[it].startSector }
+                    val ends = LongArray(title.plan.cells.size) { title.plan.cells[it].endSectorExclusive }
+                    val chapterStarts = if (preserveChapters) title.plan.chapterStartsMs else LongArray(0)
+                    val chapterEnds = if (preserveChapters) title.plan.chapterEndsMs else LongArray(0)
+                    val nativeError = nativeRemux(
+                        fds, starts, ends, output.fd, chapterStarts, chapterEnds, null,
+                        title.isoHandle, title.plan.titleSet,
+                        title.plan.streamLanguages.map { "${it.streamId}\t${it.language}" }.toTypedArray(),
+                        title.plan.subtitlePalette,
+                    )
+                    if (nativeError != null) throw IllegalStateException(nativeError)
+                }
+                check(!cancelled.get()) { "Remux cancelled" }
+                check(outputFile.isFile && outputFile.length() > 0L) { "DVD title staging produced an empty file" }
+                return title.plan.globalTitle
+            }
+        } catch (t: Throwable) {
+            outputFile.delete()
+            throw t
         } finally {
             cancelled.set(false)
             remuxLock.unlock()
