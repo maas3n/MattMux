@@ -1,0 +1,43 @@
+name: Create v1.4.9 tag once
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/tag-v1.4.9-once.yml'
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  tag-and-dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create immutable v1.4.9 tag at tested PR #49 merge
+        env:
+          TARGET_SHA: 42f5481b3446f974d6a745d1f4989e18d26ceaff
+          TAG: v1.4.9
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          git cat-file -e "${TARGET_SHA}^{commit}"
+          if git rev-parse --verify "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "${TAG} already exists; refusing to move it." >&2
+            exit 1
+          fi
+          git tag "${TAG}" "${TARGET_SHA}"
+          git push origin "refs/tags/${TAG}"
+
+      - name: Dispatch unified release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag=v1.4.9
