@@ -26,7 +26,9 @@ jobs:
         run: |
           cd src
           go test -tags cli ./...
-          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test ./...
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test -c -o /tmp/mattmux-windows.test.exe .
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -buildvcs=false -o /tmp/MattMux.exe .
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -buildvcs=false -o /tmp/mattmux-cli.exe ./cmd/mattmux-cli-windows
       - name: Commit migration
         run: |
           git config user.name 'github-actions[bot]'
