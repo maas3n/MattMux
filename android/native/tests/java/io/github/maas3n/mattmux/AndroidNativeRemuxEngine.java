@@ -6,6 +6,8 @@ public final class AndroidNativeRemuxEngine {
     private int progress;
     private boolean isNativeCancelled() { return cancelled; }
     private void onNativeProgress(int value) { progress = value; }
+    private native long[] nativeScanDvdNav(String path);
+    private native String[] nativePlanDvdNav(String path, int title);
     private native long nativeOpenIso(int fd);
     private native void nativeCloseIso(long handle);
     private native byte[] nativeReadIsoIfo(long handle, int titleSet);
@@ -19,6 +21,10 @@ public final class AndroidNativeRemuxEngine {
         System.load(args[0]);
         AndroidNativeRemuxEngine engine = new AndroidNativeRemuxEngine();
         String root = args[1];
+        if (args.length > 2 && args[2].equals("dvdnav")) {
+            testDvdNav(engine, root);
+            return;
+        }
         int first = openPath(root + "/VIDEO_TS/VTS_01_1.VOB", false);
         int second = openPath(root + "/VIDEO_TS/VTS_01_2.VOB", false);
         int isoFd = openPath(root + "/fixture.iso", false);
@@ -73,4 +79,69 @@ public final class AndroidNativeRemuxEngine {
         }
         System.out.println("Production JNI folder/ISO remux and cancellation PASS");
     }
+    private static void testDvdNav(AndroidNativeRemuxEngine engine, String root) throws Exception {
+        long[] scan = engine.nativeScanDvdNav(root + "/staged");
+        if (scan == null || scan.length != 5 || scan[0] != 2 || scan[1] != 2 ||
+            scan[3] <= 0 || scan[4] <= scan[3]) {
+            throw new AssertionError("Wrong one-based title discovery: " + java.util.Arrays.toString(scan));
+        }
+        long[] complete = engine.nativeScanDvdNav(root + "/disc");
+        if (!java.util.Arrays.equals(scan, complete)) throw new AssertionError("IFO-only scan differs from full DVD");
+        for (int title = 1; title <= 2; title++) {
+            String[] plan = engine.nativePlanDvdNav(root + "/staged", title);
+            if (plan == null || !plan[0].startsWith("T\t" + title + "\t")) throw new AssertionError("Cannot plan title " + title);
+            long duration = Long.parseLong(plan[0].split("\t")[3]);
+            if (duration != scan[title + 2] / 90) throw new AssertionError("Duration belongs to another title");
+        }
+        if (engine.nativePlanDvdNav(root + "/staged", 0) != null ||
+            engine.nativePlanDvdNav(root + "/staged", 3) != null) throw new AssertionError("Invalid title accepted");
+        String[] plan = engine.nativePlanDvdNav(root + "/staged", 2);
+        int titleSet = Integer.parseInt(plan[0].split("\t")[2]);
+        java.util.List<Long> starts = new java.util.ArrayList<>(), ends = new java.util.ArrayList<>();
+        java.util.List<Long> chapterStarts = new java.util.ArrayList<>(), chapterEnds = new java.util.ArrayList<>();
+        java.util.List<String> languages = new java.util.ArrayList<>();
+        int[] palette = new int[16];
+        for (String row : plan) {
+            String[] parts = row.split("\t");
+            switch (parts[0]) {
+                case "C": starts.add(Long.parseLong(parts[1])); ends.add(Long.parseLong(parts[2])); break;
+                case "H": chapterStarts.add(Long.parseLong(parts[1])); chapterEnds.add(Long.parseLong(parts[2])); break;
+                case "L": languages.add(parts[1] + "\t" + parts[2]); break;
+                case "P": palette[Integer.parseInt(parts[1])] = Integer.parseInt(parts[2]); break;
+            }
+        }
+        if (chapterStarts.size() != 2 || starts.isEmpty()) throw new AssertionError("Missing chapters/cells");
+        int vob = openPath(root + String.format("/disc/VIDEO_TS/VTS_%02d_1.VOB", titleSet), false);
+        int isoFd = openPath(root + "/disc.iso", false);
+        long iso = engine.nativeOpenIso(isoFd);
+        closePath(isoFd);
+        if (iso == 0) throw new AssertionError("Cannot open authored UDF ISO");
+        try {
+            // ISO metadata must produce the same native plan after staging.
+            java.nio.file.Path isoStage = java.nio.file.Path.of(root, "iso-staged", "VIDEO_TS");
+            java.nio.file.Files.createDirectories(isoStage);
+            for (int set : new int[]{0, titleSet}) {
+                byte[] bytes = engine.nativeReadIsoIfo(iso, set);
+                if (bytes == null) throw new AssertionError("ISO IFO missing");
+                java.nio.file.Files.write(isoStage.resolve(set == 0 ? "VIDEO_TS.IFO" : String.format("VTS_%02d_0.IFO", set)), bytes);
+            }
+            if (!java.util.Arrays.equals(plan, engine.nativePlanDvdNav(isoStage.getParent().toString(), 2)))
+                throw new AssertionError("Folder/ISO plans differ");
+            for (boolean fromIso : new boolean[]{false, true}) {
+                int output = openPath(root + (fromIso ? "/iso.mkv" : "/folder.mkv"), true);
+                try {
+                    String error = engine.nativeRemux(fromIso ? new int[0] : new int[]{vob},
+                        longs(starts), longs(ends), output, longs(chapterStarts), longs(chapterEnds), null,
+                        fromIso ? iso : 0, titleSet, languages.toArray(new String[0]), palette);
+                    if (error != null) throw new AssertionError(error);
+                } finally { closePath(output); }
+            }
+        } finally { engine.nativeCloseIso(iso); closePath(vob); }
+        System.out.println("Production DVDNav title 1/2, longest-title selection, native plans, chapters and folder/UDF ISO remux PASS");
+    }
+
+    private static long[] longs(java.util.List<Long> values) {
+        return values.stream().mapToLong(Long::longValue).toArray();
+    }
+
 }

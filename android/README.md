@@ -12,8 +12,11 @@ Implemented:
 - Storage Access Framework input/output pickers
 - DVD-folder / `VIDEO_TS` input through document-tree providers
 - read-only UDF ISO input through libudfread
-- one IFO/title/cell planner for folder and ISO sources
+- native libdvdnav 6.1.1 + libdvdread 6.1.3 title discovery and planning for folder and ISO sources
 - longest-title selection
+- Advanced Merger with stream, metadata and chapter selection
+- GUI BATCH for movie/VIDEO_TS collections and unmounted ISO files
+- in-app mattmux-cli: scan, metadata, remux and --batch; remux supports --streams and --no-chapters
 - native libavformat/libavcodec/libavutil stream-copy remuxing to MKV
 - chapter planning and MKV chapter output
 - temporary `.partial` output with commit/abort handling
@@ -37,6 +40,34 @@ Current limitations / remaining gates:
 
 Run and release status should be checked in CI; source implementation alone is not proof of a tested APK. Native test details are in [`native/tests/README.md`](native/tests/README.md).
 
+## BATCH and CLI
+
+The **BATCH** tab processes immediate `Movie/VIDEO_TS` folders and ISO files,
+selecting the longest title and copying all streams and chapters into MKV.
+Leave the optional output folder blank to write beside each source, or choose a
+common destination. Existing output names are skipped. Cancel stops the batch.
+
+The **CLI** tab runs `mattmux-cli` commands inside the app, using the same native
+runtime and Android Storage Access Framework permissions as the GUI. Use the
+pickers and presets to insert permitted `content://` URIs. This is an in-app
+command interface, not a standalone executable installed in Termux or adb PATH.
+
+```text
+mattmux-cli scan SOURCE
+mattmux-cli metadata --title 1 SOURCE
+mattmux-cli remux --title 1 --streams 0,2 --output OUTPUT_ROOT SOURCE
+mattmux-cli --batch MOVIES_ROOT OUTPUT_ROOT
+```
+
+`--title 0` or an omitted title selects the longest. `metadata` reports stream
+indexes for `--streams`; omitting `--streams` copies all tracks. Chapters are
+included unless `--no-chapters` is supplied. BATCH supports `--log=batch.log`
+for an app-private log. A separate FFmpeg CLI is not required: remuxing and
+Advanced Merger perform native libav stream-copy without transcoding.
+
+The APK targets Android 8/API 26+ and includes both arm64-v8a and x86_64.
+No libdvdcss or CSS decryption is included.
+
 ## Billing
 
 The project contains a Google Play Billing integration and the non-consumable product ID `mattmux_pro`, but purchases are deliberately disabled in the current experimental build through `BuildConfig.ENABLE_BILLING_PURCHASES = false`.
@@ -45,7 +76,7 @@ Do not enable charging merely because the native remux engine now exists. Enable
 
 ## Native runtime and licensing
 
-The Android commercial build must remain separate from the GPL-enabled desktop FFmpeg packages. `native/build-ffmpeg-android.sh` builds FFmpeg 9.0.1 as LGPL-only shared libraries and rejects GPL/nonfree configuration plus prohibited DVD-library dependencies. libudfread is linked separately as an LGPL shared library.
+`native/build-ffmpeg-android.sh` builds FFmpeg 9.0.1 as LGPL-only shared libraries, with libudfread 1.1.2 separately linked. libdvdnav 6.1.1 and libdvdread 6.1.3 are GPL libraries statically linked into the JNI runtime; their notices and corresponding source accompany the Android distribution. The complete Android runtime must not be described as LGPL-only.
 
 Generated native libraries and FFmpeg provenance/license assets are build outputs and are intentionally not committed:
 

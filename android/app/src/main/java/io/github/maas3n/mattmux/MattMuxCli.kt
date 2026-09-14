@@ -10,7 +10,7 @@ internal sealed class MattMuxCliCommand {
     data class Batch(val inputRoot: String, val outputRoot: String?, val logFile: String?) : MattMuxCliCommand()
     data class Scan(val source: String) : MattMuxCliCommand()
     data class Metadata(val source: String, val title: Int?) : MattMuxCliCommand()
-    data class Remux(val source: String, val title: Int?, val outputRoot: String?, val noChapters: Boolean) : MattMuxCliCommand()
+    data class Remux(val source: String, val title: Int?, val outputRoot: String?, val noChapters: Boolean, val streams: List<Int>? = null) : MattMuxCliCommand()
     object Version : MattMuxCliCommand()
     object Help : MattMuxCliCommand()
 }
@@ -18,7 +18,7 @@ internal sealed class MattMuxCliCommand {
 internal object MattMuxCliSyntax {
     private const val BATCH_USAGE = "Usage: mattmux-cli --batch [--log FILE] MOVIES_ROOT [OUTPUT_ROOT]"
     private const val METADATA_USAGE = "Usage: mattmux-cli metadata [--title N] SOURCE"
-    private const val REMUX_USAGE = "Usage: mattmux-cli remux [--title N] [--output OUTPUT_ROOT] [--no-chapters] SOURCE"
+    private const val REMUX_USAGE = "Usage: mattmux-cli remux [--title N] [--output OUTPUT_ROOT] [--streams 0,1,2] [--no-chapters] SOURCE"
 
     fun parse(commandLine: String): MattMuxCliCommand {
         val tokens = tokenize(commandLine).toMutableList()
@@ -89,6 +89,7 @@ internal object MattMuxCliSyntax {
         var title: Int? = null
         var output: String? = null
         var noChapters = false
+        var streams: List<Int>? = null
         val positional = mutableListOf<String>()
         var index = 0
         while (index < tokens.size) {
@@ -113,13 +114,28 @@ internal object MattMuxCliSyntax {
                     index++
                 }
                 token == "--no-chapters" -> { noChapters = true; index++ }
+                token == "--streams" -> {
+                    require(index + 1 < tokens.size) { "--streams requires comma-separated stream indexes" }
+                    streams = streamValues(tokens[index + 1])
+                    index += 2
+                }
+                token.startsWith("--streams=") -> {
+                    streams = streamValues(token.substringAfter("="))
+                    index++
+                }
                 token.startsWith("-") -> error("Unknown option: $token")
                 else -> { positional += token; index++ }
             }
         }
         require(positional.size == 1) { REMUX_USAGE }
-        return MattMuxCliCommand.Remux(positional.single(), title, output, noChapters)
+        return MattMuxCliCommand.Remux(positional.single(), title, output, noChapters, streams)
     }
+
+    private fun streamValues(value: String): List<Int> = value.split(',').map {
+        val index = it.trim().toIntOrNull()
+        require(index != null && index >= 0) { "--streams requires non-negative comma-separated indexes from metadata" }
+        index
+    }.distinct()
 
     private fun titleValue(value: String): Int? {
         val parsed = value.toIntOrNull() ?: throw IllegalArgumentException("--title must be an integer")
@@ -170,13 +186,14 @@ internal class MattMuxCliRunner(private val context: Context) {
                 emit("Usage:")
                 emit("  mattmux-cli scan SOURCE")
                 emit("  mattmux-cli metadata [--title N] SOURCE")
-                emit("  mattmux-cli remux [--title N] [--output OUTPUT_ROOT] [--no-chapters] SOURCE")
+                emit("  mattmux-cli remux [--title N] [--output OUTPUT_ROOT] [--streams 0,1,2] [--no-chapters] SOURCE")
                 emit("  mattmux-cli --batch [--log FILE] MOVIES_ROOT [OUTPUT_ROOT]")
                 emit("  mattmux-cli --version")
                 emit("Android SOURCE may be a persisted content:// DVD-folder tree URI or ISO document URI.")
                 emit("MOVIES_ROOT and OUTPUT_ROOT are persisted content:// document-tree URIs.")
                 emit("BATCH accepts Movie/VIDEO_TS folders plus unmounted ISO files. With no OUTPUT_ROOT, VIDEO_TS outputs go in the movie folder beside VIDEO_TS and ISO outputs go beside the ISO.")
                 emit("For ISO remux, --output is required. For a DVD-folder SOURCE, output defaults to that folder.")
+                emit("Use metadata to find stream indexes. Without --streams all tracks are copied; chapters are preserved unless --no-chapters is supplied.")
                 0
             }
             MattMuxCliCommand.Version -> { emit("MattMux CLI ${BuildConfig.VERSION_NAME} (Android/ChromeOS native)"); 0 }
@@ -222,7 +239,7 @@ internal class MattMuxCliRunner(private val context: Context) {
             ?: throw IllegalArgumentException("ISO remux requires --output OUTPUT_ROOT")
         engine.setProgressListener { percent -> progress(percent, "Remuxing… $percent%") }
         return try {
-            val result = engine.remuxTitle(context, source, output, command.title, null, preserveChapters = !command.noChapters)
+            val result = engine.remuxTitle(context, source, output, command.title, command.streams?.toIntArray(), preserveChapters = !command.noChapters)
             emit("Output: ${result.outputUri}")
             emit("Title: ${result.title}")
             emit("Duration: ${formatDuration(result.durationMs)}")

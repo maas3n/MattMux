@@ -55,4 +55,21 @@ class MattMuxCliSyntaxTest {
     @Test fun parsesVersion() {
         assertTrue(MattMuxCliSyntax.parse("mattmux-cli --version") === MattMuxCliCommand.Version)
     }
+
+    @Test fun parsesExplicitStreamsAndChapterChoice() {
+        for (option in listOf("--streams 0,2,2", "--streams=0,2,2")) {
+            val parsed = MattMuxCliSyntax.parse("mattmux-cli remux $option --no-chapters content://provider/tree/dvd") as MattMuxCliCommand.Remux
+            assertEquals(listOf(0, 2), parsed.streams)
+            assertTrue(parsed.noChapters)
+        }
+        val defaults = MattMuxCliSyntax.parse("mattmux-cli remux content://provider/tree/dvd") as MattMuxCliCommand.Remux
+        assertNull(defaults.streams)
+    }
+
+    @Test fun rejectsInvalidStreamIndexes() {
+        for (value in listOf("", "-1", "0,", "video", "2147483648")) {
+            val result = runCatching { MattMuxCliSyntax.parse("mattmux-cli remux --streams=$value content://provider/tree/dvd") }
+            assertTrue("Accepted invalid stream list: $value", result.exceptionOrNull() is IllegalArgumentException)
+        }
+    }
 }

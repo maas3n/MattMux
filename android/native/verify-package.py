@@ -32,8 +32,9 @@ for filename in sys.argv[1:]:
             needed = '\n'.join(line for line in dynamic.splitlines() if '(NEEDED)' in line)
             if lib == 'libmattmux_jni.so':
                 symbols = subprocess.check_output(['readelf', '-Ws', str(elf)], text=True)
-                if 'Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeScanDvdNav' not in symbols:
-                    raise SystemExit(f'{filename}: DVDNav JNI scanner entry point missing: {name}')
+                for entrypoint in ('nativeScanDvdNav', 'nativePlanDvdNav', 'nativeRemux', 'nativeOpenIso'):
+                    if 'Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_' + entrypoint not in symbols:
+                        raise SystemExit(f'{filename}: JNI {entrypoint} entry point missing: {name}')
             if re.search(r'dvdcss|x264|x265|xvid|libav\w+\.so\.', needed, re.I):
                 raise SystemExit(f'{filename}: forbidden or versioned dependency: {name}\n{needed}')
         if set(found) != ABIS or any(found[abi] != EXPECTED for abi in ABIS):
@@ -41,4 +42,8 @@ for filename in sys.argv[1:]:
         for notice in ('COPYING.LGPLv2.1', 'LIBUDFREAD_COPYING.txt', 'DVDREAD_COPYING.txt', 'DVDNAV_COPYING.txt', 'ffmpeg-build-info.txt'):
             if not archive.read(prefix + 'assets/ffmpeg/' + notice):
                 raise SystemExit(f'{filename}: missing/empty notice {notice}')
+        dex = b''.join(archive.read(name) for name in archive.namelist() if name.endswith('.dex'))
+        for cls in ('BatchPanel', 'CliPanel', 'MattMuxCliRunner', 'AndroidBatchProcessor', 'AdvancedMergerPanel'):
+            if ('Lio/github/maas3n/mattmux/' + cls + ';').encode() not in dex:
+                raise SystemExit(f'{filename}: missing compiled Android feature: {cls}')
         print(f'{filename}: both ABIs, all native ELFs, 16 KB alignment, dependency and notice audit PASS')
