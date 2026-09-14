@@ -1,0 +1,78 @@
+name: Add Advanced Merger ISO support
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/add-advanced-merger-iso.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Patch Android Advanced Merger ISO support
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('android/app/src/main/java/io/github/maas3n/mattmux/RemuxEngine.kt')
+          s = p.read_text()
+          if 'import java.io.File\n' not in s:
+              s = s.replace('import android.os.ParcelFileDescriptor\n', 'import android.os.ParcelFileDescriptor\nimport java.io.File\n')
+
+          marker = '    private fun remuxLocked(\n'
+          helper = '''    /** Losslessly materializes one DVD title into an app-private MKV for internal consumers. */\n    internal fun remuxTitleToFile(\n        context: Context,\n        sourceUri: Uri,\n        outputFile: File,\n        requestedTitle: Int? = null,\n        preserveChapters: Boolean = true,\n    ): Int {\n        check(isAvailable) { unavailableReason ?: "Remux engine unavailable" }\n        require(requestedTitle == null || requestedTitle > 0) { "DVD title must be greater than zero" }\n        check(remuxLock.tryLock()) { "Another native operation is still stopping. Try again shortly." }\n        try {\n            check(!cancelled.get()) { "Remux cancelled" }\n            outputFile.parentFile?.mkdirs()\n            if (outputFile.exists()) check(outputFile.delete()) { "Could not replace temporary merger input" }\n            openTitle(context, sourceUri, requestedTitle).use { title ->\n                ParcelFileDescriptor.open(\n                    outputFile,\n                    ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_READ_WRITE,\n                ).use { output ->\n                    val fds = IntArray(title.vobs.size) { title.vobs[it].fd }\n                    val starts = LongArray(title.plan.cells.size) { title.plan.cells[it].startSector }\n                    val ends = LongArray(title.plan.cells.size) { title.plan.cells[it].endSectorExclusive }\n                    val chapterStarts = if (preserveChapters) title.plan.chapterStartsMs else LongArray(0)\n                    val chapterEnds = if (preserveChapters) title.plan.chapterEndsMs else LongArray(0)\n                    val nativeError = nativeRemux(\n                        fds, starts, ends, output.fd, chapterStarts, chapterEnds, null,\n                        title.isoHandle, title.plan.titleSet,\n                        title.plan.streamLanguages.map { "${it.streamId}\\t${it.language}" }.toTypedArray(),\n                        title.plan.subtitlePalette,\n                    )\n                    if (nativeError != null) throw IllegalStateException(nativeError)\n                }\n                check(!cancelled.get()) { "Remux cancelled" }\n                check(outputFile.isFile && outputFile.length() > 0L) { "DVD title staging produced an empty file" }\n                return title.plan.globalTitle\n            }\n        } catch (t: Throwable) {\n            outputFile.delete()\n            throw t\n        } finally {\n            cancelled.set(false)\n            remuxLock.unlock()\n        }\n    }\n\n'''
+          if 'internal fun remuxTitleToFile(' not in s:
+              if marker not in s:
+                  raise SystemExit('remuxLocked marker not found')
+              s = s.replace(marker, helper + marker, 1)
+          p.write_text(s)
+
+          p = Path('android/app/src/main/java/io/github/maas3n/mattmux/AdvancedMergerPanel.kt')
+          s = p.read_text()
+          s = s.replace('    private val native = AdvancedMergerNative()\n', '    private val native = AdvancedMergerNative()\n    private val dvdEngine = AndroidNativeRemuxEngine()\n')
+          s = s.replace('    private val cancelButton = Button(activity).apply { text = "Cancel"; isEnabled = false; setOnClickListener { native.cancelled.set(true) } }\n',
+                        '    private val cancelButton = Button(activity).apply { text = "Cancel"; isEnabled = false; setOnClickListener { native.cancelled.set(true); dvdEngine.cancel() } }\n')
+          s = s.replace('        button("CHOOSE MOVIE FILES") { choose(0) }\n', '        button("CHOOSE MOVIE FILES / DVD ISO") { choose(0) }\n')
+          s = s.replace('        content.addView(TextView(activity).apply { text = "Select Streams — movie inputs include every stream and embedded chapters" })\n',
+                        '        content.addView(TextView(activity).apply { text = "Select Streams — movie inputs include every stream and embedded chapters. DVD ISO inputs are first staged losslessly from the longest DVD title using the native DVD engine." })\n')
+          s = s.replace('        run("Preparing input copies…") {\n            // Copy the whole batch before probing: IDX can then find a selected SUB sidecar.\n            val files = uris.map { uri -> sources[uri] ?: copyInput(uri).also { sources[uri] = it } }\n',
+                        '        run("Preparing inputs…") {\n            // Copy ordinary inputs before probing. Movie ISO inputs are losslessly staged through the native DVD engine first.\n            val files = uris.map { uri -> sources[uri] ?: prepareInput(uri, kind).also { sources[uri] = it } }\n')
+
+          copy_marker = '    private fun copyInput(uri: Uri): File {\n'
+          prep = '''    private fun prepareInput(uri: Uri, kind: Int): File {\n        val name = displayName(uri)\n        if (kind == 0 && name.endsWith(".iso", ignoreCase = true)) {\n            check(dvdEngine.isAvailable) { dvdEngine.unavailableReason ?: "Native DVD engine unavailable" }\n            val stem = name.dropLast(4).trim().ifBlank { "DVD" }\n            val safeStem = stem.replace(Regex("[^A-Za-z0-9._ -]"), "_")\n            val staged = File(root, "$safeStem-dvd-title.mkv")\n            require(!staged.exists()) { "Two movie inputs resolve to the same staged DVD title name: ${staged.name}" }\n            activity.runOnUiThread { status.text = "Reading DVD ISO and staging the longest title: $name" }\n            val title = dvdEngine.remuxTitleToFile(activity, uri, staged, requestedTitle = null, preserveChapters = true)\n            activity.runOnUiThread { status.text = "DVD ISO title $title staged for Advanced Merger" }\n            return staged\n        }\n        return copyInput(uri, name)\n    }\n\n    private fun displayName(uri: Uri): String =\n        activity.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {\n            if (it.moveToFirst()) it.getString(0) else null\n        } ?: "input-${sources.size}"\n\n'''
+          if 'private fun prepareInput(uri: Uri, kind: Int)' not in s:
+              if copy_marker not in s:
+                  raise SystemExit('copyInput marker not found')
+              s = s.replace(copy_marker, prep + '    private fun copyInput(uri: Uri, providedName: String? = null): File {\n', 1)
+              old_name = '''        val name = activity.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {\n            if (it.moveToFirst()) it.getString(0) else null\n        } ?: "input-${sources.size}"\n'''
+              if old_name not in s:
+                  raise SystemExit('copyInput name block not found')
+              s = s.replace(old_name, '        val name = providedName ?: displayName(uri)\n', 1)
+          s = s.replace('    fun destroy() { destroyed = true; native.cancelled.set(true); if (!busy) root.deleteRecursively() }\n',
+                        '    fun destroy() { destroyed = true; native.cancelled.set(true); dvdEngine.cancel(); if (!busy) root.deleteRecursively() }\n')
+          p.write_text(s)
+          PY
+
+          git diff --check
+          grep -Fq 'internal fun remuxTitleToFile(' android/app/src/main/java/io/github/maas3n/mattmux/RemuxEngine.kt
+          grep -Fq 'CHOOSE MOVIE FILES / DVD ISO' android/app/src/main/java/io/github/maas3n/mattmux/AdvancedMergerPanel.kt
+          grep -Fq 'dvdEngine.remuxTitleToFile' android/app/src/main/java/io/github/maas3n/mattmux/AdvancedMergerPanel.kt
+          grep -Fq 'longest DVD title' android/app/src/main/java/io/github/maas3n/mattmux/AdvancedMergerPanel.kt
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add android/
+          git diff --cached --quiet && { echo 'No Android changes to commit' >&2; exit 1; }
+          git commit -m 'Add Advanced Merger DVD ISO inputs on Android'
+          git push origin HEAD:main
