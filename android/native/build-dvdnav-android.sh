@@ -106,4 +106,20 @@ libdvdread commit: ${READ_COMMIT}
 libdvdnav commit: ${NAV_COMMIT}
 CSS decryption/circumvention: not included
 EOF
+
+# The unified release workflow uploads every file already present in
+# dist/android-release. Stage the GPL DVD source archives and notices here so
+# future Android/ChromeOS releases automatically publish the corresponding
+# source and license material alongside the APK.
+RELEASE_STAGE="${REPO_ROOT}/dist/android-release"
+mkdir -p "$RELEASE_STAGE"
+cp "$WORK/libdvdread-${DVDREAD_VERSION}-source.tar.gz" "$RELEASE_STAGE/"
+cp "$WORK/libdvdnav-${DVDNAV_VERSION}-source.tar.gz" "$RELEASE_STAGE/"
+cp "$ASSET_ROOT/DVDREAD_COPYING.txt" "$RELEASE_STAGE/"
+cp "$ASSET_ROOT/DVDNAV_COPYING.txt" "$RELEASE_STAGE/"
+test -s "$RELEASE_STAGE/libdvdread-${DVDREAD_VERSION}-source.tar.gz"
+test -s "$RELEASE_STAGE/libdvdnav-${DVDNAV_VERSION}-source.tar.gz"
+test -s "$RELEASE_STAGE/DVDREAD_COPYING.txt"
+test -s "$RELEASE_STAGE/DVDNAV_COPYING.txt"
+
 echo "libdvdnav/libdvdread Android title scanner built successfully."
