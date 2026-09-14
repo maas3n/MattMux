@@ -409,10 +409,13 @@ func (g *linuxGUI) showTrackDialog(src string, title titleInfo, options []trackO
 		rows.Add(check)
 	}
 	trackScroll := container.NewVScroll(rows)
-	details := widget.NewMultiLineEntry()
-	details.SetText(detailsText)
-	details.Disable()
-	split := container.NewVSplit(trackScroll, details)
+	// A disabled Entry uses Fyne's disabled foreground color, which made the
+	// metadata nearly unreadable on dark Linux themes. Render it as normal theme
+	// text inside a scroll pane instead; the metadata remains read-only.
+	details := widget.NewLabel(detailsText)
+	details.Wrapping = fyne.TextWrapWord
+	detailsScroll := container.NewVScroll(container.NewPadded(details))
+	split := container.NewVSplit(trackScroll, detailsScroll)
 	split.Offset = 0.55
 	selectAll := widget.NewButton("Select all", func() {
 		for _, check := range checks {

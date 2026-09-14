@@ -6,6 +6,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/widget"
 	"image/png"
 	"os"
 	"testing"
@@ -31,6 +32,32 @@ func TestAdvancedMergerAndBatchTabs(t *testing.T) {
 	if tabs.Items[2].Text != "BATCH" {
 		t.Fatal("missing BATCH tab")
 	}
+
+	var audioStreams, subtitleStreams bool
+	var activity *widget.ProgressBarInfinite
+	walkLinuxCanvas(tabs.Items[1].Content, func(obj fyne.CanvasObject) {
+		switch o := obj.(type) {
+		case *widget.Button:
+			switch o.Text {
+			case "CHOOSE AUDIO STREAMS FROM MKV or RAW":
+				audioStreams = true
+			case "CHOOSE SUBTITLE STREAMS FROM MKV or RAW":
+				subtitleStreams = true
+			}
+		case *widget.ProgressBarInfinite:
+			activity = o
+		}
+	})
+	if !audioStreams || !subtitleStreams {
+		t.Fatal("Advanced Merger stream-button labels were not updated")
+	}
+	if activity == nil {
+		t.Fatal("Advanced Merger is missing its activity progress bar")
+	}
+	if activity.Visible() {
+		t.Fatal("Advanced Merger activity progress bar should be hidden while idle")
+	}
+
 	w.Resize(fyne.NewSize(840, 620))
 	tabs.SelectIndex(2)
 	if path := os.Getenv("MATTMUX_UI_CAPTURE"); path != "" {
@@ -45,5 +72,17 @@ func TestAdvancedMergerAndBatchTabs(t *testing.T) {
 	}
 	if tabs.SelectedIndex() != 2 {
 		t.Fatal("cannot select BATCH tab")
+	}
+}
+
+func walkLinuxCanvas(obj fyne.CanvasObject, visit func(fyne.CanvasObject)) {
+	if obj == nil {
+		return
+	}
+	visit(obj)
+	if c, ok := obj.(*fyne.Container); ok {
+		for _, child := range c.Objects {
+			walkLinuxCanvas(child, visit)
+		}
 	}
 }

@@ -18,7 +18,7 @@ func TestWindowsAdvancedMergerAndBatchTabs(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer procDestroyWindow.Call(app.hwnd)
-	if mergerWindow.tab == 0 || mergerWindow.list == 0 {
+	if mergerWindow.tab == 0 || mergerWindow.list == 0 || mergerWindow.progress == 0 {
 		t.Fatal("missing merger controls")
 	}
 	visible := syscall.NewLazyDLL("user32.dll").NewProc("IsWindowVisible")
@@ -27,6 +27,7 @@ func TestWindowsAdvancedMergerAndBatchTabs(t *testing.T) {
 		t.Fatal("missing tab page controls")
 	}
 	pages := [][]uintptr{mergerWindow.dvd, mergerWindow.controls, batchWindow.controls}
+	setWindowsMergerProgress(true)
 	// Exercise the notification handler used by real clicks, including repeated
 	// returns to DVD Remux. TCM_SETCURSEL alone does not send TCN_SELCHANGE.
 	for _, selected := range []uintptr{1, 2, 0, 2, 1, 0} {
@@ -41,7 +42,19 @@ func TestWindowsAdvancedMergerAndBatchTabs(t *testing.T) {
 				}
 			}
 		}
+		progressVisible, _, _ := visible.Call(mergerWindow.progress)
+		if (progressVisible != 0) != (selected == 1) {
+			t.Fatalf("tab %d: Advanced Merger activity bar visibility is incorrect", selected)
+		}
 		assertWindowsTabBackgroundErased(t)
+	}
+
+	setWindowsMergerProgress(false)
+	procSendMessageW.Call(mergerWindow.tab, 0x130c, 1, 0)
+	showMergerWindowsTab()
+	progressVisible, _, _ := visible.Call(mergerWindow.progress)
+	if progressVisible != 0 {
+		t.Fatal("Advanced Merger activity bar remains visible while idle")
 	}
 }
 
