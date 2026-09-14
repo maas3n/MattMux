@@ -23,7 +23,7 @@ class BatchPanel(private val activity: Activity) {
     private val inputLabel = TextView(activity).apply { text = "No movie collection folder selected" }
     private val outputLabel = TextView(activity).apply { text = "Optional — blank writes beside VIDEO_TS or beside each ISO" }
     private val progress = ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100; progress = 0 }
-    private val status = TextView(activity).apply { text = "Choose the folder containing Movie Title/VIDEO_TS folders, then click ONECLICK BATCH." }
+    private val status = TextView(activity).apply { text = "Choose the collection folder containing Movie Title/VIDEO_TS folders and/or unmounted ISO files, then click ONECLICK BATCH." }
     private val cancel = Button(activity).apply { text = "Cancel"; isEnabled = false; setOnClickListener { processor.cancel(); status.text = "Cancelling…" } }
     val view: View
 
@@ -31,7 +31,9 @@ class BatchPanel(private val activity: Activity) {
         val padding = (24 * activity.resources.displayMetrics.density).toInt()
         val content = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(padding, padding, padding, padding) }
         content.addView(TextView(activity).apply { text = "BATCH — lossless DVD collection remux"; textSize = 20f })
-        content.addView(TextView(activity).apply { text = "Each immediate movie folder must contain VIDEO_TS/VIDEO_TS.IFO. MattMux uses libdvdnav/libdvdread to select the longest title, then native libav stream-copy to MKV." })
+        content.addView(TextView(activity).apply {
+            text = "MattMux scans Movie Title/VIDEO_TS folders and unmounted ISO files, uses libdvdnav/libdvdread to select the longest title, then native libav stream-copy to MKV. With no output folder, VIDEO_TS outputs are written in the movie folder beside VIDEO_TS and ISO outputs are written beside the ISO."
+        })
         fun button(label: String, action: () -> Unit) = Button(activity).apply { text = label; setOnClickListener { action() }; controls += this; content.addView(this) }
         button("CHOOSE MOVIE FOLDER") { choose(REQUEST_INPUT) }
         content.addView(inputLabel)
@@ -82,7 +84,7 @@ class BatchPanel(private val activity: Activity) {
         if (busy) return
         busy = true
         progress.progress = 0
-        status.text = "Discovering movie folders…"
+        status.text = "Discovering DVD folders and ISO files…"
         controls.forEach { it.isEnabled = false }
         cancel.isEnabled = true
         Thread {
