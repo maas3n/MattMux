@@ -13,7 +13,7 @@ internal object DvdNavScanner {
 
     fun stageTreeIfos(context: Context, treeUri: Uri): File {
         val resolver = context.contentResolver
-        val rootId = DocumentsContract.getTreeDocumentId(treeUri)
+        val rootId = documentTreeRootId(treeUri)
         val rootChildren = listChildren(context, treeUri, rootId)
         val videoTsId = if (rootChildren.any { it.name.equals("VIDEO_TS.IFO", true) }) {
             rootId

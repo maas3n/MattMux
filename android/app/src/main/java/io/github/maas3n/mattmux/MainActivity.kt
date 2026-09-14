@@ -31,6 +31,8 @@ class MainActivity : Activity(), BillingManager.Listener {
     }
 
     private lateinit var advancedMerger: AdvancedMergerPanel
+    private lateinit var batchPanel: BatchPanel
+    private lateinit var cliPanel: CliPanel
 
     private val engine: RemuxEngine = AndroidNativeRemuxEngine()
     private var billing: BillingManager? = null
@@ -56,6 +58,8 @@ class MainActivity : Activity(), BillingManager.Listener {
         super.onCreate(savedInstanceState)
         val dvd = buildUi()
         advancedMerger = AdvancedMergerPanel(this)
+        batchPanel = BatchPanel(this)
+        cliPanel = CliPanel(this)
         val host = android.widget.TabHost(this).apply { id = android.R.id.tabhost }
         val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val tabs = android.widget.TabWidget(this).apply { id = android.R.id.tabs }
@@ -64,6 +68,8 @@ class MainActivity : Activity(), BillingManager.Listener {
         applySystemBarInsets(layout, 0, 0, 0, 0)
         host.addTab(host.newTabSpec("dvd").setIndicator("DVD Remux").setContent { dvd })
         host.addTab(host.newTabSpec("merger").setIndicator("Advanced Merger").setContent { advancedMerger.view })
+        host.addTab(host.newTabSpec("batch").setIndicator("BATCH").setContent { batchPanel.view })
+        host.addTab(host.newTabSpec("cli").setIndicator("CLI").setContent { cliPanel.view })
         setContentView(host)
         restoreSelectionState(savedInstanceState)
 
@@ -90,6 +96,8 @@ class MainActivity : Activity(), BillingManager.Listener {
 
     override fun onDestroy() {
         if (::advancedMerger.isInitialized) advancedMerger.destroy()
+        if (::batchPanel.isInitialized) batchPanel.destroy()
+        if (::cliPanel.isInitialized) cliPanel.destroy()
         if (remuxRunning) engine.cancel()
         engine.setProgressListener(null)
         billing?.close()
@@ -112,6 +120,8 @@ class MainActivity : Activity(), BillingManager.Listener {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (advancedMerger.onResult(requestCode, resultCode, data)) return
+        if (batchPanel.onResult(requestCode, resultCode, data)) return
+        if (cliPanel.onResult(requestCode, resultCode, data)) return
         if (resultCode != RESULT_OK) return
         val resultData = data ?: return
         val uri = resultData.data ?: return

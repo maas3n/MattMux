@@ -23,7 +23,7 @@ internal class DvdDocumentSource(
     fun openLongestTitle(): OpenTitle = openTitle(null)
 
     fun openTitle(globalTitle: Int?): OpenTitle {
-        val rootId = DocumentsContract.getTreeDocumentId(treeUri)
+        val rootId = documentTreeRootId(treeUri)
         val rootChildren = listChildren(rootId)
         val videoTsId = if (rootChildren.any { it.name.equals("VIDEO_TS.IFO", true) }) {
             rootId
@@ -116,7 +116,7 @@ internal class DvdDocumentOutput(
     internal data class Pending(val uri: Uri, val descriptor: ParcelFileDescriptor, val finalName: String)
 
     fun create(title: Int): Pending {
-        val parentId = DocumentsContract.getTreeDocumentId(treeUri)
+        val parentId = documentTreeRootId(treeUri)
         val parent = DocumentsContract.buildDocumentUriUsingTree(treeUri, parentId)
         val finalName = "MattMux-title-%02d.mkv".format(title)
         val partialName = "$finalName.partial"
