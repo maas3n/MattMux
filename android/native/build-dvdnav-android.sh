@@ -18,6 +18,8 @@ git clone --depth 1 --branch "$DVDREAD_VERSION" https://code.videolan.org/videol
 git clone --depth 1 --branch "$DVDNAV_VERSION" https://code.videolan.org/videolan/libdvdnav.git "$NAV_SRC"
 READ_COMMIT="$(git -C "$READ_SRC" rev-parse HEAD)"
 NAV_COMMIT="$(git -C "$NAV_SRC" rev-parse HEAD)"
+test "$READ_COMMIT" = 0e020921726ee812e633959d9ad6315ff58b902b
+test "$NAV_COMMIT" = 49f36c397a31e663d9e59b909379808a08b80b8f
 git -C "$READ_SRC" archive --format=tar --prefix="libdvdread-${DVDREAD_VERSION}/" HEAD | gzip -n > "$WORK/libdvdread-${DVDREAD_VERSION}-source.tar.gz"
 git -C "$NAV_SRC" archive --format=tar --prefix="libdvdnav-${DVDNAV_VERSION}/" HEAD | gzip -n > "$WORK/libdvdnav-${DVDNAV_VERSION}-source.tar.gz"
 cp "$READ_SRC/COPYING" "$ASSET_ROOT/DVDREAD_COPYING.txt"
@@ -85,9 +87,12 @@ build_one() {
         esac
     done < <(patchelf --print-needed "$jni/libmattmux_jni.so")
 
-    "$NM" "$jni/libmattmux_jni.so" | grep -q 'dvdnav_get_number_of_titles'
-    "$NM" "$jni/libmattmux_jni.so" | grep -q 'dvdnav_describe_title_chapters'
-    "$NM" "$jni/libmattmux_jni.so" | grep -q 'DVDOpen'
+    # llvm-nm can exit 74 on a closed stdout pipe when grep -q exits early.
+    # Keep producer errors meaningful and inspect the complete symbol table.
+    "$NM" "$jni/libmattmux_jni.so" > "$WORK/symbols-${abi}.txt"
+    grep -q 'dvdnav_get_number_of_titles' "$WORK/symbols-${abi}.txt"
+    grep -q 'dvdnav_describe_title_chapters' "$WORK/symbols-${abi}.txt"
+    grep -q 'DVDOpen' "$WORK/symbols-${abi}.txt"
     patchelf --print-needed "$jni/libmattmux_jni.so" | grep -Eiq 'dvdcss' && {
         echo 'libdvdcss must not be bundled' >&2; exit 1;
     } || true
