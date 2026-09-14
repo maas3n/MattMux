@@ -1,0 +1,667 @@
+name: Add Android BATCH and CLI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/add-android-batch-cli.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  port:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Add Android-only BATCH and mattmux-cli implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > android/app/src/main/java/io/github/maas3n/mattmux/DocumentTree.kt <<'KOTLIN'
+          package io.github.maas3n.mattmux
+
+          import android.net.Uri
+          import android.provider.DocumentsContract
+
+          /** Returns the selected document itself for nested tree/document URIs, otherwise the tree root. */
+          internal fun documentTreeRootId(uri: Uri): String =
+              runCatching { DocumentsContract.getDocumentId(uri) }
+                  .getOrElse { DocumentsContract.getTreeDocumentId(uri) }
+          KOTLIN
+
+          cat > android/app/src/main/java/io/github/maas3n/mattmux/BatchNaming.kt <<'KOTLIN'
+          package io.github.maas3n.mattmux
+
+          internal object BatchNaming {
+              private val invalid = Regex("[<>:\"/\\\\|?*\\u0000-\\u001F]")
+
+              fun outputName(movieName: String): String {
+                  var base = movieName.trim().replace(invalid, "_").trimEnd('.', ' ')
+                  if (base.isBlank()) base = "DVD"
+                  return "$base.mkv"
+              }
+          }
+          KOTLIN
+
+          cat > android/app/src/main/java/io/github/maas3n/mattmux/AndroidBatch.kt <<'KOTLIN'
+          package io.github.maas3n.mattmux
+
+          import android.content.Context
+          import android.net.Uri
+          import android.provider.DocumentsContract
+          import android.provider.DocumentsContract.Document
+          import java.util.Locale
+          import java.util.concurrent.atomic.AtomicBoolean
+
+          internal data class AndroidBatchMovie(val name: String, val sourceUri: Uri)
+          internal data class AndroidBatchFailure(val movie: String, val message: String)
+          internal data class AndroidBatchResult(
+              val total: Int,
+              val completed: Int,
+              val outputs: List<Uri>,
+              val failures: List<AndroidBatchFailure>,
+              val cancelled: Boolean,
+          )
+
+          /** Android/ChromeOS equivalent of the desktop ONECLICK BATCH engine. */
+          internal class AndroidBatchProcessor(
+              private val context: Context,
+              private val engine: RemuxEngine = AndroidNativeRemuxEngine(),
+          ) {
+              private data class Entry(val name: String, val documentId: String, val mimeType: String)
+              private val cancelled = AtomicBoolean(false)
+
+              val isAvailable: Boolean get() = engine.isAvailable
+              val unavailableReason: String? get() = engine.unavailableReason
+
+              fun cancel() {
+                  cancelled.set(true)
+                  engine.cancel()
+              }
+
+              fun discover(inputRoot: Uri): List<AndroidBatchMovie> {
+                  require(DocumentsContract.isTreeUri(inputRoot)) { "MOVIES_ROOT must be an Android document-tree URI" }
+                  val rootId = documentTreeRootId(inputRoot)
+                  val movies = listChildren(inputRoot, rootId)
+                      .asSequence()
+                      .filter { it.mimeType == Document.MIME_TYPE_DIR }
+                      .filter { movie -> containsVideoTs(inputRoot, movie.documentId) }
+                      .map { movie ->
+                          AndroidBatchMovie(
+                              movie.name,
+                              DocumentsContract.buildDocumentUriUsingTree(inputRoot, movie.documentId),
+                          )
+                      }
+                      .sortedBy { it.name.lowercase(Locale.ROOT) }
+                      .toList()
+                  require(movies.isNotEmpty()) { "No immediate movie folders containing VIDEO_TS/VIDEO_TS.IFO were found" }
+                  return movies
+              }
+
+              fun run(
+                  inputRoot: Uri,
+                  outputRoot: Uri?,
+                  progress: (Int, String) -> Unit = { _, _ -> },
+                  log: (String) -> Unit = {},
+              ): AndroidBatchResult {
+                  check(engine.isAvailable) { engine.unavailableReason ?: "Remux engine unavailable" }
+                  outputRoot?.let { require(DocumentsContract.isTreeUri(it)) { "OUTPUT_ROOT must be an Android document-tree URI" } }
+                  cancelled.set(false)
+                  val movies = discover(inputRoot)
+                  val outputs = mutableListOf<Uri>()
+                  val failures = mutableListOf<AndroidBatchFailure>()
+                  var completed = 0
+                  var activeIndex = -1
+                  var activeName = ""
+
+                  engine.setProgressListener { moviePercent ->
+                      if (activeIndex >= 0 && movies.isNotEmpty()) {
+                          val overall = (((activeIndex + moviePercent / 100.0) / movies.size) * 100.0).toInt().coerceIn(0, 100)
+                          progress(overall, "[${activeIndex + 1}/${movies.size}] $activeName — remuxing $moviePercent%")
+                      }
+                  }
+                  try {
+                      log("MattMux Android batch start: movies=${movies.size} input=$inputRoot output=${outputRoot ?: "<movie folder>"}")
+                      movies.forEachIndexed { index, movie ->
+                          if (cancelled.get()) return@forEachIndexed
+                          activeIndex = index
+                          activeName = movie.name
+                          val targetTree = outputRoot ?: movie.sourceUri
+                          val desiredName = BatchNaming.outputName(movie.name)
+                          val basePercent = ((index.toDouble() / movies.size) * 100.0).toInt()
+                          progress(basePercent, "[${index + 1}/${movies.size}] ${movie.name} — scanning DVD titles")
+                          log("[${index + 1}/${movies.size}] scanning ${movie.name}")
+
+                          if (documentNameExists(targetTree, desiredName)) {
+                              val message = "output already exists: $desiredName"
+                              failures += AndroidBatchFailure(movie.name, message)
+                              log("[${index + 1}/${movies.size}] skipped ${movie.name}: $message")
+                              return@forEachIndexed
+                          }
+
+                          try {
+                              val remux = engine.remux(context, movie.sourceUri, targetTree, null)
+                              if (cancelled.get()) return@forEachIndexed
+                              val renamed = DocumentsContract.renameDocument(context.contentResolver, remux.outputUri, desiredName)
+                                  ?: error("remux completed but output provider could not rename ${remux.outputUri} to $desiredName; completed MKV retained at ${remux.outputUri}")
+                              outputs += renamed
+                              completed++
+                              progress((((index + 1).toDouble() / movies.size) * 100.0).toInt(), "Completed ${index + 1} of ${movies.size} movie(s).")
+                              log("[${index + 1}/${movies.size}] completed ${movie.name} -> $renamed")
+                          } catch (error: Throwable) {
+                              if (cancelled.get()) return@forEachIndexed
+                              val message = error.message ?: error.javaClass.simpleName
+                              failures += AndroidBatchFailure(movie.name, message)
+                              log("[${index + 1}/${movies.size}] failed ${movie.name}: $message")
+                          }
+                      }
+                  } finally {
+                      engine.setProgressListener(null)
+                  }
+
+                  val wasCancelled = cancelled.get()
+                  if (wasCancelled) log("MattMux Android batch cancelled: completed=$completed total=${movies.size}")
+                  else log("MattMux Android batch complete: completed=$completed failed=${failures.size} total=${movies.size}")
+                  return AndroidBatchResult(movies.size, completed, outputs, failures, wasCancelled)
+              }
+
+              private fun containsVideoTs(treeUri: Uri, movieId: String): Boolean {
+                  val videoTs = listChildren(treeUri, movieId).firstOrNull {
+                      it.mimeType == Document.MIME_TYPE_DIR && it.name.equals("VIDEO_TS", true)
+                  } ?: return false
+                  return listChildren(treeUri, videoTs.documentId).any {
+                      it.mimeType != Document.MIME_TYPE_DIR && it.name.equals("VIDEO_TS.IFO", true)
+                  }
+              }
+
+              private fun documentNameExists(treeUri: Uri, name: String): Boolean =
+                  listChildren(treeUri, documentTreeRootId(treeUri)).any { it.name.equals(name, true) }
+
+              private fun listChildren(treeUri: Uri, parentId: String): List<Entry> {
+                  val children = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentId)
+                  return context.contentResolver.query(
+                      children,
+                      arrayOf(Document.COLUMN_DISPLAY_NAME, Document.COLUMN_DOCUMENT_ID, Document.COLUMN_MIME_TYPE),
+                      null,
+                      null,
+                      null,
+                  )?.use { cursor ->
+                      val nameCol = cursor.getColumnIndexOrThrow(Document.COLUMN_DISPLAY_NAME)
+                      val idCol = cursor.getColumnIndexOrThrow(Document.COLUMN_DOCUMENT_ID)
+                      val mimeCol = cursor.getColumnIndexOrThrow(Document.COLUMN_MIME_TYPE)
+                      buildList {
+                          while (cursor.moveToNext()) {
+                              add(Entry(cursor.getString(nameCol), cursor.getString(idCol), cursor.getString(mimeCol)))
+                          }
+                      }
+                  } ?: error("Selected document provider did not return directory contents")
+              }
+          }
+          KOTLIN
+
+          cat > android/app/src/main/java/io/github/maas3n/mattmux/BatchPanel.kt <<'KOTLIN'
+          package io.github.maas3n.mattmux
+
+          import android.app.Activity
+          import android.content.Intent
+          import android.net.Uri
+          import android.view.View
+          import android.widget.Button
+          import android.widget.LinearLayout
+          import android.widget.ProgressBar
+          import android.widget.ScrollView
+          import android.widget.TextView
+
+          class BatchPanel(private val activity: Activity) {
+              companion object { private const val REQUEST_INPUT = 8200; private const val REQUEST_OUTPUT = 8201 }
+
+              private val processor = AndroidBatchProcessor(activity)
+              private val controls = mutableListOf<View>()
+              private var input: Uri? = null
+              private var output: Uri? = null
+              @Volatile private var busy = false
+              @Volatile private var destroyed = false
+
+              private val inputLabel = TextView(activity).apply { text = "No movie collection folder selected" }
+              private val outputLabel = TextView(activity).apply { text = "Optional — blank writes each MKV into its movie title folder" }
+              private val progress = ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100; progress = 0 }
+              private val status = TextView(activity).apply { text = "Choose the folder containing Movie Title/VIDEO_TS folders, then click ONECLICK BATCH." }
+              private val cancel = Button(activity).apply { text = "Cancel"; isEnabled = false; setOnClickListener { processor.cancel(); status.text = "Cancelling…" } }
+              val view: View
+
+              init {
+                  val padding = (24 * activity.resources.displayMetrics.density).toInt()
+                  val content = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(padding, padding, padding, padding) }
+                  content.addView(TextView(activity).apply { text = "BATCH — lossless DVD collection remux"; textSize = 20f })
+                  content.addView(TextView(activity).apply { text = "Each immediate movie folder must contain VIDEO_TS/VIDEO_TS.IFO. MattMux uses libdvdnav/libdvdread to select the longest title, then native libav stream-copy to MKV." })
+                  fun button(label: String, action: () -> Unit) = Button(activity).apply { text = label; setOnClickListener { action() }; controls += this; content.addView(this) }
+                  button("CHOOSE MOVIE FOLDER") { choose(REQUEST_INPUT) }
+                  content.addView(inputLabel)
+                  button("CHOOSE OUTPUT FOLDER (OPTIONAL)") { choose(REQUEST_OUTPUT) }
+                  button("CLEAR OUTPUT FOLDER") { output = null; outputLabel.text = "Optional — blank writes each MKV into its movie title folder" }
+                  content.addView(outputLabel)
+                  button("ONECLICK BATCH") { start() }
+                  content.addView(cancel)
+                  content.addView(progress)
+                  content.addView(status)
+                  view = ScrollView(activity).apply { addView(content) }
+              }
+
+              fun onResult(request: Int, result: Int, data: Intent?): Boolean {
+                  if (request != REQUEST_INPUT && request != REQUEST_OUTPUT) return false
+                  if (result != Activity.RESULT_OK || data == null || busy) return true
+                  val uri = data.data ?: return true
+                  persist(uri, data.flags)
+                  if (request == REQUEST_INPUT) {
+                      input = uri
+                      inputLabel.text = uri.toString()
+                  } else {
+                      output = uri
+                      outputLabel.text = uri.toString()
+                  }
+                  return true
+              }
+
+              fun destroy() {
+                  destroyed = true
+                  if (busy) processor.cancel()
+              }
+
+              private fun choose(request: Int) {
+                  activity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+                  }, request)
+              }
+
+              private fun persist(uri: Uri, flags: Int) {
+                  val wanted = flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                  if (wanted == 0) return
+                  runCatching { activity.contentResolver.takePersistableUriPermission(uri, wanted) }
+              }
+
+              private fun start() {
+                  val root = input ?: run { status.text = "Choose the movie collection folder first."; return }
+                  if (busy) return
+                  busy = true
+                  progress.progress = 0
+                  status.text = "Discovering movie folders…"
+                  controls.forEach { it.isEnabled = false }
+                  cancel.isEnabled = true
+                  Thread {
+                      val result = runCatching {
+                          processor.run(root, output, progress = { percent, message ->
+                              activity.runOnUiThread { if (!destroyed) { progress.progress = percent; status.text = message } }
+                          })
+                      }
+                      activity.runOnUiThread {
+                          if (destroyed) return@runOnUiThread
+                          busy = false
+                          controls.forEach { it.isEnabled = true }
+                          cancel.isEnabled = false
+                          result.onSuccess { batch ->
+                              progress.progress = if (batch.cancelled) progress.progress else 100
+                              status.text = when {
+                                  batch.cancelled -> "Batch cancelled: ${batch.completed}/${batch.total} completed."
+                                  batch.failures.isEmpty() -> "Batch complete: ${batch.completed} movie(s) remuxed."
+                                  else -> "Batch complete: ${batch.completed}/${batch.total} completed; ${batch.failures.size} failed. " + batch.failures.joinToString("; ") { "${it.movie}: ${it.message}" }
+                              }
+                          }.onFailure { status.text = "Batch failed: ${it.message ?: it.javaClass.simpleName}" }
+                      }
+                  }.apply { name = "MattMux-Android-BATCH" }.start()
+              }
+          }
+          KOTLIN
+
+          cat > android/app/src/main/java/io/github/maas3n/mattmux/MattMuxCli.kt <<'KOTLIN'
+          package io.github.maas3n.mattmux
+
+          import android.content.Context
+          import android.net.Uri
+          import android.provider.DocumentsContract
+          import java.io.File
+
+          internal sealed class MattMuxCliCommand {
+              data class Batch(val inputRoot: String, val outputRoot: String?, val logFile: String?) : MattMuxCliCommand()
+              object Version : MattMuxCliCommand()
+              object Help : MattMuxCliCommand()
+          }
+
+          internal object MattMuxCliSyntax {
+              fun parse(commandLine: String): MattMuxCliCommand {
+                  val tokens = tokenize(commandLine).toMutableList()
+                  if (tokens.firstOrNull() == "mattmux-cli") tokens.removeAt(0)
+                  if (tokens.isEmpty() || tokens == listOf("--help") || tokens == listOf("-h")) return MattMuxCliCommand.Help
+                  if (tokens == listOf("--version")) return MattMuxCliCommand.Version
+                  require(tokens.removeFirstOrNull() == "--batch") { "Usage: mattmux-cli --batch [--log FILE] MOVIES_ROOT [OUTPUT_ROOT]" }
+
+                  var logFile: String? = null
+                  val positional = mutableListOf<String>()
+                  var index = 0
+                  while (index < tokens.size) {
+                      val token = tokens[index]
+                      when {
+                          token == "--log" -> {
+                              require(index + 1 < tokens.size) { "--log requires a filename" }
+                              logFile = tokens[index + 1]
+                              index += 2
+                          }
+                          token.startsWith("--log=") -> {
+                              logFile = token.substringAfter("--log=").also { require(it.isNotBlank()) { "--log requires a filename" } }
+                              index++
+                          }
+                          token.startsWith("-") -> error("Unknown option: $token")
+                          else -> { positional += token; index++ }
+                      }
+                  }
+                  require(positional.size in 1..2) { "Usage: mattmux-cli --batch [--log FILE] MOVIES_ROOT [OUTPUT_ROOT]" }
+                  return MattMuxCliCommand.Batch(positional[0], positional.getOrNull(1), logFile)
+              }
+
+              private fun tokenize(text: String): List<String> {
+                  val out = mutableListOf<String>()
+                  val current = StringBuilder()
+                  var quote: Char? = null
+                  var escaped = false
+                  fun flush() { if (current.isNotEmpty()) { out += current.toString(); current.setLength(0) } }
+                  text.forEach { ch ->
+                      when {
+                          escaped -> { current.append(ch); escaped = false }
+                          ch == '\\' && quote != '\'' -> escaped = true
+                          quote != null && ch == quote -> quote = null
+                          quote != null -> current.append(ch)
+                          ch == '\'' || ch == '"' -> quote = ch
+                          ch.isWhitespace() -> flush()
+                          else -> current.append(ch)
+                      }
+                  }
+                  require(!escaped && quote == null) { "Unterminated quote or escape in command" }
+                  flush()
+                  return out
+              }
+          }
+
+          internal class MattMuxCliRunner(private val context: Context) {
+              @Volatile private var processor: AndroidBatchProcessor? = null
+
+              fun cancel() { processor?.cancel() }
+
+              fun execute(
+                  commandLine: String,
+                  emit: (String) -> Unit,
+                  progress: (Int, String) -> Unit,
+              ): Int {
+                  return when (val command = MattMuxCliSyntax.parse(commandLine)) {
+                      MattMuxCliCommand.Help -> {
+                          emit("MattMux CLI ${BuildConfig.VERSION_NAME}")
+                          emit("Usage: mattmux-cli --batch [--log FILE] MOVIES_ROOT [OUTPUT_ROOT]")
+                          emit("Android uses Storage Access Framework content:// tree URIs for MOVIES_ROOT and OUTPUT_ROOT.")
+                          emit("Use the CLI tab folder buttons to insert valid URIs.")
+                          0
+                      }
+                      MattMuxCliCommand.Version -> { emit("MattMux CLI ${BuildConfig.VERSION_NAME} (Android/ChromeOS native)"); 0 }
+                      is MattMuxCliCommand.Batch -> runBatch(command, emit, progress)
+                  }
+              }
+
+              private fun runBatch(command: MattMuxCliCommand.Batch, emit: (String) -> Unit, progress: (Int, String) -> Unit): Int {
+                  val input = parseTreeUri(command.inputRoot, "MOVIES_ROOT")
+                  val output = command.outputRoot?.let { parseTreeUri(it, "OUTPUT_ROOT") }
+                  val writer = command.logFile?.let { name ->
+                      require(name == File(name).name && name != "." && name != "..") { "Android --log must be an app-private filename, not a filesystem path" }
+                      File(context.filesDir, name).bufferedWriter()
+                  }
+                  val localProcessor = AndroidBatchProcessor(context)
+                  processor = localProcessor
+                  return try {
+                      val result = localProcessor.run(input, output, progress, log = { line ->
+                          writer?.apply { appendLine(line); flush() }
+                          emit(line)
+                      })
+                      emit("Result: completed=${result.completed} failed=${result.failures.size} total=${result.total}${if (result.cancelled) " cancelled=true" else ""}")
+                      result.outputs.forEach { emit("Output: $it") }
+                      result.failures.forEach { emit("Failure: ${it.movie}: ${it.message}") }
+                      when {
+                          result.cancelled -> 130
+                          result.failures.isNotEmpty() -> 1
+                          else -> 0
+                      }
+                  } finally {
+                      writer?.close()
+                      processor = null
+                  }
+              }
+
+              private fun parseTreeUri(value: String, label: String): Uri {
+                  val uri = Uri.parse(value)
+                  require(uri.scheme == "content" && DocumentsContract.isTreeUri(uri)) { "$label must be a content:// document-tree URI" }
+                  return uri
+              }
+          }
+          KOTLIN
+
+          cat > android/app/src/main/java/io/github/maas3n/mattmux/CliPanel.kt <<'KOTLIN'
+          package io.github.maas3n.mattmux
+
+          import android.app.Activity
+          import android.content.Intent
+          import android.net.Uri
+          import android.view.View
+          import android.widget.Button
+          import android.widget.EditText
+          import android.widget.LinearLayout
+          import android.widget.ProgressBar
+          import android.widget.ScrollView
+          import android.widget.TextView
+
+          class CliPanel(private val activity: Activity) {
+              companion object { private const val REQUEST_INPUT = 8300; private const val REQUEST_OUTPUT = 8301 }
+              private val runner = MattMuxCliRunner(activity)
+              private val controls = mutableListOf<View>()
+              private var input: Uri? = null
+              private var output: Uri? = null
+              @Volatile private var busy = false
+              @Volatile private var destroyed = false
+
+              private val command = EditText(activity).apply { setText("mattmux-cli --help"); minLines = 2 }
+              private val progress = ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
+              private val console = TextView(activity).apply { text = "Android mattmux-cli ready. Folder pickers insert Storage Access Framework content:// URIs into the command." }
+              private val cancel = Button(activity).apply { text = "Cancel"; isEnabled = false; setOnClickListener { runner.cancel(); append("Cancelling…") } }
+              val view: View
+
+              init {
+                  val padding = (24 * activity.resources.displayMetrics.density).toInt()
+                  val content = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(padding, padding, padding, padding) }
+                  content.addView(TextView(activity).apply { text = "mattmux-cli"; textSize = 20f })
+                  content.addView(TextView(activity).apply { text = "Same BATCH command model as desktop. Android storage is URI-based, so use the buttons below or paste persisted content:// tree URIs." })
+                  fun button(label: String, action: () -> Unit) = Button(activity).apply { text = label; setOnClickListener { action() }; controls += this; content.addView(this) }
+                  button("CHOOSE MOVIES_ROOT") { choose(REQUEST_INPUT) }
+                  button("CHOOSE OUTPUT_ROOT (OPTIONAL)") { choose(REQUEST_OUTPUT) }
+                  button("CLEAR OUTPUT_ROOT") { output = null; refreshCommand() }
+                  content.addView(command); controls += command
+                  button("RUN mattmux-cli") { runCommand() }
+                  content.addView(cancel)
+                  content.addView(progress)
+                  content.addView(console)
+                  view = ScrollView(activity).apply { addView(content) }
+              }
+
+              fun onResult(request: Int, result: Int, data: Intent?): Boolean {
+                  if (request != REQUEST_INPUT && request != REQUEST_OUTPUT) return false
+                  if (result != Activity.RESULT_OK || data == null || busy) return true
+                  val uri = data.data ?: return true
+                  persist(uri, data.flags)
+                  if (request == REQUEST_INPUT) input = uri else output = uri
+                  refreshCommand()
+                  return true
+              }
+
+              fun destroy() { destroyed = true; if (busy) runner.cancel() }
+
+              private fun choose(request: Int) {
+                  activity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+                  }, request)
+              }
+
+              private fun persist(uri: Uri, flags: Int) {
+                  val wanted = flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                  if (wanted != 0) runCatching { activity.contentResolver.takePersistableUriPermission(uri, wanted) }
+              }
+
+              private fun refreshCommand() {
+                  val root = input ?: run { command.setText("mattmux-cli --help"); return }
+                  val text = buildString {
+                      append("mattmux-cli --batch \""); append(root); append('"')
+                      output?.let { append(" \""); append(it); append('"') }
+                  }
+                  command.setText(text)
+              }
+
+              private fun runCommand() {
+                  if (busy) return
+                  busy = true
+                  console.text = ""
+                  progress.progress = 0
+                  controls.forEach { it.isEnabled = false }
+                  cancel.isEnabled = true
+                  val text = command.text.toString()
+                  Thread {
+                      val result = runCatching {
+                          runner.execute(text, emit = { line -> activity.runOnUiThread { if (!destroyed) append(line) } }, progress = { percent, message ->
+                              activity.runOnUiThread { if (!destroyed) { progress.progress = percent; append(message) } }
+                          })
+                      }
+                      activity.runOnUiThread {
+                          if (destroyed) return@runOnUiThread
+                          busy = false
+                          controls.forEach { it.isEnabled = true }
+                          cancel.isEnabled = false
+                          result.onSuccess { code -> append("mattmux-cli exit code: $code") }
+                              .onFailure { append("mattmux-cli error: ${it.message ?: it.javaClass.simpleName}") }
+                      }
+                  }.apply { name = "MattMux-Android-CLI" }.start()
+              }
+
+              private fun append(line: String) {
+                  console.text = if (console.text.isEmpty()) line else "${console.text}\n$line"
+              }
+          }
+          KOTLIN
+
+          cat > android/app/src/test/java/io/github/maas3n/mattmux/MattMuxCliSyntaxTest.kt <<'KOTLIN'
+          package io.github.maas3n.mattmux
+
+          import org.junit.Assert.assertEquals
+          import org.junit.Assert.assertTrue
+          import org.junit.Test
+
+          class MattMuxCliSyntaxTest {
+              @Test fun parsesBatchWithQuotedUris() {
+                  val parsed = MattMuxCliSyntax.parse("mattmux-cli --batch \"content://provider/tree/movies\" \"content://provider/tree/output\"")
+                  assertTrue(parsed is MattMuxCliCommand.Batch)
+                  parsed as MattMuxCliCommand.Batch
+                  assertEquals("content://provider/tree/movies", parsed.inputRoot)
+                  assertEquals("content://provider/tree/output", parsed.outputRoot)
+              }
+
+              @Test fun parsesLogEqualsForm() {
+                  val parsed = MattMuxCliSyntax.parse("mattmux-cli --batch --log=batch.log content://provider/tree/movies") as MattMuxCliCommand.Batch
+                  assertEquals("batch.log", parsed.logFile)
+                  assertEquals(null, parsed.outputRoot)
+              }
+
+              @Test fun parsesVersion() {
+                  assertTrue(MattMuxCliSyntax.parse("mattmux-cli --version") === MattMuxCliCommand.Version)
+              }
+          }
+          KOTLIN
+
+          cat > android/app/src/test/java/io/github/maas3n/mattmux/BatchNamingTest.kt <<'KOTLIN'
+          package io.github.maas3n.mattmux
+
+          import org.junit.Assert.assertEquals
+          import org.junit.Test
+
+          class BatchNamingTest {
+              @Test fun createsMovieNamedMkv() { assertEquals("Movie Title.mkv", BatchNaming.outputName("Movie Title")) }
+              @Test fun sanitizesPortableFilenameCharacters() { assertEquals("Movie_________.mkv", BatchNaming.outputName("Movie<>:\"/\\|?*")) }
+              @Test fun fallsBackForBlankName() { assertEquals("DVD.mkv", BatchNaming.outputName("   ...   ")) }
+          }
+          KOTLIN
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          # Nested document/tree URIs must treat the selected child document as the DVD/output root.
+          p = Path('android/app/src/main/java/io/github/maas3n/mattmux/DvdDocumentSource.kt')
+          s = p.read_text()
+          count = s.count('DocumentsContract.getTreeDocumentId(treeUri)')
+          if count != 2:
+              raise SystemExit(f'expected 2 DvdDocumentSource tree-root calls, found {count}')
+          s = s.replace('DocumentsContract.getTreeDocumentId(treeUri)', 'documentTreeRootId(treeUri)')
+          p.write_text(s)
+
+          p = Path('android/app/src/main/java/io/github/maas3n/mattmux/DvdNavScanner.kt')
+          s = p.read_text()
+          if s.count('DocumentsContract.getTreeDocumentId(treeUri)') != 1:
+              raise SystemExit('unexpected DvdNavScanner tree-root call count')
+          p.write_text(s.replace('DocumentsContract.getTreeDocumentId(treeUri)', 'documentTreeRootId(treeUri)'))
+
+          p = Path('android/app/src/main/java/io/github/maas3n/mattmux/MainActivity.kt')
+          s = p.read_text()
+          old = '    private lateinit var advancedMerger: AdvancedMergerPanel\n'
+          new = old + '    private lateinit var batchPanel: BatchPanel\n    private lateinit var cliPanel: CliPanel\n'
+          if old not in s: raise SystemExit('MainActivity advancedMerger field marker missing')
+          s = s.replace(old, new, 1)
+
+          old = '        advancedMerger = AdvancedMergerPanel(this)\n        val host = android.widget.TabHost(this).apply { id = android.R.id.tabhost }'
+          new = '        advancedMerger = AdvancedMergerPanel(this)\n        batchPanel = BatchPanel(this)\n        cliPanel = CliPanel(this)\n        val host = android.widget.TabHost(this).apply { id = android.R.id.tabhost }'
+          if old not in s: raise SystemExit('MainActivity panel initialization marker missing')
+          s = s.replace(old, new, 1)
+
+          old = '        host.addTab(host.newTabSpec("dvd").setIndicator("DVD Remux").setContent { dvd })\n        host.addTab(host.newTabSpec("merger").setIndicator("Advanced Merger").setContent { advancedMerger.view })'
+          new = old + '\n        host.addTab(host.newTabSpec("batch").setIndicator("BATCH").setContent { batchPanel.view })\n        host.addTab(host.newTabSpec("cli").setIndicator("CLI").setContent { cliPanel.view })'
+          if old not in s: raise SystemExit('MainActivity tab marker missing')
+          s = s.replace(old, new, 1)
+
+          old = '        if (::advancedMerger.isInitialized) advancedMerger.destroy()\n        if (remuxRunning) engine.cancel()'
+          new = '        if (::advancedMerger.isInitialized) advancedMerger.destroy()\n        if (::batchPanel.isInitialized) batchPanel.destroy()\n        if (::cliPanel.isInitialized) cliPanel.destroy()\n        if (remuxRunning) engine.cancel()'
+          if old not in s: raise SystemExit('MainActivity destroy marker missing')
+          s = s.replace(old, new, 1)
+
+          old = '        if (advancedMerger.onResult(requestCode, resultCode, data)) return\n        if (resultCode != RESULT_OK) return'
+          new = '        if (advancedMerger.onResult(requestCode, resultCode, data)) return\n        if (batchPanel.onResult(requestCode, resultCode, data)) return\n        if (cliPanel.onResult(requestCode, resultCode, data)) return\n        if (resultCode != RESULT_OK) return'
+          if old not in s: raise SystemExit('MainActivity activity-result marker missing')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+
+          git diff --check
+          changed="$(git diff --name-only)"
+          printf '%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -Ev '^(android/)' | grep -q .; then
+            echo 'Refusing to modify non-Android files' >&2
+            exit 1
+          fi
+          grep -Fq 'setIndicator("BATCH")' android/app/src/main/java/io/github/maas3n/mattmux/MainActivity.kt
+          grep -Fq 'setIndicator("CLI")' android/app/src/main/java/io/github/maas3n/mattmux/MainActivity.kt
+          grep -Fq 'libdvdnav/libdvdread' android/app/src/main/java/io/github/maas3n/mattmux/BatchPanel.kt
+          grep -Fq 'mattmux-cli --batch' android/app/src/main/java/io/github/maas3n/mattmux/MattMuxCli.kt
+
+      - name: Commit Android-only changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add android/
+          git diff --cached --quiet && { echo 'No Android changes to commit' >&2; exit 1; }
+          git commit -m 'Add Android BATCH and mattmux-cli'
+          git push origin HEAD:main
