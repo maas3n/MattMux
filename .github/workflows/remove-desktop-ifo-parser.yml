@@ -21,7 +21,7 @@ jobs:
           python3 tmp/remove_desktop_ifo_parser.py
           gofmt -w src/dvdchapter_types.go src/no_mattmux_ifo_parser_test.go src/app_windows_4.go src/linux_core.go
           git diff --check
-          ! grep -R --line-number --include='*.go' -E 'ReadDVDChapters\(|func readIFO\(|func mapGlobalTitle\(|func parseVTSPTTTable\(|func parsePGC\(|ErrNativeDVDChaptersUnsupported|native DVD IFO parser' src
+          ! grep -R --line-number --include='*.go' --exclude='no_mattmux_ifo_parser_test.go' -E 'ReadDVDChapters\(|func readIFO\(|func mapGlobalTitle\(|func parseVTSPTTTable\(|func parsePGC\(|ErrNativeDVDChaptersUnsupported|native DVD IFO parser' src
       - name: Test desktop source
         run: |
           cd src
