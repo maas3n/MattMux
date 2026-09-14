@@ -1,0 +1,914 @@
+name: Add Android CLI scan metadata remux
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/add-android-cli-commands.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  port:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Extend Android CLI through the native DVD engine
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > android/app/src/main/java/io/github/maas3n/mattmux/RemuxEngine.kt <<'KOTLIN'
+          package io.github.maas3n.mattmux
+
+          import android.content.Context
+          import android.net.Uri
+          import android.provider.DocumentsContract
+          import android.os.ParcelFileDescriptor
+          import java.util.concurrent.atomic.AtomicBoolean
+          import java.util.concurrent.locks.ReentrantLock
+
+          data class RemuxResult(val outputUri: Uri, val title: Int, val durationMs: Long, val planJson: String)
+
+          data class TrackInfo(
+              val index: Int, val kind: String, val codec: String, val language: String?, val title: String?,
+              val width: Int, val height: Int, val channels: Int, val channelLayout: String?,
+          ) {
+              fun displayLabel(): String {
+                  val typeName = when (kind) { "video" -> "Video"; "audio" -> "Audio"; "subtitle" -> "Subtitle"; else -> kind }
+                  val details = mutableListOf<String>()
+                  if (width > 0 && height > 0) details += "${width}x${height}"
+                  if (channels > 0) details += if (channelLayout.isNullOrBlank()) "$channels ch" else "$channels ch ($channelLayout)"
+                  language?.takeIf { it.isNotBlank() }?.let { details += "[$it]" }
+                  title?.takeIf { it.isNotBlank() }?.let { details += it }
+                  return buildString {
+                      append(typeName); append("  #"); append(index); append("  "); append(codec)
+                      if (details.isNotEmpty()) { append("  "); append(details.joinToString("  ")) }
+                  }
+              }
+          }
+
+          data class TrackProbeResult(val title: Int, val tracks: List<TrackInfo>)
+          internal data class DvdTitleScanInfo(val title: Int, val durationMs: Long, val longest: Boolean)
+          internal data class DvdScanResult(val titles: List<DvdTitleScanInfo>, val longestTitle: Int)
+          internal data class DvdMetadataResult(
+              val title: Int,
+              val durationMs: Long,
+              val chapterStartsMs: LongArray,
+              val chapterEndsMs: LongArray,
+              val tracks: List<TrackInfo>,
+              val planJson: String,
+          )
+
+          interface RemuxEngine {
+              val isAvailable: Boolean
+              val unavailableReason: String?
+              val runtimeInfo: String?
+              fun probeTracks(context: Context, sourceUri: Uri): TrackProbeResult
+              fun remux(context: Context, sourceUri: Uri, outputTreeUri: Uri, selectedStreamIndexes: IntArray? = null): RemuxResult
+              fun cancel()
+              fun setProgressListener(listener: ((Int) -> Unit)?)
+          }
+
+          class AndroidNativeRemuxEngine : RemuxEngine {
+              companion object {
+                  private val remuxLock = ReentrantLock()
+                  private const val DVDNAV_TICKS_PER_MS = 90L
+                  private val loadFailure: Throwable? = runCatching {
+                      System.loadLibrary("avutil")
+                      System.loadLibrary("avcodec")
+                      System.loadLibrary("avformat")
+                      System.loadLibrary("udfread")
+                      System.loadLibrary("mattmux_jni")
+                  }.exceptionOrNull()
+              }
+
+              private val cancelled = AtomicBoolean(false)
+
+              @Volatile
+              private var progressListener: ((Int) -> Unit)? = null
+
+              override val runtimeInfo: String? by lazy {
+                  if (loadFailure != null) null else runCatching { nativeVersionSummary() }
+                      .getOrElse { "Bundled FFmpeg libraries loaded (version probe failed)" }
+              }
+
+              override val isAvailable: Boolean
+                  get() = loadFailure == null
+
+              override val unavailableReason: String?
+                  get() = loadFailure?.let { "Bundled FFmpeg runtime failed to load: ${it.javaClass.simpleName}" }
+
+              override fun setProgressListener(listener: ((Int) -> Unit)?) {
+                  progressListener = listener
+              }
+
+              override fun cancel() {
+                  cancelled.set(true)
+              }
+
+              override fun probeTracks(context: Context, sourceUri: Uri): TrackProbeResult {
+                  val metadata = probeTitleMetadata(context, sourceUri, null)
+                  return TrackProbeResult(metadata.title, metadata.tracks)
+              }
+
+              internal fun probeTitleMetadata(context: Context, sourceUri: Uri, requestedTitle: Int?): DvdMetadataResult {
+                  check(isAvailable) { unavailableReason ?: "Remux engine unavailable" }
+                  check(remuxLock.tryLock()) { "Another native operation is still stopping. Try again shortly." }
+                  try {
+                      check(!cancelled.get()) { "Metadata read cancelled" }
+                      openTitle(context, sourceUri, requestedTitle).use { title ->
+                          val fds = IntArray(title.vobs.size) { title.vobs[it].fd }
+                          val starts = LongArray(title.plan.cells.size) { title.plan.cells[it].startSector }
+                          val ends = LongArray(title.plan.cells.size) { title.plan.cells[it].endSectorExclusive }
+                          val languageRecords = title.plan.streamLanguages.map { "${it.streamId}\t${it.language}" }.toTypedArray()
+                          val records = nativeProbeTracks(fds, starts, ends, title.isoHandle, title.plan.titleSet, languageRecords, title.plan.subtitlePalette)
+                              ?: error("Could not probe DVD streams")
+                          return DvdMetadataResult(
+                              title = title.plan.globalTitle,
+                              durationMs = title.plan.durationMs,
+                              chapterStartsMs = title.plan.chapterStartsMs.copyOf(),
+                              chapterEndsMs = title.plan.chapterEndsMs.copyOf(),
+                              tracks = records.map(::parseTrackRecord),
+                              planJson = title.plan.diagnosticJson(),
+                          )
+                      }
+                  } finally {
+                      cancelled.set(false)
+                      remuxLock.unlock()
+                  }
+              }
+
+              internal fun scanTitles(context: Context, sourceUri: Uri): DvdScanResult {
+                  check(isAvailable) { unavailableReason ?: "Remux engine unavailable" }
+                  check(remuxLock.tryLock()) { "Another native operation is still stopping. Try again shortly." }
+                  try {
+                      check(!cancelled.get()) { "DVD scan cancelled" }
+                      return scanSourceWithDvdNav(context, sourceUri)
+                  } finally {
+                      cancelled.set(false)
+                      remuxLock.unlock()
+                  }
+              }
+
+              private fun parseTrackRecord(record: String): TrackInfo {
+                  val fields = record.split('\t', limit = 9)
+                  require(fields.size == 9) { "Invalid native track metadata" }
+                  fun optional(value: String): String? = value.takeUnless { it == "-" || it.isBlank() }
+                  return TrackInfo(
+                      index = fields[0].toInt(), kind = fields[1], codec = fields[2],
+                      language = optional(fields[3]), title = optional(fields[4]),
+                      width = fields[5].toInt(), height = fields[6].toInt(), channels = fields[7].toInt(),
+                      channelLayout = optional(fields[8]),
+                  )
+              }
+
+              override fun remux(context: Context, sourceUri: Uri, outputTreeUri: Uri, selectedStreamIndexes: IntArray?): RemuxResult =
+                  remuxTitle(context, sourceUri, outputTreeUri, null, selectedStreamIndexes, preserveChapters = true)
+
+              internal fun remuxTitle(
+                  context: Context,
+                  sourceUri: Uri,
+                  outputTreeUri: Uri,
+                  requestedTitle: Int?,
+                  selectedStreamIndexes: IntArray? = null,
+                  preserveChapters: Boolean = true,
+              ): RemuxResult {
+                  check(isAvailable) { unavailableReason ?: "Remux engine unavailable" }
+                  require(DocumentsContract.isTreeUri(outputTreeUri)) { "Output must be a document-tree folder" }
+                  require(requestedTitle == null || requestedTitle > 0) { "DVD title must be greater than zero" }
+                  require(selectedStreamIndexes == null || selectedStreamIndexes.isNotEmpty()) { "Select at least one video, audio, or subtitle track before remuxing" }
+                  check(remuxLock.tryLock()) { "Another remux is still stopping. Try again shortly." }
+                  try {
+                      check(!cancelled.get()) { "Remux cancelled" }
+                      return remuxLocked(context, sourceUri, outputTreeUri, requestedTitle, selectedStreamIndexes, preserveChapters)
+                  } finally {
+                      cancelled.set(false)
+                      remuxLock.unlock()
+                  }
+              }
+
+              private fun remuxLocked(
+                  context: Context,
+                  sourceUri: Uri,
+                  outputTreeUri: Uri,
+                  requestedTitle: Int?,
+                  selectedStreamIndexes: IntArray?,
+                  preserveChapters: Boolean,
+              ): RemuxResult {
+                  val resolver = context.contentResolver
+                  openTitle(context, sourceUri, requestedTitle).use { title ->
+                      check(!cancelled.get()) { "Remux cancelled" }
+                      android.util.Log.i("MattMuxPlan", title.plan.diagnosticJson())
+                      val output = DvdDocumentOutput(resolver, outputTreeUri)
+                      val pending = output.create(title.plan.globalTitle)
+                      var remuxCompleted = false
+                      try {
+                          val fds = IntArray(title.vobs.size) { title.vobs[it].fd }
+                          val starts = LongArray(title.plan.cells.size) { title.plan.cells[it].startSector }
+                          val ends = LongArray(title.plan.cells.size) { title.plan.cells[it].endSectorExclusive }
+                          val chapterStarts = if (preserveChapters) title.plan.chapterStartsMs else LongArray(0)
+                          val chapterEnds = if (preserveChapters) title.plan.chapterEndsMs else LongArray(0)
+                          val nativeError = nativeRemux(
+                              fds,
+                              starts,
+                              ends,
+                              pending.descriptor.fd,
+                              chapterStarts,
+                              chapterEnds,
+                              selectedStreamIndexes,
+                              title.isoHandle,
+                              title.plan.titleSet,
+                              title.plan.streamLanguages.map { "${it.streamId}\t${it.language}" }.toTypedArray(),
+                              title.plan.subtitlePalette,
+                          )
+                          if (nativeError != null) {
+                              throw IllegalStateException(nativeError)
+                          }
+                          remuxCompleted = true
+                          check(!cancelled.get()) { "Remux cancelled" }
+                          val finalUri = output.commit(pending)
+                          return RemuxResult(finalUri, title.plan.globalTitle, title.plan.durationMs, title.plan.diagnosticJson())
+                      } catch (t: Throwable) {
+                          if (remuxCompleted) output.preserve(pending) else output.abort(pending)
+                          throw t
+                      }
+                  }
+              }
+
+              private class NativeTitle(
+                  val plan: DvdTitlePlan,
+                  val vobs: List<ParcelFileDescriptor>,
+                  val isoHandle: Long = 0,
+                  val cleanup: () -> Unit,
+              ) : AutoCloseable {
+                  override fun close() = cleanup()
+              }
+
+              private fun parseDvdNavScan(values: LongArray): DvdScanResult {
+                  require(values.size >= 3) { "libdvdnav scanner returned invalid data" }
+                  val count = values[0].toInt()
+                  val bestTitle = values[1].toInt()
+                  require(count > 0 && bestTitle in 1..count) { "libdvdnav scanner found no usable titles" }
+                  require(values.size >= count + 3) { "libdvdnav scanner did not return per-title durations" }
+                  val titles = (1..count).map { title ->
+                      val ticks = values[title + 2].coerceAtLeast(0)
+                      DvdTitleScanInfo(title, ticks / DVDNAV_TICKS_PER_MS, title == bestTitle)
+                  }
+                  return DvdScanResult(titles, bestTitle)
+              }
+
+              private fun scanWithDvdNav(stageRoot: java.io.File): Int {
+                  val values = nativeScanDvdNav(stageRoot.absolutePath)
+                      ?: error("libdvdnav/libdvdread could not scan the staged DVD metadata")
+                  val result = parseDvdNavScan(values)
+                  android.util.Log.i(
+                      "MattMuxDVDNav",
+                      "libdvdnav/libdvdread scanned ${result.titles.size} title(s); selected title ${result.longestTitle} as longest",
+                  )
+                  return result.longestTitle
+              }
+
+              private fun scanSourceWithDvdNav(context: Context, uri: Uri): DvdScanResult {
+                  val resolver = context.contentResolver
+                  if (DocumentsContract.isTreeUri(uri)) {
+                      val stageRoot = DvdNavScanner.stageTreeIfos(context, uri)
+                      return try {
+                          parseDvdNavScan(nativeScanDvdNav(stageRoot.absolutePath)
+                              ?: error("libdvdnav/libdvdread could not scan the staged DVD metadata"))
+                      } finally {
+                          stageRoot.deleteRecursively()
+                      }
+                  }
+
+                  val handle = resolver.openFileDescriptor(uri, "r")?.use { nativeOpenIso(it.fd) }
+                      ?: error("Could not open ISO image")
+                  check(handle != 0L) { "Could not open UDF filesystem" }
+                  try {
+                      val vmg = nativeReadIsoIfo(handle, 0) ?: error("ISO has no VIDEO_TS/VIDEO_TS.IFO")
+                      val stageRoot = DvdNavScanner.stageIsoIfos(context, vmg) { titleSet -> nativeReadIsoIfo(handle, titleSet) }
+                      return try {
+                          parseDvdNavScan(nativeScanDvdNav(stageRoot.absolutePath)
+                              ?: error("libdvdnav/libdvdread could not scan the staged DVD metadata"))
+                      } finally {
+                          stageRoot.deleteRecursively()
+                      }
+                  } finally {
+                      nativeCloseIso(handle)
+                  }
+              }
+
+              private fun openTitle(context: Context, uri: Uri, requestedTitle: Int? = null): NativeTitle {
+                  require(requestedTitle == null || requestedTitle > 0) { "DVD title must be greater than zero" }
+                  val resolver = context.contentResolver
+                  if (DocumentsContract.isTreeUri(uri)) {
+                      val titleNumber = if (requestedTitle != null) {
+                          requestedTitle
+                      } else {
+                          val stageRoot = DvdNavScanner.stageTreeIfos(context, uri)
+                          try { scanWithDvdNav(stageRoot) } finally { stageRoot.deleteRecursively() }
+                      }
+                      val title = DvdDocumentSource(resolver, uri).openTitle(titleNumber)
+                      return NativeTitle(title.plan, title.vobs, cleanup = { title.close() })
+                  }
+
+                  val handle = resolver.openFileDescriptor(uri, "r")?.use { nativeOpenIso(it.fd) }
+                      ?: error("Could not open ISO image")
+                  check(handle != 0L) { "Could not open UDF filesystem" }
+                  try {
+                      val vmg = nativeReadIsoIfo(handle, 0) ?: error("ISO has no VIDEO_TS/VIDEO_TS.IFO")
+                      val titleNumber = if (requestedTitle != null) {
+                          requestedTitle
+                      } else {
+                          val stageRoot = DvdNavScanner.stageIsoIfos(context, vmg) { titleSet -> nativeReadIsoIfo(handle, titleSet) }
+                          try { scanWithDvdNav(stageRoot) } finally { stageRoot.deleteRecursively() }
+                      }
+                      val plan = DvdIfoParser.selectTitle(vmg, titleNumber) { titleSet ->
+                          check(!cancelled.get()) { "Remux cancelled" }
+                          nativeReadIsoIfo(handle, titleSet)
+                      }
+                      return NativeTitle(plan, emptyList(), handle, cleanup = { nativeCloseIso(handle) })
+                  } catch (t: Throwable) {
+                      nativeCloseIso(handle)
+                      throw t
+                  }
+              }
+
+              @Suppress("unused")
+              private fun isNativeCancelled(): Boolean = cancelled.get()
+
+              @Suppress("unused")
+              private fun onNativeProgress(percent: Int) {
+                  progressListener?.invoke(percent.coerceIn(0, 100))
+              }
+
+              private external fun nativeVersionSummary(): String
+              private external fun nativeScanDvdNav(path: String): LongArray?
+              private external fun nativeOpenIso(fd: Int): Long
+              private external fun nativeReadIsoIfo(handle: Long, titleSet: Int): ByteArray?
+              private external fun nativeCloseIso(handle: Long)
+              private external fun nativeProbeTracks(vobFds: IntArray, cellStartSectors: LongArray, cellEndSectors: LongArray, isoHandle: Long, titleSet: Int, streamLanguages: Array<String>, subtitlePalette: IntArray): Array<String>?
+              private external fun nativeRemux(
+                  vobFds: IntArray,
+                  cellStartSectors: LongArray,
+                  cellEndSectors: LongArray,
+                  outputFd: Int,
+                  chapterStartsMs: LongArray,
+                  chapterEndsMs: LongArray,
+                  selectedStreamIndexes: IntArray?,
+                  isoHandle: Long,
+                  titleSet: Int,
+                  streamLanguages: Array<String>,
+                  subtitlePalette: IntArray,
+              ): String?
+          }
+          KOTLIN
+
+          cat > android/app/src/main/java/io/github/maas3n/mattmux/MattMuxCli.kt <<'KOTLIN'
+          package io.github.maas3n.mattmux
+
+          import android.content.Context
+          import android.net.Uri
+          import android.provider.DocumentsContract
+          import java.io.File
+          import java.util.Locale
+
+          internal sealed class MattMuxCliCommand {
+              data class Batch(val inputRoot: String, val outputRoot: String?, val logFile: String?) : MattMuxCliCommand()
+              data class Scan(val source: String) : MattMuxCliCommand()
+              data class Metadata(val source: String, val title: Int?) : MattMuxCliCommand()
+              data class Remux(val source: String, val title: Int?, val outputRoot: String?, val noChapters: Boolean) : MattMuxCliCommand()
+              object Version : MattMuxCliCommand()
+              object Help : MattMuxCliCommand()
+          }
+
+          internal object MattMuxCliSyntax {
+              private const val BATCH_USAGE = "Usage: mattmux-cli --batch [--log FILE] MOVIES_ROOT [OUTPUT_ROOT]"
+              private const val METADATA_USAGE = "Usage: mattmux-cli metadata [--title N] SOURCE"
+              private const val REMUX_USAGE = "Usage: mattmux-cli remux [--title N] [--output OUTPUT_ROOT] [--no-chapters] SOURCE"
+
+              fun parse(commandLine: String): MattMuxCliCommand {
+                  val tokens = tokenize(commandLine).toMutableList()
+                  if (tokens.firstOrNull() == "mattmux-cli") tokens.removeAt(0)
+                  if (tokens.isEmpty() || tokens == listOf("--help") || tokens == listOf("-h") || tokens == listOf("help")) return MattMuxCliCommand.Help
+                  if (tokens == listOf("--version") || tokens == listOf("-version") || tokens == listOf("version")) return MattMuxCliCommand.Version
+                  return when (tokens.removeAt(0)) {
+                      "--batch" -> parseBatch(tokens)
+                      "scan" -> {
+                          require(tokens.size == 1) { "Usage: mattmux-cli scan SOURCE" }
+                          MattMuxCliCommand.Scan(tokens.single())
+                      }
+                      "metadata" -> parseMetadata(tokens)
+                      "remux" -> parseRemux(tokens)
+                      else -> error("Unknown command. Run mattmux-cli --help")
+                  }
+              }
+
+              private fun parseBatch(tokens: List<String>): MattMuxCliCommand.Batch {
+                  var logFile: String? = null
+                  val positional = mutableListOf<String>()
+                  var index = 0
+                  while (index < tokens.size) {
+                      val token = tokens[index]
+                      when {
+                          token == "--log" -> {
+                              require(index + 1 < tokens.size) { "--log requires a filename" }
+                              logFile = tokens[index + 1]
+                              index += 2
+                          }
+                          token.startsWith("--log=") -> {
+                              logFile = token.substringAfter("--log=").also { require(it.isNotBlank()) { "--log requires a filename" } }
+                              index++
+                          }
+                          token.startsWith("-") -> error("Unknown option: $token")
+                          else -> { positional += token; index++ }
+                      }
+                  }
+                  require(positional.size in 1..2) { BATCH_USAGE }
+                  return MattMuxCliCommand.Batch(positional[0], positional.getOrNull(1), logFile)
+              }
+
+              private fun parseMetadata(tokens: List<String>): MattMuxCliCommand.Metadata {
+                  var title: Int? = null
+                  val positional = mutableListOf<String>()
+                  var index = 0
+                  while (index < tokens.size) {
+                      val token = tokens[index]
+                      when {
+                          token == "--title" -> {
+                              require(index + 1 < tokens.size) { "--title requires a number" }
+                              title = titleValue(tokens[index + 1])
+                              index += 2
+                          }
+                          token.startsWith("--title=") -> {
+                              title = titleValue(token.substringAfter("="))
+                              index++
+                          }
+                          token.startsWith("-") -> error("Unknown option: $token")
+                          else -> { positional += token; index++ }
+                      }
+                  }
+                  require(positional.size == 1) { METADATA_USAGE }
+                  return MattMuxCliCommand.Metadata(positional.single(), title)
+              }
+
+              private fun parseRemux(tokens: List<String>): MattMuxCliCommand.Remux {
+                  var title: Int? = null
+                  var output: String? = null
+                  var noChapters = false
+                  val positional = mutableListOf<String>()
+                  var index = 0
+                  while (index < tokens.size) {
+                      val token = tokens[index]
+                      when {
+                          token == "--title" -> {
+                              require(index + 1 < tokens.size) { "--title requires a number" }
+                              title = titleValue(tokens[index + 1])
+                              index += 2
+                          }
+                          token.startsWith("--title=") -> {
+                              title = titleValue(token.substringAfter("="))
+                              index++
+                          }
+                          token == "--output" -> {
+                              require(index + 1 < tokens.size) { "--output requires a document-tree URI" }
+                              output = tokens[index + 1]
+                              index += 2
+                          }
+                          token.startsWith("--output=") -> {
+                              output = token.substringAfter("=").also { require(it.isNotBlank()) { "--output requires a document-tree URI" } }
+                              index++
+                          }
+                          token == "--no-chapters" -> { noChapters = true; index++ }
+                          token.startsWith("-") -> error("Unknown option: $token")
+                          else -> { positional += token; index++ }
+                      }
+                  }
+                  require(positional.size == 1) { REMUX_USAGE }
+                  return MattMuxCliCommand.Remux(positional.single(), title, output, noChapters)
+              }
+
+              private fun titleValue(value: String): Int? {
+                  val parsed = value.toIntOrNull() ?: throw IllegalArgumentException("--title must be an integer")
+                  require(parsed >= 0) { "--title must be >= 0" }
+                  return parsed.takeIf { it > 0 }
+              }
+
+              private fun tokenize(text: String): List<String> {
+                  val out = mutableListOf<String>()
+                  val current = StringBuilder()
+                  var quote: Char? = null
+                  var escaped = false
+                  fun flush() { if (current.isNotEmpty()) { out += current.toString(); current.setLength(0) } }
+                  text.forEach { ch ->
+                      when {
+                          escaped -> { current.append(ch); escaped = false }
+                          ch == '\\' && quote != '\'' -> escaped = true
+                          quote != null && ch == quote -> quote = null
+                          quote != null -> current.append(ch)
+                          ch == '\'' || ch == '"' -> quote = ch
+                          ch.isWhitespace() -> flush()
+                          else -> current.append(ch)
+                      }
+                  }
+                  require(!escaped && quote == null) { "Unterminated quote or escape in command" }
+                  flush()
+                  return out
+              }
+          }
+
+          internal class MattMuxCliRunner(private val context: Context) {
+              private val engine = AndroidNativeRemuxEngine()
+              @Volatile private var processor: AndroidBatchProcessor? = null
+
+              fun cancel() {
+                  processor?.cancel()
+                  engine.cancel()
+              }
+
+              fun execute(
+                  commandLine: String,
+                  emit: (String) -> Unit,
+                  progress: (Int, String) -> Unit,
+              ): Int {
+                  return when (val command = MattMuxCliSyntax.parse(commandLine)) {
+                      MattMuxCliCommand.Help -> {
+                          emit("MattMux CLI ${BuildConfig.VERSION_NAME}")
+                          emit("Usage:")
+                          emit("  mattmux-cli scan SOURCE")
+                          emit("  mattmux-cli metadata [--title N] SOURCE")
+                          emit("  mattmux-cli remux [--title N] [--output OUTPUT_ROOT] [--no-chapters] SOURCE")
+                          emit("  mattmux-cli --batch [--log FILE] MOVIES_ROOT [OUTPUT_ROOT]")
+                          emit("  mattmux-cli --version")
+                          emit("Android SOURCE may be a persisted content:// DVD-folder tree URI or ISO document URI.")
+                          emit("MOVIES_ROOT and OUTPUT_ROOT are persisted content:// document-tree URIs.")
+                          emit("For ISO remux, --output is required. For a DVD-folder SOURCE, output defaults to that folder.")
+                          0
+                      }
+                      MattMuxCliCommand.Version -> { emit("MattMux CLI ${BuildConfig.VERSION_NAME} (Android/ChromeOS native)"); 0 }
+                      is MattMuxCliCommand.Batch -> runBatch(command, emit, progress)
+                      is MattMuxCliCommand.Scan -> runScan(command, emit)
+                      is MattMuxCliCommand.Metadata -> runMetadata(command, emit)
+                      is MattMuxCliCommand.Remux -> runRemux(command, emit, progress)
+                  }
+              }
+
+              private fun runScan(command: MattMuxCliCommand.Scan, emit: (String) -> Unit): Int {
+                  requireEngine()
+                  val source = parseSourceUri(command.source, "SOURCE")
+                  val scan = engine.scanTitles(context, source)
+                  emit("TITLE   DURATION       DEFAULT")
+                  scan.titles.forEach { title ->
+                      emit(String.format(Locale.ROOT, "%-7d %-14s %s", title.title, formatDuration(title.durationMs), if (title.longest) "longest" else ""))
+                  }
+                  return 0
+              }
+
+              private fun runMetadata(command: MattMuxCliCommand.Metadata, emit: (String) -> Unit): Int {
+                  requireEngine()
+                  val source = parseSourceUri(command.source, "SOURCE")
+                  val result = engine.probeTitleMetadata(context, source, command.title)
+                  emit("Title: ${result.title}")
+                  emit("Duration: ${formatDuration(result.durationMs)}")
+                  emit("Chapters: ${result.chapterStartsMs.size}")
+                  result.chapterStartsMs.indices.forEach { index ->
+                      emit("  Chapter %02d  %s - %s".format(Locale.ROOT, index + 1, formatDuration(result.chapterStartsMs[index]), formatDuration(result.chapterEndsMs[index])))
+                  }
+                  emit("Streams: ${result.tracks.size}")
+                  result.tracks.forEach { emit("  ${it.displayLabel()}") }
+                  emit("Plan: ${result.planJson}")
+                  return 0
+              }
+
+              private fun runRemux(command: MattMuxCliCommand.Remux, emit: (String) -> Unit, progress: (Int, String) -> Unit): Int {
+                  requireEngine()
+                  val source = parseSourceUri(command.source, "SOURCE")
+                  val output = command.outputRoot?.let { parseTreeUri(it, "OUTPUT_ROOT") }
+                      ?: source.takeIf { DocumentsContract.isTreeUri(it) }
+                      ?: throw IllegalArgumentException("ISO remux requires --output OUTPUT_ROOT")
+                  engine.setProgressListener { percent -> progress(percent, "Remuxing… $percent%") }
+                  return try {
+                      val result = engine.remuxTitle(context, source, output, command.title, null, preserveChapters = !command.noChapters)
+                      emit("Output: ${result.outputUri}")
+                      emit("Title: ${result.title}")
+                      emit("Duration: ${formatDuration(result.durationMs)}")
+                      0
+                  } finally {
+                      engine.setProgressListener(null)
+                  }
+              }
+
+              private fun runBatch(command: MattMuxCliCommand.Batch, emit: (String) -> Unit, progress: (Int, String) -> Unit): Int {
+                  val input = parseTreeUri(command.inputRoot, "MOVIES_ROOT")
+                  val output = command.outputRoot?.let { parseTreeUri(it, "OUTPUT_ROOT") }
+                  val writer = command.logFile?.let { name ->
+                      require(name == File(name).name && name != "." && name != "..") { "Android --log must be an app-private filename, not a filesystem path" }
+                      File(context.filesDir, name).bufferedWriter()
+                  }
+                  val localProcessor = AndroidBatchProcessor(context)
+                  processor = localProcessor
+                  return try {
+                      val result = localProcessor.run(input, output, progress, log = { line ->
+                          writer?.apply { appendLine(line); flush() }
+                          emit(line)
+                      })
+                      emit("Result: completed=${result.completed} failed=${result.failures.size} total=${result.total}${if (result.cancelled) " cancelled=true" else ""}")
+                      result.outputs.forEach { emit("Output: $it") }
+                      result.failures.forEach { emit("Failure: ${it.movie}: ${it.message}") }
+                      when {
+                          result.cancelled -> 130
+                          result.failures.isNotEmpty() -> 1
+                          else -> 0
+                      }
+                  } finally {
+                      writer?.close()
+                      processor = null
+                  }
+              }
+
+              private fun requireEngine() {
+                  check(engine.isAvailable) { engine.unavailableReason ?: "Native MattMux engine unavailable" }
+              }
+
+              private fun parseSourceUri(value: String, label: String): Uri {
+                  val uri = Uri.parse(value)
+                  require(uri.scheme == "content" && (DocumentsContract.isTreeUri(uri) || DocumentsContract.isDocumentUri(context, uri))) {
+                      "$label must be a persisted content:// document or document-tree URI"
+                  }
+                  return uri
+              }
+
+              private fun parseTreeUri(value: String, label: String): Uri {
+                  val uri = Uri.parse(value)
+                  require(uri.scheme == "content" && DocumentsContract.isTreeUri(uri)) { "$label must be a content:// document-tree URI" }
+                  return uri
+              }
+
+              private fun formatDuration(ms: Long): String {
+                  val safe = ms.coerceAtLeast(0)
+                  val hours = safe / 3_600_000
+                  val minutes = (safe / 60_000) % 60
+                  val seconds = (safe / 1_000) % 60
+                  val millis = safe % 1_000
+                  return String.format(Locale.ROOT, "%d:%02d:%02d.%03d", hours, minutes, seconds, millis)
+              }
+          }
+          KOTLIN
+
+          cat > android/app/src/main/java/io/github/maas3n/mattmux/CliPanel.kt <<'KOTLIN'
+          package io.github.maas3n.mattmux
+
+          import android.app.Activity
+          import android.content.Intent
+          import android.net.Uri
+          import android.view.View
+          import android.widget.Button
+          import android.widget.EditText
+          import android.widget.LinearLayout
+          import android.widget.ProgressBar
+          import android.widget.ScrollView
+          import android.widget.TextView
+
+          class CliPanel(private val activity: Activity) {
+              companion object {
+                  private const val REQUEST_SOURCE_ISO = 8300
+                  private const val REQUEST_SOURCE_FOLDER = 8301
+                  private const val REQUEST_OUTPUT = 8302
+              }
+
+              private enum class Preset { HELP, SCAN, METADATA, REMUX, BATCH }
+
+              private val runner = MattMuxCliRunner(activity)
+              private val controls = mutableListOf<View>()
+              private var source: Uri? = null
+              private var output: Uri? = null
+              private var preset = Preset.HELP
+              @Volatile private var busy = false
+              @Volatile private var destroyed = false
+
+              private val command = EditText(activity).apply { setText("mattmux-cli --help"); minLines = 2 }
+              private val progress = ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
+              private val console = TextView(activity).apply { text = "Android mattmux-cli ready. Pick a DVD folder or ISO, choose a command preset, then edit the command if needed." }
+              private val cancel = Button(activity).apply { text = "Cancel"; isEnabled = false; setOnClickListener { runner.cancel(); append("Cancelling…") } }
+              val view: View
+
+              init {
+                  val padding = (24 * activity.resources.displayMetrics.density).toInt()
+                  val content = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(padding, padding, padding, padding) }
+                  content.addView(TextView(activity).apply { text = "mattmux-cli"; textSize = 20f })
+                  content.addView(TextView(activity).apply {
+                      text = "Native Android CLI surface: scan, metadata, remux and --batch. Android storage uses persisted content:// URIs instead of shell filesystem paths."
+                  })
+                  fun button(label: String, action: () -> Unit) = Button(activity).apply { text = label; setOnClickListener { action() }; controls += this; content.addView(this) }
+
+                  button("CHOOSE ISO SOURCE") { chooseIso() }
+                  button("CHOOSE DVD FOLDER SOURCE") { chooseTree(REQUEST_SOURCE_FOLDER) }
+                  button("CHOOSE OUTPUT FOLDER") { chooseTree(REQUEST_OUTPUT) }
+                  button("CLEAR OUTPUT FOLDER") { output = null; refreshCommand() }
+
+                  button("PRESET: SCAN") { preset = Preset.SCAN; refreshCommand() }
+                  button("PRESET: METADATA") { preset = Preset.METADATA; refreshCommand() }
+                  button("PRESET: REMUX") { preset = Preset.REMUX; refreshCommand() }
+                  button("PRESET: BATCH") { preset = Preset.BATCH; refreshCommand() }
+
+                  content.addView(command); controls += command
+                  button("RUN mattmux-cli") { runCommand() }
+                  content.addView(cancel)
+                  content.addView(progress)
+                  content.addView(console)
+                  view = ScrollView(activity).apply { addView(content) }
+              }
+
+              fun onResult(request: Int, result: Int, data: Intent?): Boolean {
+                  if (request !in setOf(REQUEST_SOURCE_ISO, REQUEST_SOURCE_FOLDER, REQUEST_OUTPUT)) return false
+                  if (result != Activity.RESULT_OK || data == null || busy) return true
+                  val uri = data.data ?: return true
+                  persist(uri, data.flags)
+                  if (request == REQUEST_OUTPUT) {
+                      output = uri
+                  } else {
+                      source = uri
+                      if (preset == Preset.HELP) preset = Preset.SCAN
+                  }
+                  refreshCommand()
+                  return true
+              }
+
+              fun destroy() { destroyed = true; if (busy) runner.cancel() }
+
+              private fun chooseIso() {
+                  activity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                      addCategory(Intent.CATEGORY_OPENABLE)
+                      type = "*/*"
+                      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+                  }, REQUEST_SOURCE_ISO)
+              }
+
+              private fun chooseTree(request: Int) {
+                  activity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+                  }, request)
+              }
+
+              private fun persist(uri: Uri, flags: Int) {
+                  val wanted = flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                  if (wanted != 0) runCatching { activity.contentResolver.takePersistableUriPermission(uri, wanted) }
+              }
+
+              private fun refreshCommand() {
+                  val src = source
+                  val text = when (preset) {
+                      Preset.HELP -> "mattmux-cli --help"
+                      Preset.SCAN -> src?.let { "mattmux-cli scan \"$it\"" } ?: "mattmux-cli scan SOURCE"
+                      Preset.METADATA -> src?.let { "mattmux-cli metadata \"$it\"" } ?: "mattmux-cli metadata SOURCE"
+                      Preset.REMUX -> src?.let {
+                          buildString {
+                              append("mattmux-cli remux")
+                              output?.let { out -> append(" --output \""); append(out); append('"') }
+                              append(" \""); append(it); append('"')
+                          }
+                      } ?: "mattmux-cli remux SOURCE"
+                      Preset.BATCH -> src?.let {
+                          buildString {
+                              append("mattmux-cli --batch \""); append(it); append('"')
+                              output?.let { out -> append(" \""); append(out); append('"') }
+                          }
+                      } ?: "mattmux-cli --batch MOVIES_ROOT"
+                  }
+                  command.setText(text)
+              }
+
+              private fun runCommand() {
+                  if (busy) return
+                  busy = true
+                  console.text = ""
+                  progress.progress = 0
+                  controls.forEach { it.isEnabled = false }
+                  cancel.isEnabled = true
+                  val text = command.text.toString()
+                  Thread {
+                      val result = runCatching {
+                          runner.execute(text, emit = { line -> activity.runOnUiThread { if (!destroyed) append(line) } }, progress = { percent, message ->
+                              activity.runOnUiThread { if (!destroyed) { progress.progress = percent; append(message) } }
+                          })
+                      }
+                      activity.runOnUiThread {
+                          if (destroyed) return@runOnUiThread
+                          busy = false
+                          controls.forEach { it.isEnabled = true }
+                          cancel.isEnabled = false
+                          result.onSuccess { code -> append("mattmux-cli exit code: $code") }
+                              .onFailure { append("mattmux-cli error: ${it.message ?: it.javaClass.simpleName}") }
+                      }
+                  }.apply { name = "MattMux-Android-CLI" }.start()
+              }
+
+              private fun append(line: String) {
+                  console.text = if (console.text.isEmpty()) line else "${console.text}\n$line"
+              }
+          }
+          KOTLIN
+
+          cat > android/app/src/test/java/io/github/maas3n/mattmux/MattMuxCliSyntaxTest.kt <<'KOTLIN'
+          package io.github.maas3n.mattmux
+
+          import org.junit.Assert.assertEquals
+          import org.junit.Assert.assertFalse
+          import org.junit.Assert.assertNull
+          import org.junit.Assert.assertTrue
+          import org.junit.Test
+
+          class MattMuxCliSyntaxTest {
+              @Test fun parsesBatchWithQuotedUris() {
+                  val parsed = MattMuxCliSyntax.parse("mattmux-cli --batch \"content://provider/tree/movies\" \"content://provider/tree/output\"")
+                  assertTrue(parsed is MattMuxCliCommand.Batch)
+                  parsed as MattMuxCliCommand.Batch
+                  assertEquals("content://provider/tree/movies", parsed.inputRoot)
+                  assertEquals("content://provider/tree/output", parsed.outputRoot)
+              }
+
+              @Test fun parsesLogEqualsForm() {
+                  val parsed = MattMuxCliSyntax.parse("mattmux-cli --batch --log=batch.log content://provider/tree/movies") as MattMuxCliCommand.Batch
+                  assertEquals("batch.log", parsed.logFile)
+                  assertNull(parsed.outputRoot)
+              }
+
+              @Test fun parsesScan() {
+                  val parsed = MattMuxCliSyntax.parse("mattmux-cli scan content://provider/document/disc.iso") as MattMuxCliCommand.Scan
+                  assertEquals("content://provider/document/disc.iso", parsed.source)
+              }
+
+              @Test fun parsesMetadataTitle() {
+                  val parsed = MattMuxCliSyntax.parse("mattmux-cli metadata --title 3 content://provider/tree/dvd") as MattMuxCliCommand.Metadata
+                  assertEquals(3, parsed.title)
+                  assertEquals("content://provider/tree/dvd", parsed.source)
+              }
+
+              @Test fun titleZeroSelectsLongest() {
+                  val parsed = MattMuxCliSyntax.parse("mattmux-cli metadata --title=0 content://provider/tree/dvd") as MattMuxCliCommand.Metadata
+                  assertNull(parsed.title)
+              }
+
+              @Test fun parsesRemuxOptions() {
+                  val parsed = MattMuxCliSyntax.parse("mattmux-cli remux --title=2 --output content://provider/tree/out --no-chapters content://provider/document/disc.iso") as MattMuxCliCommand.Remux
+                  assertEquals(2, parsed.title)
+                  assertEquals("content://provider/tree/out", parsed.outputRoot)
+                  assertTrue(parsed.noChapters)
+                  assertEquals("content://provider/document/disc.iso", parsed.source)
+              }
+
+              @Test fun remuxDefaultsToChapters() {
+                  val parsed = MattMuxCliSyntax.parse("mattmux-cli remux content://provider/tree/dvd") as MattMuxCliCommand.Remux
+                  assertFalse(parsed.noChapters)
+                  assertNull(parsed.title)
+                  assertNull(parsed.outputRoot)
+              }
+
+              @Test fun parsesVersion() {
+                  assertTrue(MattMuxCliSyntax.parse("mattmux-cli --version") === MattMuxCliCommand.Version)
+              }
+          }
+          KOTLIN
+
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('android/native/mattmux_jni.c')
+          text = path.read_text()
+
+          old = '''    jsize count = (*env)->GetArrayLength(env, starts_array);\n    if (count <= 0 || (*env)->GetArrayLength(env, ends_array) != count) return AVERROR(EINVAL);\n    jlong *starts = (*env)->GetLongArrayElements(env, starts_array, NULL);'''
+          new = '''    jsize count = (*env)->GetArrayLength(env, starts_array);\n    if ((*env)->GetArrayLength(env, ends_array) != count) return AVERROR(EINVAL);\n    if (count == 0) return 0;\n    jlong *starts = (*env)->GetLongArrayElements(env, starts_array, NULL);'''
+          if old not in text:
+              raise SystemExit('add_chapters guard changed; refusing unsafe patch')
+          text = text.replace(old, new, 1)
+
+          old = '''    int32_t best_title = 1;\n    uint64_t best_duration = 0;\n    for (int32_t title = 1; title <= title_count; ++title) {\n        uint64_t *chapter_times = NULL;\n        uint64_t duration = 0;\n        uint32_t chapters = dvdnav_describe_title_chapters(nav, title - 1, &chapter_times, &duration);\n        __android_log_print(ANDROID_LOG_INFO, "MattMuxDVDNav",\n                            "title %d/%d chapters=%u duration_ticks=%llu",\n                            title, title_count, chapters, (unsigned long long)duration);\n        free(chapter_times);\n        if (duration > best_duration) {\n            best_duration = duration;\n            best_title = title;\n        }\n    }\n\n    jlong values[3] = {(jlong)title_count, (jlong)best_title, (jlong)best_duration};\n    jlongArray result = (*env)->NewLongArray(env, 3);\n    if (result) (*env)->SetLongArrayRegion(env, result, 0, 3, values);\n    dvdnav_close(nav);\n    return result;'''
+          new = '''    const jsize result_count = (jsize)title_count + 3;\n    jlong *values = calloc((size_t)result_count, sizeof(*values));\n    if (!values) {\n        dvdnav_close(nav);\n        return NULL;\n    }\n\n    int32_t best_title = 1;\n    uint64_t best_duration = 0;\n    for (int32_t title = 1; title <= title_count; ++title) {\n        uint64_t *chapter_times = NULL;\n        uint64_t duration = 0;\n        uint32_t chapters = dvdnav_describe_title_chapters(nav, title - 1, &chapter_times, &duration);\n        __android_log_print(ANDROID_LOG_INFO, "MattMuxDVDNav",\n                            "title %d/%d chapters=%u duration_ticks=%llu",\n                            title, title_count, chapters, (unsigned long long)duration);\n        free(chapter_times);\n        values[title + 2] = (jlong)duration;\n        if (duration > best_duration) {\n            best_duration = duration;\n            best_title = title;\n        }\n    }\n\n    values[0] = (jlong)title_count;\n    values[1] = (jlong)best_title;\n    values[2] = (jlong)best_duration;\n    jlongArray result = (*env)->NewLongArray(env, result_count);\n    if (result) (*env)->SetLongArrayRegion(env, result, 0, result_count, values);\n    free(values);\n    dvdnav_close(nav);\n    return result;'''
+          if old not in text:
+              raise SystemExit('DVDNav scanner block changed; refusing unsafe patch')
+          text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+
+          git diff --check
+          git diff -- android/
+
+          changed="$(git diff --name-only)"
+          test -n "$changed"
+          if echo "$changed" | grep -Ev '^android/' >/dev/null; then
+            echo "Refusing to commit non-Android changes:" >&2
+            echo "$changed" >&2
+            exit 1
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add android/
+          git diff --cached --quiet && { echo 'No Android changes to commit' >&2; exit 1; }
+          git commit -m 'Add Android CLI scan metadata and remux'
+          git push origin HEAD:main
