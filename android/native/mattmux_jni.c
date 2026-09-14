@@ -19,6 +19,9 @@
 #include <libavutil/mem.h>
 #ifdef MATTMUX_DVDNAV
 #include <dvdnav/dvdnav.h>
+#include <dvdread/dvd_reader.h>
+#include <dvdread/ifo_read.h>
+#include <dvdread/ifo_types.h>
 #include <android/log.h>
 #endif
 #include <libavutil/timestamp.h>
@@ -838,4 +841,177 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeScanDvdNav(JNIEnv *
     dvdnav_close(nav);
     return result;
 }
+
+static int mattmux_ascii_language(uint16_t code, char out[3])
+{
+    unsigned char a = (unsigned char)(code >> 8), b = (unsigned char)(code & 0xff);
+    if (!((a >= 'A' && a <= 'Z') || (a >= 'a' && a <= 'z')) ||
+        !((b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z'))) return 0;
+    out[0] = (char)((a >= 'A' && a <= 'Z') ? a + ('a' - 'A') : a);
+    out[1] = (char)((b >= 'A' && b <= 'Z') ? b + ('a' - 'A') : b);
+    out[2] = '\0';
+    return 1;
+}
+
+static int mattmux_audio_stream_id(int format, int position)
+{
+    switch (format) {
+        case 0: return 0x80 + position;
+        case 2:
+        case 3: return 0x1c0 + position;
+        case 4: return 0xa0 + position;
+        case 6: return 0x88 + position;
+        default: return -1;
+    }
+}
+
+static int mattmux_yuv_to_rgb(uint32_t raw)
+{
+    int y = (raw >> 16) & 0xff, cr = (raw >> 8) & 0xff, cb = raw & 0xff;
+    int c = y - 16, d = cb - 128, e = cr - 128;
+    int r = (298 * c + 409 * e + 128) >> 8;
+    int g = (298 * c - 100 * d - 208 * e + 128) >> 8;
+    int b = (298 * c + 516 * d + 128) >> 8;
+    if (r < 0) r = 0; else if (r > 255) r = 255;
+    if (g < 0) g = 0; else if (g > 255) g = 255;
+    if (b < 0) b = 0; else if (b > 255) b = 255;
+    return (r << 16) | (g << 8) | b;
+}
+
+static int mattmux_add_row(JNIEnv *env, jobjectArray array, int index, const char *text)
+{
+    jstring value = (*env)->NewStringUTF(env, text);
+    if (!value) return 0;
+    (*env)->SetObjectArrayElement(env, array, index, value);
+    (*env)->DeleteLocalRef(env, value);
+    return !(*env)->ExceptionCheck(env);
+}
+
+JNIEXPORT jobjectArray JNICALL
+Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativePlanDvdNav(JNIEnv *env, jobject thiz, jstring path_string, jint global_title)
+{
+    (void)thiz;
+    if (!path_string || global_title <= 0) return NULL;
+    const char *path = (*env)->GetStringUTFChars(env, path_string, NULL);
+    if (!path) return NULL;
+
+    dvdnav_t *nav = NULL;
+    dvd_reader_t *dvd = NULL;
+    ifo_handle_t *vmg = NULL, *vts = NULL;
+    uint64_t *chapter_times = NULL, duration = 0;
+    jobjectArray result = NULL;
+    char **rows = NULL;
+    int row_count = 0, row_capacity = 0;
+
+#define ADD_ROW(...) do { \
+    if (row_count >= row_capacity) { \
+        int next_capacity = row_capacity ? row_capacity * 2 : 64; \
+        char **next = realloc(rows, (size_t)next_capacity * sizeof(*rows)); \
+        if (!next) goto cleanup_plan; \
+        rows = next; row_capacity = next_capacity; \
+    } \
+    char temp[256]; snprintf(temp, sizeof(temp), __VA_ARGS__); \
+    rows[row_count] = strdup(temp); \
+    if (!rows[row_count]) goto cleanup_plan; \
+    row_count++; \
+} while (0)
+
+    if (dvdnav_open(&nav, path) != DVDNAV_STATUS_OK || !nav) goto cleanup_plan;
+    uint32_t nav_chapters = dvdnav_describe_title_chapters(nav, global_title - 1, &chapter_times, &duration);
+    if (!nav_chapters || !duration) goto cleanup_plan;
+
+    dvd = DVDOpen(path);
+    if (!dvd) goto cleanup_plan;
+    vmg = ifoOpen(dvd, 0);
+    if (!vmg || !vmg->tt_srpt || global_title > vmg->tt_srpt->nr_of_srpts) goto cleanup_plan;
+    title_info_t info = vmg->tt_srpt->title[global_title - 1];
+    if (info.title_set_nr <= 0 || info.vts_ttn <= 0) goto cleanup_plan;
+    vts = ifoOpen(dvd, info.title_set_nr);
+    if (!vts || !vts->vts_ptt_srpt || !vts->vts_pgcit || !vts->vtsi_mat) goto cleanup_plan;
+    if (info.vts_ttn > vts->vts_ptt_srpt->nr_of_srpts) goto cleanup_plan;
+
+    ttu_t *ttu = &vts->vts_ptt_srpt->title[info.vts_ttn - 1];
+    if (!ttu || ttu->nr_of_ptts <= 0 || !ttu->ptt) goto cleanup_plan;
+    int pgcn = ttu->ptt[0].pgcn;
+    int first_pgn = ttu->ptt[0].pgn;
+    int last_pgn = ttu->ptt[ttu->nr_of_ptts - 1].pgn;
+    if (pgcn <= 0 || pgcn > vts->vts_pgcit->nr_of_pgci_srp) goto cleanup_plan;
+    for (int i = 0, prev = 0; i < ttu->nr_of_ptts; ++i) {
+        if (ttu->ptt[i].pgcn != pgcn || ttu->ptt[i].pgn <= prev) goto cleanup_plan;
+        prev = ttu->ptt[i].pgn;
+    }
+    pgc_t *pgc = vts->vts_pgcit->pgci_srp[pgcn - 1].pgc;
+    if (!pgc || !pgc->program_map || !pgc->cell_playback || pgc->nr_of_programs <= 0 || pgc->nr_of_cells <= 0) goto cleanup_plan;
+    if (first_pgn <= 0 || first_pgn > pgc->nr_of_programs || last_pgn > pgc->nr_of_programs) goto cleanup_plan;
+    if (pgc->pg_playback_mode != 0 || pgc->still_time != 0) goto cleanup_plan;
+
+    int end_program_exclusive = pgc->nr_of_programs + 1;
+    for (int i = 0; i < vts->vts_ptt_srpt->nr_of_srpts; ++i) {
+        if (i == info.vts_ttn - 1) continue;
+        ttu_t *other = &vts->vts_ptt_srpt->title[i];
+        if (!other || other->nr_of_ptts <= 0 || !other->ptt) continue;
+        if (other->ptt[0].pgcn == pgcn && other->ptt[0].pgn > last_pgn && other->ptt[0].pgn < end_program_exclusive)
+            end_program_exclusive = other->ptt[0].pgn;
+    }
+
+    ADD_ROW("T\t%d\t%d\t%llu", global_title, info.title_set_nr, (unsigned long long)(duration / 90ULL));
+
+    for (int program = first_pgn; program < end_program_exclusive; ++program) {
+        int first_cell = pgc->program_map[program - 1];
+        int last_cell = program < pgc->nr_of_programs ? pgc->program_map[program] - 1 : pgc->nr_of_cells;
+        if (first_cell <= 0 || last_cell < first_cell || last_cell > pgc->nr_of_cells) goto cleanup_plan;
+        for (int cell = first_cell; cell <= last_cell; ++cell) {
+            cell_playback_t *cp = &pgc->cell_playback[cell - 1];
+            if (cp->interleaved || cp->still_time != 0) goto cleanup_plan;
+            if (cp->block_type == BLOCK_TYPE_ANGLE_BLOCK) {
+                if (cp->block_mode == BLOCK_MODE_IN_BLOCK || cp->block_mode == BLOCK_MODE_LAST_CELL) continue;
+                if (cp->block_mode != BLOCK_MODE_FIRST_CELL) goto cleanup_plan;
+            } else if (cp->block_mode != BLOCK_MODE_NOT_IN_BLOCK) goto cleanup_plan;
+            if (cp->last_sector < cp->first_sector) goto cleanup_plan;
+            ADD_ROW("C\t%u\t%u", cp->first_sector, cp->last_sector + 1U);
+        }
+    }
+
+    uint64_t previous = 0;
+    for (uint32_t i = 0; i < nav_chapters; ++i) {
+        uint64_t end = chapter_times ? chapter_times[i] : 0;
+        if (i + 1 == nav_chapters && duration > end) end = duration;
+        if (end <= previous) goto cleanup_plan;
+        ADD_ROW("H\t%llu\t%llu", (unsigned long long)(previous / 90ULL), (unsigned long long)(end / 90ULL));
+        previous = end;
+    }
+
+    for (int i = 0; i < vts->vtsi_mat->nr_of_vts_audio_streams && i < 8; ++i) {
+        uint16_t control = pgc->audio_control[i];
+        if (!(control & 0x8000)) continue;
+        int stream_id = mattmux_audio_stream_id(vts->vtsi_mat->vts_audio_attr[i].audio_format, (control >> 8) & 0x7f);
+        char lang[3];
+        if (stream_id >= 0 && mattmux_ascii_language(vts->vtsi_mat->vts_audio_attr[i].lang_code, lang)) ADD_ROW("L\t%d\t%s", stream_id, lang);
+    }
+    for (int i = 0; i < vts->vtsi_mat->nr_of_vts_subp_streams && i < 32; ++i) {
+        uint32_t control = pgc->subp_control[i];
+        char lang[3];
+        if (!(control & 0x80000000U) || !mattmux_ascii_language(vts->vtsi_mat->vts_subp_attr[i].lang_code, lang)) continue;
+        int offsets[4] = { (control >> 24) & 0x1f, (control >> 16) & 0x1f, (control >> 8) & 0x1f, control & 0x1f };
+        for (int j = 0; j < 4; ++j) ADD_ROW("L\t%d\t%s", 0x20 + offsets[j], lang);
+    }
+    for (int i = 0; i < 16; ++i) ADD_ROW("P\t%d\t%d", i, mattmux_yuv_to_rgb(pgc->palette[i]));
+
+    result = (*env)->NewObjectArray(env, row_count, (*env)->FindClass(env, "java/lang/String"), NULL);
+    if (!result) goto cleanup_plan;
+    for (int i = 0; i < row_count; ++i) if (!mattmux_add_row(env, result, i, rows[i])) { result = NULL; break; }
+
+cleanup_plan:
+    for (int i = 0; i < row_count; ++i) free(rows[i]);
+    free(rows);
+    free(chapter_times);
+    if (vts) ifoClose(vts);
+    if (vmg) ifoClose(vmg);
+    if (dvd) DVDClose(dvd);
+    if (nav) dvdnav_close(nav);
+    (*env)->ReleaseStringUTFChars(env, path_string, path);
+    return result;
+#undef ADD_ROW
+}
+
 #endif

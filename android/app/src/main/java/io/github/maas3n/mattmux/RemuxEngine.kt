@@ -296,6 +296,14 @@ class AndroidNativeRemuxEngine : RemuxEngine {
         return result.longestTitle
     }
 
+    private fun planWithDvdNav(stageRoot: java.io.File, globalTitle: Int): DvdTitlePlan {
+        val records = nativePlanDvdNav(stageRoot.absolutePath, globalTitle)
+            ?: error("libdvdnav/libdvdread could not build the selected DVD title plan")
+        val plan = DvdNavPlanCodec.parse(records)
+        require(plan.globalTitle == globalTitle) { "libdvdnav/libdvdread returned the wrong DVD title" }
+        return plan
+    }
+
     private fun scanSourceWithDvdNav(context: Context, uri: Uri): DvdScanResult {
         val resolver = context.contentResolver
         if (isDirectorySource(context, uri)) {
@@ -337,13 +345,12 @@ class AndroidNativeRemuxEngine : RemuxEngine {
         require(requestedTitle == null || requestedTitle > 0) { "DVD title must be greater than zero" }
         val resolver = context.contentResolver
         if (isDirectorySource(context, uri)) {
-            val titleNumber = if (requestedTitle != null) {
-                requestedTitle
-            } else {
-                val stageRoot = DvdNavScanner.stageTreeIfos(context, uri)
-                try { scanWithDvdNav(stageRoot) } finally { stageRoot.deleteRecursively() }
-            }
-            val title = DvdDocumentSource(resolver, uri).openTitle(titleNumber)
+            val stageRoot = DvdNavScanner.stageTreeIfos(context, uri)
+            val plan = try {
+                val title = requestedTitle ?: scanWithDvdNav(stageRoot)
+                planWithDvdNav(stageRoot, title)
+            } finally { stageRoot.deleteRecursively() }
+            val title = DvdDocumentSource(resolver, uri).openPlan(plan)
             return NativeTitle(title.plan, title.vobs, cleanup = { title.close() })
         }
 
@@ -352,16 +359,11 @@ class AndroidNativeRemuxEngine : RemuxEngine {
         check(handle != 0L) { "Could not open UDF filesystem" }
         try {
             val vmg = nativeReadIsoIfo(handle, 0) ?: error("ISO has no VIDEO_TS/VIDEO_TS.IFO")
-            val titleNumber = if (requestedTitle != null) {
-                requestedTitle
-            } else {
-                val stageRoot = DvdNavScanner.stageIsoIfos(context, vmg) { titleSet -> nativeReadIsoIfo(handle, titleSet) }
-                try { scanWithDvdNav(stageRoot) } finally { stageRoot.deleteRecursively() }
-            }
-            val plan = DvdIfoParser.selectTitle(vmg, titleNumber) { titleSet ->
-                check(!cancelled.get()) { "Remux cancelled" }
-                nativeReadIsoIfo(handle, titleSet)
-            }
+            val stageRoot = DvdNavScanner.stageIsoIfos(context, vmg) { titleSet -> nativeReadIsoIfo(handle, titleSet) }
+            val plan = try {
+                val title = requestedTitle ?: scanWithDvdNav(stageRoot)
+                planWithDvdNav(stageRoot, title)
+            } finally { stageRoot.deleteRecursively() }
             return NativeTitle(plan, emptyList(), handle, cleanup = { nativeCloseIso(handle) })
         } catch (t: Throwable) {
             nativeCloseIso(handle)
@@ -379,6 +381,7 @@ class AndroidNativeRemuxEngine : RemuxEngine {
 
     private external fun nativeVersionSummary(): String
     private external fun nativeScanDvdNav(path: String): LongArray?
+    private external fun nativePlanDvdNav(path: String, globalTitle: Int): Array<String>?
     private external fun nativeOpenIso(fd: Int): Long
     private external fun nativeReadIsoIfo(handle: Long, titleSet: Int): ByteArray?
     private external fun nativeCloseIso(handle: Long)

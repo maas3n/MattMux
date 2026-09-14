@@ -7,7 +7,7 @@ import android.provider.DocumentsContract.Document
 import java.io.File
 import java.util.Locale
 
-/** Stages only DVD IFO metadata so libdvdnav/libdvdread can select the longest title. */
+/** Stages only DVD IFO metadata for libdvdnav/libdvdread discovery and title planning. */
 internal object DvdNavScanner {
     private data class Entry(val name: String, val documentId: String, val mimeType: String)
 

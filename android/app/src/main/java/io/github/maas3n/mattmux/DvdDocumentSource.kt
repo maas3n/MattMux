@@ -20,9 +20,7 @@ internal class DvdDocumentSource(
 
     private data class Entry(val name: String, val documentId: String, val mimeType: String)
 
-    fun openLongestTitle(): OpenTitle = openTitle(null)
-
-    fun openTitle(globalTitle: Int?): OpenTitle {
+    fun openPlan(plan: DvdTitlePlan): OpenTitle {
         val rootId = documentTreeRootId(treeUri)
         val rootChildren = listChildren(rootId)
         val videoTsId = if (rootChildren.any { it.name.equals("VIDEO_TS.IFO", true) }) {
@@ -33,23 +31,11 @@ internal class DvdDocumentSource(
             }?.documentId ?: error("VIDEO_TS folder was not found in the selected tree")
         }
         val entries = listChildren(videoTsId)
-        val byName = entries.associateBy { it.name.uppercase(Locale.ROOT) }
-        val vmg = readEntry(byName["VIDEO_TS.IFO"] ?: error("VIDEO_TS.IFO is missing"))
-        val vtsLoader: (Int) -> ByteArray? = { titleSet ->
-            byName[String.format(Locale.ROOT, "VTS_%02d_0.IFO", titleSet)]?.let(::readEntry)
-        }
-        val plan = if (globalTitle == null) {
-            DvdIfoParser.selectLongestTitle(vmg, vtsLoader)
-        } else {
-            DvdIfoParser.selectTitle(vmg, globalTitle, vtsLoader)
-        }
-
         val prefix = String.format(Locale.ROOT, "VTS_%02d_", plan.titleSet)
         val vobEntries = entries
             .filter { it.name.uppercase(Locale.ROOT).matches(Regex("${prefix}[1-9]\\.VOB")) }
             .sortedBy { it.name.uppercase(Locale.ROOT) }
         require(vobEntries.isNotEmpty()) { "No title VOB files were found for VTS ${plan.titleSet}" }
-
         vobEntries.forEachIndexed { index, entry ->
             require(entry.name.equals("${prefix}${index + 1}.VOB", true)) { "Title has a missing VOB part" }
         }
@@ -71,42 +57,18 @@ internal class DvdDocumentSource(
         return resolver.query(
             childrenUri,
             arrayOf(Document.COLUMN_DISPLAY_NAME, Document.COLUMN_DOCUMENT_ID, Document.COLUMN_MIME_TYPE),
-            null,
-            null,
-            null,
+            null, null, null,
         )?.use { cursor ->
             val nameCol = cursor.getColumnIndexOrThrow(Document.COLUMN_DISPLAY_NAME)
             val idCol = cursor.getColumnIndexOrThrow(Document.COLUMN_DOCUMENT_ID)
             val mimeCol = cursor.getColumnIndexOrThrow(Document.COLUMN_MIME_TYPE)
             buildList {
-                while (cursor.moveToNext()) {
-                    add(Entry(cursor.getString(nameCol), cursor.getString(idCol), cursor.getString(mimeCol)))
-                }
+                while (cursor.moveToNext()) add(Entry(cursor.getString(nameCol), cursor.getString(idCol), cursor.getString(mimeCol)))
             }
         } ?: error("Selected document provider did not return directory contents")
     }
 
-    private fun readEntry(entry: Entry): ByteArray {
-        val uri = documentUri(entry.documentId)
-        resolver.openInputStream(uri)?.use { input ->
-            val max = 64 * 1024 * 1024
-            val out = java.io.ByteArrayOutputStream()
-            val buffer = ByteArray(32 * 1024)
-            var total = 0
-            while (true) {
-                val n = input.read(buffer)
-                if (n < 0) break
-                total += n
-                require(total <= max) { "${entry.name} is implausibly large" }
-                out.write(buffer, 0, n)
-            }
-            return out.toByteArray()
-        }
-        error("Could not read ${entry.name}")
-    }
-
-    private fun documentUri(documentId: String): Uri =
-        DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
+    private fun documentUri(documentId: String): Uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
 }
 
 internal class DvdDocumentOutput(
@@ -123,12 +85,10 @@ internal class DvdDocumentOutput(
         val uri = DocumentsContract.createDocument(resolver, parent, "video/x-matroska", partialName)
             ?: error("The output provider could not create $partialName")
         try {
-            val descriptor = resolver.openFileDescriptor(uri, "rw")
-                ?: error("The output provider could not open $partialName")
+            val descriptor = resolver.openFileDescriptor(uri, "rw") ?: error("The output provider could not open $partialName")
             return Pending(uri, descriptor, finalName)
         } catch (t: Throwable) {
-            runCatching { DocumentsContract.deleteDocument(resolver, uri) }
-            throw t
+            runCatching { DocumentsContract.deleteDocument(resolver, uri) }; throw t
         }
     }
 
@@ -137,11 +97,7 @@ internal class DvdDocumentOutput(
         return DocumentsContract.renameDocument(resolver, pending.uri, pending.finalName)
             ?: error("Remux completed, but the output provider could not rename the temporary file. Completed MKV kept at ${pending.uri}")
     }
-
-    fun preserve(pending: Pending) {
-        runCatching { pending.descriptor.close() }
-    }
-
+    fun preserve(pending: Pending) { runCatching { pending.descriptor.close() } }
     fun abort(pending: Pending) {
         runCatching { pending.descriptor.close() }
         runCatching { DocumentsContract.deleteDocument(resolver, pending.uri) }
