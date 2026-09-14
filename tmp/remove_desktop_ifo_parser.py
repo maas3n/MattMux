@@ -1,0 +1,73 @@
+from pathlib import Path
+import re
+
+# Shared chapter value type only. DVD structure parsing belongs to
+# FFmpeg dvdvideo/libdvdread/libdvdnav, never MattMux source.
+Path('src/dvdchapter_types.go').write_text('''package main\n\nimport "time"\n\n// DVDChapter is chapter metadata returned by the external dvdvideo/libdvdread/libdvdnav path.\ntype DVDChapter struct {\n\tNumber   int\n\tStart    time.Duration\n\tDuration time.Duration\n}\n''')
+
+Path('src/dvdchapters.go').unlink()
+if Path('src/dvdchapters_test.go').exists():
+    Path('src/dvdchapters_test.go').unlink()
+
+p = Path('src/app_windows_4.go')
+s = p.read_text()
+pattern = re.compile(r'''func detectChapters\(ctx context\.Context, ffprobe, src string, title int\) \(\[\]DVDChapter, string, error\) \{.*?\n\}\n\nfunc probeChapters''', re.S)
+replacement = '''func detectChapters(ctx context.Context, ffprobe, src string, title int) ([]DVDChapter, string, error) {\n\tchapters, err := probeChapters(ctx, ffprobe, src, title)\n\tif err != nil {\n\t\treturn nil, "", err\n\t}\n\treturn chapters, "FFmpeg dvdvideo/libdvdread/libdvdnav pre-index", nil\n}\n\nfunc probeChapters'''
+s2, n = pattern.subn(replacement, s, count=1)
+if n != 1:
+    raise SystemExit('Windows detectChapters block not found exactly once')
+p.write_text(s2)
+
+p = Path('src/linux_core.go')
+s = p.read_text()
+pattern = re.compile(r'''func detectChapters\(ctx context\.Context, ffprobe, src string, title int\) \(\[\]DVDChapter, string, error\) \{.*?\n\}\n''', re.S)
+replacement = '''func detectChapters(ctx context.Context, ffprobe, src string, title int) ([]DVDChapter, string, error) {\n\tchs, err := probeChapters(ctx, ffprobe, src, title)\n\tif err != nil {\n\t\treturn nil, "", err\n\t}\n\treturn chs, "FFmpeg dvdvideo/libdvdread/libdvdnav pre-index", nil\n}\n'''
+s2, n = pattern.subn(replacement, s, count=1)
+if n != 1:
+    raise SystemExit('Linux detectChapters block not found exactly once')
+p.write_text(s2)
+
+p = Path('README.md')
+s = p.read_text()
+s = s.replace('- Native Go IFO chapter parser on desktop with FFprobe fallback\n',
+              '- DVD chapter metadata on Windows/Linux comes only from FFprobe `dvdvideo` backed by `libdvdread` + `libdvdnav`; MattMux does not parse DVD IFO bytes\n')
+p.write_text(s)
+
+Path('src/no_mattmux_ifo_parser_test.go').write_text(r'''package main
+
+import (
+    "os"
+    "path/filepath"
+    "strings"
+    "testing"
+)
+
+func TestNoMattMuxWrittenIFOParser(t *testing.T) {
+    banned := []string{
+        "ReadDVDChapters(",
+        "func readIFO(",
+        "func mapGlobalTitle(",
+        "func parseVTSPTTTable(",
+        "func parsePGC(",
+        "func sectorTable(",
+        "ErrNativeDVDChaptersUnsupported",
+        "native DVD IFO parser",
+    }
+    entries, err := filepath.Glob("*.go")
+    if err != nil { t.Fatal(err) }
+    for _, path := range entries {
+        if filepath.Base(path) == "no_mattmux_ifo_parser_test.go" { continue }
+        data, err := os.ReadFile(path)
+        if err != nil { t.Fatal(err) }
+        text := string(data)
+        for _, needle := range banned {
+            if strings.Contains(text, needle) {
+                t.Fatalf("MattMux-written IFO parser pattern %q remains in %s", needle, path)
+            }
+        }
+    }
+    if _, err := os.Stat("dvdchapters.go"); !os.IsNotExist(err) {
+        t.Fatalf("legacy MattMux IFO parser file dvdchapters.go must not exist")
+    }
+}
+''')
