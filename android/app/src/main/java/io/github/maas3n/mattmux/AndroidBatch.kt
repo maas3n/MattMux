@@ -7,7 +7,11 @@ import android.provider.DocumentsContract.Document
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
-internal data class AndroidBatchMovie(val name: String, val sourceUri: Uri)
+internal data class AndroidBatchMovie(
+    val name: String,
+    val sourceUri: Uri,
+    val defaultOutputTree: Uri,
+)
 internal data class AndroidBatchFailure(val movie: String, val message: String)
 internal data class AndroidBatchResult(
     val total: Int,
@@ -33,22 +37,49 @@ internal class AndroidBatchProcessor(
         engine.cancel()
     }
 
+    /**
+     * BATCH scans one collection level only:
+     *  - Movie/VIDEO_TS/VIDEO_TS.IFO -> Movie/Movie.mkv when OUTPUT_ROOT is blank.
+     *  - Movie.iso -> Movie.mkv beside the ISO when OUTPUT_ROOT is blank.
+     *  - Movie/Movie.iso -> Movie/Movie.mkv beside the ISO when OUTPUT_ROOT is blank.
+     */
     fun discover(inputRoot: Uri): List<AndroidBatchMovie> {
         require(DocumentsContract.isTreeUri(inputRoot)) { "MOVIES_ROOT must be an Android document-tree URI" }
         val rootId = documentTreeRootId(inputRoot)
-        val movies = listChildren(inputRoot, rootId)
-            .asSequence()
-            .filter { it.mimeType == Document.MIME_TYPE_DIR }
-            .filter { movie -> containsVideoTs(inputRoot, movie.documentId) }
-            .map { movie ->
-                AndroidBatchMovie(
-                    movie.name,
-                    DocumentsContract.buildDocumentUriUsingTree(inputRoot, movie.documentId),
-                )
+        val items = mutableListOf<AndroidBatchMovie>()
+
+        listChildren(inputRoot, rootId).forEach { entry ->
+            when {
+                entry.mimeType == Document.MIME_TYPE_DIR -> {
+                    val folderUri = DocumentsContract.buildDocumentUriUsingTree(inputRoot, entry.documentId)
+                    if (containsVideoTs(inputRoot, entry.documentId)) {
+                        items += AndroidBatchMovie(entry.name, folderUri, folderUri)
+                    } else {
+                        listChildren(inputRoot, entry.documentId)
+                            .filter(::isIso)
+                            .forEach { iso ->
+                                items += AndroidBatchMovie(
+                                    isoBaseName(iso.name),
+                                    DocumentsContract.buildDocumentUriUsingTree(inputRoot, iso.documentId),
+                                    folderUri,
+                                )
+                            }
+                    }
+                }
+                isIso(entry) -> {
+                    items += AndroidBatchMovie(
+                        isoBaseName(entry.name),
+                        DocumentsContract.buildDocumentUriUsingTree(inputRoot, entry.documentId),
+                        inputRoot,
+                    )
+                }
             }
-            .sortedBy { it.name.lowercase(Locale.ROOT) }
-            .toList()
-        require(movies.isNotEmpty()) { "No immediate movie folders containing VIDEO_TS/VIDEO_TS.IFO were found" }
+        }
+
+        val movies = items.sortedWith(compareBy<AndroidBatchMovie> { it.name.lowercase(Locale.ROOT) }.thenBy { it.sourceUri.toString() })
+        require(movies.isNotEmpty()) {
+            "No immediate movie folders containing VIDEO_TS/VIDEO_TS.IFO or unmounted ISO files were found"
+        }
         return movies
     }
 
@@ -75,12 +106,12 @@ internal class AndroidBatchProcessor(
             }
         }
         try {
-            log("MattMux Android batch start: movies=${movies.size} input=$inputRoot output=${outputRoot ?: "<movie folder>"}")
+            log("MattMux Android batch start: movies=${movies.size} input=$inputRoot output=${outputRoot ?: "<beside source>"}")
             movies.forEachIndexed { index, movie ->
                 if (cancelled.get()) return@forEachIndexed
                 activeIndex = index
                 activeName = movie.name
-                val targetTree = outputRoot ?: movie.sourceUri
+                val targetTree = outputRoot ?: movie.defaultOutputTree
                 val desiredName = BatchNaming.outputName(movie.name)
                 val basePercent = ((index.toDouble() / movies.size) * 100.0).toInt()
                 progress(basePercent, "[${index + 1}/${movies.size}] ${movie.name} — scanning DVD titles")
@@ -128,6 +159,12 @@ internal class AndroidBatchProcessor(
         }
     }
 
+    private fun isIso(entry: Entry): Boolean =
+        entry.mimeType != Document.MIME_TYPE_DIR && entry.name.endsWith(".iso", ignoreCase = true)
+
+    private fun isoBaseName(name: String): String =
+        name.substring(0, name.length - 4).trim().ifBlank { "DVD" }
+
     private fun documentNameExists(treeUri: Uri, name: String): Boolean =
         listChildren(treeUri, documentTreeRootId(treeUri)).any { it.name.equals(name, true) }
 
@@ -136,9 +173,7 @@ internal class AndroidBatchProcessor(
         return context.contentResolver.query(
             children,
             arrayOf(Document.COLUMN_DISPLAY_NAME, Document.COLUMN_DOCUMENT_ID, Document.COLUMN_MIME_TYPE),
-            null,
-            null,
-            null,
+            null, null, null,
         )?.use { cursor ->
             val nameCol = cursor.getColumnIndexOrThrow(Document.COLUMN_DISPLAY_NAME)
             val idCol = cursor.getColumnIndexOrThrow(Document.COLUMN_DOCUMENT_ID)

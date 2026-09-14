@@ -21,7 +21,7 @@ class BatchPanel(private val activity: Activity) {
     @Volatile private var destroyed = false
 
     private val inputLabel = TextView(activity).apply { text = "No movie collection folder selected" }
-    private val outputLabel = TextView(activity).apply { text = "Optional — blank writes each MKV into its movie title folder" }
+    private val outputLabel = TextView(activity).apply { text = "Optional — blank writes beside VIDEO_TS or beside each ISO" }
     private val progress = ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100; progress = 0 }
     private val status = TextView(activity).apply { text = "Choose the folder containing Movie Title/VIDEO_TS folders, then click ONECLICK BATCH." }
     private val cancel = Button(activity).apply { text = "Cancel"; isEnabled = false; setOnClickListener { processor.cancel(); status.text = "Cancelling…" } }
@@ -36,7 +36,7 @@ class BatchPanel(private val activity: Activity) {
         button("CHOOSE MOVIE FOLDER") { choose(REQUEST_INPUT) }
         content.addView(inputLabel)
         button("CHOOSE OUTPUT FOLDER (OPTIONAL)") { choose(REQUEST_OUTPUT) }
-        button("CLEAR OUTPUT FOLDER") { output = null; outputLabel.text = "Optional — blank writes each MKV into its movie title folder" }
+        button("CLEAR OUTPUT FOLDER") { output = null; outputLabel.text = "Optional — blank writes beside VIDEO_TS or beside each ISO" }
         content.addView(outputLabel)
         button("ONECLICK BATCH") { start() }
         content.addView(cancel)

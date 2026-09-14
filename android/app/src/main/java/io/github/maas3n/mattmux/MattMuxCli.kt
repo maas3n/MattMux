@@ -175,6 +175,7 @@ internal class MattMuxCliRunner(private val context: Context) {
                 emit("  mattmux-cli --version")
                 emit("Android SOURCE may be a persisted content:// DVD-folder tree URI or ISO document URI.")
                 emit("MOVIES_ROOT and OUTPUT_ROOT are persisted content:// document-tree URIs.")
+                emit("BATCH accepts Movie/VIDEO_TS folders plus unmounted ISO files. With no OUTPUT_ROOT, VIDEO_TS outputs go in the movie folder beside VIDEO_TS and ISO outputs go beside the ISO.")
                 emit("For ISO remux, --output is required. For a DVD-folder SOURCE, output defaults to that folder.")
                 0
             }

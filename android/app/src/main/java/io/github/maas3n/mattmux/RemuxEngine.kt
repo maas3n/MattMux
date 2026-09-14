@@ -3,6 +3,7 @@ package io.github.maas3n.mattmux
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.provider.DocumentsContract.Document
 import android.os.ParcelFileDescriptor
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.ReentrantLock
@@ -250,7 +251,7 @@ class AndroidNativeRemuxEngine : RemuxEngine {
 
     private fun scanSourceWithDvdNav(context: Context, uri: Uri): DvdScanResult {
         val resolver = context.contentResolver
-        if (DocumentsContract.isTreeUri(uri)) {
+        if (isDirectorySource(context, uri)) {
             val stageRoot = DvdNavScanner.stageTreeIfos(context, uri)
             return try {
                 parseDvdNavScan(nativeScanDvdNav(stageRoot.absolutePath)
@@ -277,10 +278,18 @@ class AndroidNativeRemuxEngine : RemuxEngine {
         }
     }
 
+    private fun isDirectorySource(context: Context, uri: Uri): Boolean {
+        if (!DocumentsContract.isTreeUri(uri)) return false
+        val documentUri = runCatching {
+            DocumentsContract.buildDocumentUriUsingTree(uri, documentTreeRootId(uri))
+        }.getOrElse { uri }
+        return context.contentResolver.getType(documentUri) == Document.MIME_TYPE_DIR
+    }
+
     private fun openTitle(context: Context, uri: Uri, requestedTitle: Int? = null): NativeTitle {
         require(requestedTitle == null || requestedTitle > 0) { "DVD title must be greater than zero" }
         val resolver = context.contentResolver
-        if (DocumentsContract.isTreeUri(uri)) {
+        if (isDirectorySource(context, uri)) {
             val titleNumber = if (requestedTitle != null) {
                 requestedTitle
             } else {
