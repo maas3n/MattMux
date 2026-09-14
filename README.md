@@ -16,8 +16,7 @@ The original `v1.4.8` tag and source archive remain at `2074d74ee8f69ed080db2374
 | --- | --- | --- |
 | Windows x64 | `MattMux-1.4.8-Windows-All-in-One.exe` | Setup EXE or Portable ZIP; Setup/Portable include `mattmux-cli.exe` |
 | Linux amd64 | `MattMux-1.4.8-Linux-amd64Standalone` | Self-contained `.deb` or tarball; packaged CLI included |
-| Android phone / tablet | `MattMux-1.4.8-Android.apk` | Signed universal APK; behavior unchanged from 1.4.7 |
-| ChromeOS | `MattMux-1.4.8-ChromeOS.apk` | Byte-identical alias of the Android APK |
+| Android / ChromeOS | `MattMux-1.4.8-Android.apk` | One signed universal APK for Android phones/tablets and Chromebooks with Android app support |
 
 The release also includes source archives, third-party source/provenance files, per-platform SHA-256 manifests, and one combined `SHA256SUMS.txt`.
 
@@ -144,7 +143,7 @@ Changing the DVD source or selected title clears the previous track selection so
 - Android 8.0 / API 26 or newer
 - arm64-v8a and x86_64 are targeted
 - The v1.4.0 GitHub APK was debug-signed; v1.4.1 and later GitHub APKs use persistent distribution signing, so upgrading from v1.4.0 may require uninstalling v1.4.0 first
-- The `Android.apk` and `ChromeOS.apk` release assets are the same signed universal APK under device-friendly names
+- The single `Android.apk` release asset is the signed universal APK for Android phones/tablets and Chromebooks with Android app support
 - Advanced Merger requires temporary free space for staged inputs plus the in-progress MKV
 - See [`android/README.md`](android/README.md) for current native-remux details and limitations
 
@@ -177,7 +176,7 @@ mattmux-cli --version
 
 ### Android / ChromeOS
 
-For Android phones/tablets, download `MattMux-1.4.8-Android.apk`. For Chromebooks, download `MattMux-1.4.8-ChromeOS.apk` from the [MattMux 1.4.8 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.8). They are the same persistently signed universal APK; 1.4.8 does not change Android/ChromeOS product behavior from 1.4.7.
+For Android phones/tablets and Chromebooks with Android app support, download `MattMux-1.4.8-Android.apk` from the [MattMux 1.4.8 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.8). It is the single persistently signed universal APK for both Android and ChromeOS; 1.4.8 does not change Android/ChromeOS product behavior from 1.4.7.
 
 ### Output location behavior
 

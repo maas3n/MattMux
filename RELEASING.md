@@ -20,13 +20,12 @@ A unified release contains the platform assets that are ready from the same tagg
 - `MattMux-<version>-Linux-amd64.tar.gz`
 - `MattMux-<version>-Linux-amd64Standalone`
 - `MattMux-<version>-Source.tar.gz`
-- `MattMux-<version>-Android.apk`
-- `MattMux-<version>-ChromeOS.apk`
+- `MattMux-<version>-Android.apk` — universal APK for Android phones/tablets and Chromebooks with Android app support
 - third-party source/provenance/license files
 - per-platform checksum manifests
 - one combined `SHA256SUMS.txt`
 
-The Android and ChromeOS APK filenames are byte-identical aliases of the same persistently signed universal APK. The separate names make the intended device class obvious without maintaining separate Android builds.
+`MattMux-<version>-Android.apk` is the single persistently signed universal APK for both Android phones/tablets and Chromebooks with Android app support.
 
 GitHub also exposes source ZIP/tar archives automatically for the release tag.
 
@@ -71,7 +70,7 @@ The **Unified release** workflow then:
 2. derives one product version plus the Android `versionCode`;
 3. builds the Windows payload;
 4. builds the Linux payload;
-5. builds one signed universal Android APK and publishes byte-identical Android/ChromeOS filename aliases;
+5. builds one signed universal `MattMux-<version>-Android.apk` for both Android and ChromeOS;
 6. verifies each platform payload;
 7. downloads all platform artifacts into one release job;
 8. creates a combined `SHA256SUMS.txt`; and

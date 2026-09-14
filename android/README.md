@@ -1,8 +1,8 @@
 # MattMux for Android / ChromeOS
 
-This directory contains the experimental Android/ChromeOS frontend for MattMux. Android/ChromeOS follows the unified MattMux release line; the current published unified release is **1.4.2** (`v1.4.2`). MattMux 1.4.1 was the first GitHub APK release using the persistent MattMux distribution-signing key; 1.4.2 publishes that same signed universal APK under explicit Android and ChromeOS filenames.
+This directory contains the experimental Android/ChromeOS frontend for MattMux. Android/ChromeOS follows the unified MattMux release line. GitHub releases publish one persistently signed universal APK named `MattMux-<version>-Android.apk`.
 
-For GitHub releases, use `MattMux-<version>-Android.apk` on Android phones/tablets and `MattMux-<version>-ChromeOS.apk` on Chromebooks. The two files are byte-for-byte identical aliases of one universal APK.
+Use `MattMux-<version>-Android.apk` on Android phones/tablets and on Chromebooks with Android app support. The same APK supports both Android and ChromeOS; no separate ChromeOS APK is required.
 
 ## Experimental status
 
