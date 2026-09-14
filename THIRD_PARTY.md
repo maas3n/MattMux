@@ -48,14 +48,17 @@ The self-contained Linux packages keep the resulting MediaInfo binary private to
 
 ## Android / ChromeOS Alpha 4
 
-The experimental Android/ChromeOS app uses native FFmpeg libraries and libudfread rather than launching desktop `ffprobe` or MediaInfo subprocesses.
+The Android/ChromeOS app uses native FFmpeg libraries, libudfread, and the DVD title-discovery pair proven by the 1.4.2 DVDNav Beta 1.
 
-- FFmpeg version: `9.0.1`
+- FFmpeg version: `9.0.1` (LGPL-only FFmpeg configuration)
 - FFmpeg source SHA-256: `cf38e0e28c7e5605942c4a77755349b0145804a397af37eb1fb4c77cb237f635`
 - libudfread version: `1.1.2`
+- libdvdnav version: `6.1.1` (GPL; statically linked into the JNI bridge)
+- libdvdread version: `6.1.3` (GPL; statically linked into the JNI bridge)
 - Current target ABIs: `arm64-v8a`, `x86_64`
+- CSS decryption/circumvention: not included
 
-The Android build is configured around an LGPL FFmpeg runtime and separately linked LGPL libudfread. Source/provenance and license assets accompany the Alpha 4 release.
+Android releases must include source/provenance and license material for all four native dependencies.
 
 ## Licensing
 

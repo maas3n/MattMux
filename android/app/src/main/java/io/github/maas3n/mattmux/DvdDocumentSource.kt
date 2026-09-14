@@ -20,7 +20,9 @@ internal class DvdDocumentSource(
 
     private data class Entry(val name: String, val documentId: String, val mimeType: String)
 
-    fun openLongestTitle(): OpenTitle {
+    fun openLongestTitle(): OpenTitle = openTitle(null)
+
+    fun openTitle(globalTitle: Int?): OpenTitle {
         val rootId = DocumentsContract.getTreeDocumentId(treeUri)
         val rootChildren = listChildren(rootId)
         val videoTsId = if (rootChildren.any { it.name.equals("VIDEO_TS.IFO", true) }) {
@@ -33,8 +35,13 @@ internal class DvdDocumentSource(
         val entries = listChildren(videoTsId)
         val byName = entries.associateBy { it.name.uppercase(Locale.ROOT) }
         val vmg = readEntry(byName["VIDEO_TS.IFO"] ?: error("VIDEO_TS.IFO is missing"))
-        val plan = DvdIfoParser.selectLongestTitle(vmg) { titleSet ->
+        val vtsLoader: (Int) -> ByteArray? = { titleSet ->
             byName[String.format(Locale.ROOT, "VTS_%02d_0.IFO", titleSet)]?.let(::readEntry)
+        }
+        val plan = if (globalTitle == null) {
+            DvdIfoParser.selectLongestTitle(vmg, vtsLoader)
+        } else {
+            DvdIfoParser.selectTitle(vmg, globalTitle, vtsLoader)
         }
 
         val prefix = String.format(Locale.ROOT, "VTS_%02d_", plan.titleSet)

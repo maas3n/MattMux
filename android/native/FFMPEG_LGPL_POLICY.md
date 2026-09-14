@@ -1,75 +1,19 @@
-# MattMux Android FFmpeg LGPL policy
+# MattMux Android native licensing policy
 
-MattMux for Android/ChromeOS uses FFmpeg's `libavformat`, `libavcodec`, and `libavutil` libraries in an **LGPL-only, dynamically linked** configuration.
+MattMux Android/ChromeOS keeps **FFmpeg 9.0.1 itself in an LGPL-only dynamically linked configuration**, while DVD title discovery uses **libdvdnav 6.1.1 + libdvdread 6.1.3**, matching the proven DVDNav Beta 1 scanner design.
 
-This file is an engineering policy, not legal advice. Before a commercial Play release, verify the exact shipped FFmpeg version, configure flags, linked libraries, notices, and source/build materials against that version's license files.
+This is an engineering compliance note, not legal advice. libdvdnav and libdvdread are GPL components; the Android package must ship their notices and corresponding source, and redistribution must be reviewed for the GPL obligations created by linking those components into the JNI native library.
 
-## Pinned production baseline
+## Pinned native baseline
 
-- FFmpeg: `9.0.1`
-- upstream source: `https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz`
-- source SHA-256: `cf38e0e28c7e5605942c4a77755349b0145804a397af37eb1fb4c77cb237f635`
-- Android NDK: `30.0.16248370` (r30)
+- FFmpeg: 9.0.1, LGPL configuration, GPL/nonfree disabled
+- libudfread: 1.1.2, LGPL-2.1-or-later, separate shared library
+- libdvdnav: 6.1.1, GPL, statically linked into `libmattmux_jni.so`
+- libdvdread: 6.1.3, GPL, statically linked into `libmattmux_jni.so`
+- Android NDK: 30.0.16248370
 - ABIs: `arm64-v8a`, `x86_64`
-- linkage: FFmpeg shared libraries loaded by the MattMux JNI layer
+- CSS decryption/circumvention: not included
 
-Changing any of these requires re-reviewing the generated build configuration and release notices.
+FFmpeg's `dvdvideo` demuxer remains disabled in the Android FFmpeg build. libdvdnav/libdvdread are used only to inspect staged IFO metadata and choose the longest DVD title. MattMux then converts that selected global title into its existing cell/chapter plan and performs the normal stream-copy remux through libav.
 
-## Mandatory build constraints
-
-A distributable MattMux Android native build must satisfy all of these:
-
-1. FFmpeg is configured **without** `--enable-gpl`.
-2. FFmpeg is configured **without** `--enable-nonfree`.
-3. No GPL-only external library is linked into the shipped FFmpeg libraries.
-4. MattMux does not bundle `libdvdnav`, `libdvdread`, or `libdvdcss`.
-5. FFmpeg's `dvdvideo` demuxer is disabled; DVD navigation stays in MattMux-owned code.
-6. The build is stream-copy focused; do not add GPL encoders merely for convenience.
-7. The exact FFmpeg source revision/archive hash and configure command are recorded in release provenance.
-8. Required FFmpeg/LGPL copyright and license notices ship with the app.
-9. The applicable FFmpeg source and build/relinking material required by the LGPL is made available with each commercial release.
-10. CI must reject versioned/forbidden native dependencies before the APK/AAB is publishable.
-
-## Forbidden examples
-
-Do not enable or link these in the Android commercial build:
-
-- `--enable-gpl`
-- `--enable-nonfree`
-- `libx264`
-- `libx265`
-- `libxvid`
-- `libdvdnav`
-- `libdvdread`
-- `libdvdcss`
-
-This list is intentionally conservative and is not exhaustive. Any new native dependency must have its license reviewed before it enters the production build.
-
-## Intended native surface
-
-Use only the FFmpeg/libav pieces MattMux needs for remuxing DVD program streams into Matroska without transcoding, plus MattMux-owned DVD structure code and a thin read-only fd adapter to LGPL libudfread.
-
-The native build exposes a small JNI surface to Kotlin. The first implemented call reports the loaded FFmpeg/libav versions; the next implementation stage will add:
-
-- opening Android content URIs through custom I/O
-- probing MPEG program streams
-- enumerating streams
-- stream-copy remuxing to Matroska
-- writing chapters/metadata
-- reporting progress
-- cancellation
-
-DVD title/cell selection stays outside FFmpeg in MattMux-owned code.
-
-## Release gate
-
-Billing must remain disabled until CI proves the production native build uses the approved configuration and real Chromebook tests confirm correct remux output.
-
-## Alpha 4 UDF dependency
-
-Approved filesystem-only dependency: VideoLAN libudfread 1.1.2, official peeled
-commit `a35513813819efadca82c4b90edbe1407b1b9e05`. Source headers and COPYING
-specify LGPL-2.1-or-later. Build a separate `libudfread.so`, retain its license
-in APK assets, and publish the exact source archive alongside each APK.
-No static link into JNI, root, mounts, FUSE, CSS decryption, or GPL DVD library.
-The same final ELF alignment/dependency checks apply to this library.
+Every Android release must publish the exact FFmpeg, libudfread, libdvdnav and libdvdread source archives used by CI, retain their license notices, preserve 16 KB ELF alignment, and reject `libdvdcss` and unapproved codec dependencies.

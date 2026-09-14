@@ -66,6 +66,15 @@ internal object DvdIfoParser {
         )
     }
 
+    fun selectTitle(vmg: ByteArray, globalTitle: Int, vtsLoader: (Int) -> ByteArray?): DvdTitlePlan {
+        requireMagic(vmg, "DVDVIDEO-VMG")
+        val location = parseLocations(vmg).firstOrNull { it.global == globalTitle }
+            ?: throw IllegalArgumentException("DVD title $globalTitle is outside the VMG title table")
+        val vts = vtsLoader(location.vts)
+            ?: error("VTS_%02d_0.IFO is missing".format(location.vts))
+        return buildPlan(location, vts)
+    }
+
     private fun parseLocations(vmg: ByteArray): List<Location> {
         val (base, end) = sectorTable(vmg, 0xC4)
         val count = u16(vmg, base)

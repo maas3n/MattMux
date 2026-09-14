@@ -84,10 +84,10 @@ FFmpeg source: ${FFMPEG_URL}
 FFmpeg source SHA-256: ${FFMPEG_SHA256}
 Android NDK revision: ${NDK_REVISION}
 Android minimum native API: ${ANDROID_API}
-License mode: LGPL-only dynamic libraries
-GPL enabled: no
-nonfree enabled: no
-Bundled GPL DVD libraries: none
+FFmpeg license mode: LGPL-only dynamic libraries
+GPL enabled in FFmpeg: no
+nonfree enabled in FFmpeg: no
+DVD title scanner: libdvdnav 6.1.1 + libdvdread 6.1.3 (GPL; statically linked into JNI)
 UDF reader: libudfread 1.1.2, LGPL-2.1-or-later, separate shared library
 UDF source: https://code.videolan.org/videolan/libudfread
 UDF commit: ${UDFREAD_COMMIT}
@@ -275,4 +275,6 @@ build_abi() {
 build_abi arm64-v8a aarch64 aarch64-linux-android
 build_abi x86_64 x86_64 x86_64-linux-android
 
-echo "Bundled LGPL FFmpeg runtime built successfully."
+bash "${SCRIPT_DIR}/build-dvdnav-android.sh"
+
+echo "Bundled FFmpeg + libdvdnav/libdvdread runtime built successfully."

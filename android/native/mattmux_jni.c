@@ -17,6 +17,10 @@
 #include <libavutil/mathematics.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/mem.h>
+#ifdef MATTMUX_DVDNAV
+#include <dvdnav/dvdnav.h>
+#include <android/log.h>
+#endif
 #include <libavutil/timestamp.h>
 
 #define IO_BUFFER_SIZE (64 * 1024)
@@ -773,3 +777,53 @@ cleanup:
 }
 
 #include "advanced_merger_jni.c"
+
+
+#ifdef MATTMUX_DVDNAV
+JNIEXPORT jlongArray JNICALL
+Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeScanDvdNav(JNIEnv *env, jobject thiz, jstring path_string)
+{
+    (void)thiz;
+    if (!path_string) return NULL;
+    const char *path = (*env)->GetStringUTFChars(env, path_string, NULL);
+    if (!path) return NULL;
+
+    dvdnav_t *nav = NULL;
+    if (dvdnav_open(&nav, path) != DVDNAV_STATUS_OK || !nav) {
+        __android_log_print(ANDROID_LOG_ERROR, "MattMuxDVDNav", "dvdnav_open failed for %s", path);
+        (*env)->ReleaseStringUTFChars(env, path_string, path);
+        if (nav) dvdnav_close(nav);
+        return NULL;
+    }
+    (*env)->ReleaseStringUTFChars(env, path_string, path);
+
+    int32_t title_count = 0;
+    if (dvdnav_get_number_of_titles(nav, &title_count) != DVDNAV_STATUS_OK || title_count <= 0) {
+        __android_log_print(ANDROID_LOG_ERROR, "MattMuxDVDNav", "dvdnav_get_number_of_titles failed");
+        dvdnav_close(nav);
+        return NULL;
+    }
+
+    int32_t best_title = 1;
+    uint64_t best_duration = 0;
+    for (int32_t title = 1; title <= title_count; ++title) {
+        uint64_t *chapter_times = NULL;
+        uint64_t duration = 0;
+        uint32_t chapters = dvdnav_describe_title_chapters(nav, title - 1, &chapter_times, &duration);
+        __android_log_print(ANDROID_LOG_INFO, "MattMuxDVDNav",
+                            "title %d/%d chapters=%u duration_ticks=%llu",
+                            title, title_count, chapters, (unsigned long long)duration);
+        free(chapter_times);
+        if (duration > best_duration) {
+            best_duration = duration;
+            best_title = title;
+        }
+    }
+
+    jlong values[3] = {(jlong)title_count, (jlong)best_title, (jlong)best_duration};
+    jlongArray result = (*env)->NewLongArray(env, 3);
+    if (result) (*env)->SetLongArrayRegion(env, result, 0, 3, values);
+    dvdnav_close(nav);
+    return result;
+}
+#endif
