@@ -12,7 +12,7 @@ permissions:
 env:
   FFMPEG_VERSION: '9.0.1'
   ANDROID_NDK_VERSION: '30.0.16248370'
-  SOURCE_COMMIT: 'f5e4c519daaaedd27ecbf148186659fd6fc04508'
+  SOURCE_COMMIT: '585f5608be63df337e72755611ebe37628cf067f'
   VERSION: '1.4.9'
   VERSION_CODE: '10409999'
 
@@ -126,7 +126,12 @@ jobs:
           grep -Fq 'setIndicator("BATCH")' android/app/src/main/java/io/github/maas3n/mattmux/MainActivity.kt
           grep -Fq 'setIndicator("CLI")' android/app/src/main/java/io/github/maas3n/mattmux/MainActivity.kt
           grep -Fq 'mattmux-cli --batch' android/app/src/main/java/io/github/maas3n/mattmux/MattMuxCli.kt
+          grep -Fq 'mattmux-cli scan SOURCE' android/app/src/main/java/io/github/maas3n/mattmux/MattMuxCli.kt
+          grep -Fq 'mattmux-cli metadata [--title N] SOURCE' android/app/src/main/java/io/github/maas3n/mattmux/MattMuxCli.kt
+          grep -Fq 'mattmux-cli remux [--title N]' android/app/src/main/java/io/github/maas3n/mattmux/MattMuxCli.kt
           grep -Fq 'native libav stream-copy' android/app/src/main/java/io/github/maas3n/mattmux/BatchPanel.kt
+          test ! -e android/app/src/main/java/io/github/maas3n/mattmux/DvdIfoParser.kt
+          ! grep -R -n 'DvdIfoParser' android/app/src/main/java android/native --exclude-dir=build
           "${ANDROID_HOME}/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "$APK"
           "${ANDROID_HOME}/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/mattmux-apksigner.txt
           ! grep -Fq 'CN=Android Debug' /tmp/mattmux-apksigner.txt
@@ -175,11 +180,11 @@ jobs:
             "$stage/SHA256SUMS.txt"
 
           jq -r '.body // ""' /tmp/release-before.json > /tmp/release-body.md
-          printf '\n\n### Android / ChromeOS BATCH + CLI update\n\n' >> /tmp/release-body.md
-          printf '%s\n' 'The v1.4.9 Android APK has been rebuilt from validated Android source commit `f5e4c519daaaedd27ecbf148186659fd6fc04508`.' >> /tmp/release-body.md
-          printf '%s\n' 'It keeps direct native/JNI libdvdnav 6.1.1 + libdvdread 6.1.3 longest-title discovery, native FFmpeg 9.0.1 + libudfread 1.1.2 ISO access, native libav stream-copy remuxing, Advanced Merger, chapter/stream selection, arm64-v8a + x86_64, Android 8/API 26+, and no CSS decryption/circumvention.' >> /tmp/release-body.md
-          printf '%s\n' 'It now adds an Android **BATCH** tab with **ONECLICK BATCH** for immediate `Movie Title/VIDEO_TS/VIDEO_TS.IFO` folders and an in-app **CLI** tab supporting `mattmux-cli --batch [--log FILE] MOVIES_ROOT [OUTPUT_ROOT]` with persisted Android Storage Access Framework `content://` tree URIs.' >> /tmp/release-body.md
-          printf '%s\n' 'No separate FFmpeg CLI executable is bundled for batch remuxing because the Android path already performs lossless stream-copy directly through native libav.' >> /tmp/release-body.md
+          printf '\n\n### Android / ChromeOS validated libdvdnav update\n\n' >> /tmp/release-body.md
+          printf '%s\n' 'The v1.4.9 Android APK has been rebuilt from validated Android source commit `585f5608be63df337e72755611ebe37628cf067f`.' >> /tmp/release-body.md
+          printf '%s\n' 'Android DVD title discovery and DVD planning use libdvdnav 6.1.1 + libdvdread 6.1.3 directly; the old MattMux DvdIfoParser path is removed. It keeps native FFmpeg 9.0.1 + libudfread 1.1.2 ISO access, native libav stream-copy remuxing, Advanced Merger with DVD ISO inputs, chapter/stream selection, arm64-v8a + x86_64, Android 8/API 26+, and no CSS decryption/circumvention.' >> /tmp/release-body.md
+          printf '%s\n' 'Android BATCH supports DVD VIDEO_TS movie folders and unmounted ISO files. The in-app CLI supports scan, metadata, single-disc remux, and --batch using Android Storage Access Framework content URIs.' >> /tmp/release-body.md
+          printf '%s\n' 'No separate FFmpeg CLI executable is bundled because the Android path performs lossless stream-copy directly through native libav.' >> /tmp/release-body.md
           printf '%s\n' 'Windows and Linux v1.4.9 binaries and their platform checksum assets were not rebuilt or modified. The original v1.4.9 tag remains unchanged.' >> /tmp/release-body.md
           gh release edit v1.4.9 --repo "$GITHUB_REPOSITORY" --notes-file /tmp/release-body.md
 
