@@ -1,6 +1,8 @@
 package io.github.maas3n.mattmux
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -16,7 +18,38 @@ class MattMuxCliSyntaxTest {
     @Test fun parsesLogEqualsForm() {
         val parsed = MattMuxCliSyntax.parse("mattmux-cli --batch --log=batch.log content://provider/tree/movies") as MattMuxCliCommand.Batch
         assertEquals("batch.log", parsed.logFile)
-        assertEquals(null, parsed.outputRoot)
+        assertNull(parsed.outputRoot)
+    }
+
+    @Test fun parsesScan() {
+        val parsed = MattMuxCliSyntax.parse("mattmux-cli scan content://provider/document/disc.iso") as MattMuxCliCommand.Scan
+        assertEquals("content://provider/document/disc.iso", parsed.source)
+    }
+
+    @Test fun parsesMetadataTitle() {
+        val parsed = MattMuxCliSyntax.parse("mattmux-cli metadata --title 3 content://provider/tree/dvd") as MattMuxCliCommand.Metadata
+        assertEquals(3, parsed.title)
+        assertEquals("content://provider/tree/dvd", parsed.source)
+    }
+
+    @Test fun titleZeroSelectsLongest() {
+        val parsed = MattMuxCliSyntax.parse("mattmux-cli metadata --title=0 content://provider/tree/dvd") as MattMuxCliCommand.Metadata
+        assertNull(parsed.title)
+    }
+
+    @Test fun parsesRemuxOptions() {
+        val parsed = MattMuxCliSyntax.parse("mattmux-cli remux --title=2 --output content://provider/tree/out --no-chapters content://provider/document/disc.iso") as MattMuxCliCommand.Remux
+        assertEquals(2, parsed.title)
+        assertEquals("content://provider/tree/out", parsed.outputRoot)
+        assertTrue(parsed.noChapters)
+        assertEquals("content://provider/document/disc.iso", parsed.source)
+    }
+
+    @Test fun remuxDefaultsToChapters() {
+        val parsed = MattMuxCliSyntax.parse("mattmux-cli remux content://provider/tree/dvd") as MattMuxCliCommand.Remux
+        assertFalse(parsed.noChapters)
+        assertNull(parsed.title)
+        assertNull(parsed.outputRoot)
     }
 
     @Test fun parsesVersion() {

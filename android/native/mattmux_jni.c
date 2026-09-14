@@ -302,7 +302,8 @@ static void free_source(SourceContext *ctx)
 static int add_chapters(JNIEnv *env, AVFormatContext *out, jlongArray starts_array, jlongArray ends_array)
 {
     jsize count = (*env)->GetArrayLength(env, starts_array);
-    if (count <= 0 || (*env)->GetArrayLength(env, ends_array) != count) return AVERROR(EINVAL);
+    if ((*env)->GetArrayLength(env, ends_array) != count) return AVERROR(EINVAL);
+    if (count == 0) return 0;
     jlong *starts = (*env)->GetLongArrayElements(env, starts_array, NULL);
     jlong *ends = (*env)->GetLongArrayElements(env, ends_array, NULL);
     if (!starts || !ends) {
@@ -804,6 +805,13 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeScanDvdNav(JNIEnv *
         return NULL;
     }
 
+    const jsize result_count = (jsize)title_count + 3;
+    jlong *values = calloc((size_t)result_count, sizeof(*values));
+    if (!values) {
+        dvdnav_close(nav);
+        return NULL;
+    }
+
     int32_t best_title = 1;
     uint64_t best_duration = 0;
     for (int32_t title = 1; title <= title_count; ++title) {
@@ -814,15 +822,19 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeScanDvdNav(JNIEnv *
                             "title %d/%d chapters=%u duration_ticks=%llu",
                             title, title_count, chapters, (unsigned long long)duration);
         free(chapter_times);
+        values[title + 2] = (jlong)duration;
         if (duration > best_duration) {
             best_duration = duration;
             best_title = title;
         }
     }
 
-    jlong values[3] = {(jlong)title_count, (jlong)best_title, (jlong)best_duration};
-    jlongArray result = (*env)->NewLongArray(env, 3);
-    if (result) (*env)->SetLongArrayRegion(env, result, 0, 3, values);
+    values[0] = (jlong)title_count;
+    values[1] = (jlong)best_title;
+    values[2] = (jlong)best_duration;
+    jlongArray result = (*env)->NewLongArray(env, result_count);
+    if (result) (*env)->SetLongArrayRegion(env, result, 0, result_count, values);
+    free(values);
     dvdnav_close(nav);
     return result;
 }

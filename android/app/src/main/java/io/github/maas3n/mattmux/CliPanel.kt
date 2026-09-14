@@ -12,17 +12,25 @@ import android.widget.ScrollView
 import android.widget.TextView
 
 class CliPanel(private val activity: Activity) {
-    companion object { private const val REQUEST_INPUT = 8300; private const val REQUEST_OUTPUT = 8301 }
+    companion object {
+        private const val REQUEST_SOURCE_ISO = 8300
+        private const val REQUEST_SOURCE_FOLDER = 8301
+        private const val REQUEST_OUTPUT = 8302
+    }
+
+    private enum class Preset { HELP, SCAN, METADATA, REMUX, BATCH }
+
     private val runner = MattMuxCliRunner(activity)
     private val controls = mutableListOf<View>()
-    private var input: Uri? = null
+    private var source: Uri? = null
     private var output: Uri? = null
+    private var preset = Preset.HELP
     @Volatile private var busy = false
     @Volatile private var destroyed = false
 
     private val command = EditText(activity).apply { setText("mattmux-cli --help"); minLines = 2 }
     private val progress = ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
-    private val console = TextView(activity).apply { text = "Android mattmux-cli ready. Folder pickers insert Storage Access Framework content:// URIs into the command." }
+    private val console = TextView(activity).apply { text = "Android mattmux-cli ready. Pick a DVD folder or ISO, choose a command preset, then edit the command if needed." }
     private val cancel = Button(activity).apply { text = "Cancel"; isEnabled = false; setOnClickListener { runner.cancel(); append("Cancelling…") } }
     val view: View
 
@@ -30,11 +38,21 @@ class CliPanel(private val activity: Activity) {
         val padding = (24 * activity.resources.displayMetrics.density).toInt()
         val content = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(padding, padding, padding, padding) }
         content.addView(TextView(activity).apply { text = "mattmux-cli"; textSize = 20f })
-        content.addView(TextView(activity).apply { text = "Same BATCH command model as desktop. Android storage is URI-based, so use the buttons below or paste persisted content:// tree URIs." })
+        content.addView(TextView(activity).apply {
+            text = "Native Android CLI surface: scan, metadata, remux and --batch. Android storage uses persisted content:// URIs instead of shell filesystem paths."
+        })
         fun button(label: String, action: () -> Unit) = Button(activity).apply { text = label; setOnClickListener { action() }; controls += this; content.addView(this) }
-        button("CHOOSE MOVIES_ROOT") { choose(REQUEST_INPUT) }
-        button("CHOOSE OUTPUT_ROOT (OPTIONAL)") { choose(REQUEST_OUTPUT) }
-        button("CLEAR OUTPUT_ROOT") { output = null; refreshCommand() }
+
+        button("CHOOSE ISO SOURCE") { chooseIso() }
+        button("CHOOSE DVD FOLDER SOURCE") { chooseTree(REQUEST_SOURCE_FOLDER) }
+        button("CHOOSE OUTPUT FOLDER") { chooseTree(REQUEST_OUTPUT) }
+        button("CLEAR OUTPUT FOLDER") { output = null; refreshCommand() }
+
+        button("PRESET: SCAN") { preset = Preset.SCAN; refreshCommand() }
+        button("PRESET: METADATA") { preset = Preset.METADATA; refreshCommand() }
+        button("PRESET: REMUX") { preset = Preset.REMUX; refreshCommand() }
+        button("PRESET: BATCH") { preset = Preset.BATCH; refreshCommand() }
+
         content.addView(command); controls += command
         button("RUN mattmux-cli") { runCommand() }
         content.addView(cancel)
@@ -44,18 +62,31 @@ class CliPanel(private val activity: Activity) {
     }
 
     fun onResult(request: Int, result: Int, data: Intent?): Boolean {
-        if (request != REQUEST_INPUT && request != REQUEST_OUTPUT) return false
+        if (request !in setOf(REQUEST_SOURCE_ISO, REQUEST_SOURCE_FOLDER, REQUEST_OUTPUT)) return false
         if (result != Activity.RESULT_OK || data == null || busy) return true
         val uri = data.data ?: return true
         persist(uri, data.flags)
-        if (request == REQUEST_INPUT) input = uri else output = uri
+        if (request == REQUEST_OUTPUT) {
+            output = uri
+        } else {
+            source = uri
+            if (preset == Preset.HELP) preset = Preset.SCAN
+        }
         refreshCommand()
         return true
     }
 
     fun destroy() { destroyed = true; if (busy) runner.cancel() }
 
-    private fun choose(request: Int) {
+    private fun chooseIso() {
+        activity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }, REQUEST_SOURCE_ISO)
+    }
+
+    private fun chooseTree(request: Int) {
         activity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }, request)
@@ -67,10 +98,24 @@ class CliPanel(private val activity: Activity) {
     }
 
     private fun refreshCommand() {
-        val root = input ?: run { command.setText("mattmux-cli --help"); return }
-        val text = buildString {
-            append("mattmux-cli --batch \""); append(root); append('"')
-            output?.let { append(" \""); append(it); append('"') }
+        val src = source
+        val text = when (preset) {
+            Preset.HELP -> "mattmux-cli --help"
+            Preset.SCAN -> src?.let { "mattmux-cli scan \"$it\"" } ?: "mattmux-cli scan SOURCE"
+            Preset.METADATA -> src?.let { "mattmux-cli metadata \"$it\"" } ?: "mattmux-cli metadata SOURCE"
+            Preset.REMUX -> src?.let {
+                buildString {
+                    append("mattmux-cli remux")
+                    output?.let { out -> append(" --output \""); append(out); append('"') }
+                    append(" \""); append(it); append('"')
+                }
+            } ?: "mattmux-cli remux SOURCE"
+            Preset.BATCH -> src?.let {
+                buildString {
+                    append("mattmux-cli --batch \""); append(it); append('"')
+                    output?.let { out -> append(" \""); append(out); append('"') }
+                }
+            } ?: "mattmux-cli --batch MOVIES_ROOT"
         }
         command.setText(text)
     }

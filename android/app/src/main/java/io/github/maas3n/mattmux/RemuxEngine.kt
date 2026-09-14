@@ -28,6 +28,16 @@ data class TrackInfo(
 }
 
 data class TrackProbeResult(val title: Int, val tracks: List<TrackInfo>)
+internal data class DvdTitleScanInfo(val title: Int, val durationMs: Long, val longest: Boolean)
+internal data class DvdScanResult(val titles: List<DvdTitleScanInfo>, val longestTitle: Int)
+internal data class DvdMetadataResult(
+    val title: Int,
+    val durationMs: Long,
+    val chapterStartsMs: LongArray,
+    val chapterEndsMs: LongArray,
+    val tracks: List<TrackInfo>,
+    val planJson: String,
+)
 
 interface RemuxEngine {
     val isAvailable: Boolean
@@ -42,6 +52,7 @@ interface RemuxEngine {
 class AndroidNativeRemuxEngine : RemuxEngine {
     companion object {
         private val remuxLock = ReentrantLock()
+        private const val DVDNAV_TICKS_PER_MS = 90L
         private val loadFailure: Throwable? = runCatching {
             System.loadLibrary("avutil")
             System.loadLibrary("avcodec")
@@ -76,19 +87,43 @@ class AndroidNativeRemuxEngine : RemuxEngine {
     }
 
     override fun probeTracks(context: Context, sourceUri: Uri): TrackProbeResult {
+        val metadata = probeTitleMetadata(context, sourceUri, null)
+        return TrackProbeResult(metadata.title, metadata.tracks)
+    }
+
+    internal fun probeTitleMetadata(context: Context, sourceUri: Uri, requestedTitle: Int?): DvdMetadataResult {
         check(isAvailable) { unavailableReason ?: "Remux engine unavailable" }
         check(remuxLock.tryLock()) { "Another native operation is still stopping. Try again shortly." }
         try {
             check(!cancelled.get()) { "Metadata read cancelled" }
-            openTitle(context, sourceUri).use { title ->
+            openTitle(context, sourceUri, requestedTitle).use { title ->
                 val fds = IntArray(title.vobs.size) { title.vobs[it].fd }
                 val starts = LongArray(title.plan.cells.size) { title.plan.cells[it].startSector }
                 val ends = LongArray(title.plan.cells.size) { title.plan.cells[it].endSectorExclusive }
                 val languageRecords = title.plan.streamLanguages.map { "${it.streamId}\t${it.language}" }.toTypedArray()
                 val records = nativeProbeTracks(fds, starts, ends, title.isoHandle, title.plan.titleSet, languageRecords, title.plan.subtitlePalette)
                     ?: error("Could not probe DVD streams")
-                return TrackProbeResult(title.plan.globalTitle, records.map(::parseTrackRecord))
+                return DvdMetadataResult(
+                    title = title.plan.globalTitle,
+                    durationMs = title.plan.durationMs,
+                    chapterStartsMs = title.plan.chapterStartsMs.copyOf(),
+                    chapterEndsMs = title.plan.chapterEndsMs.copyOf(),
+                    tracks = records.map(::parseTrackRecord),
+                    planJson = title.plan.diagnosticJson(),
+                )
             }
+        } finally {
+            cancelled.set(false)
+            remuxLock.unlock()
+        }
+    }
+
+    internal fun scanTitles(context: Context, sourceUri: Uri): DvdScanResult {
+        check(isAvailable) { unavailableReason ?: "Remux engine unavailable" }
+        check(remuxLock.tryLock()) { "Another native operation is still stopping. Try again shortly." }
+        try {
+            check(!cancelled.get()) { "DVD scan cancelled" }
+            return scanSourceWithDvdNav(context, sourceUri)
         } finally {
             cancelled.set(false)
             remuxLock.unlock()
@@ -107,23 +142,41 @@ class AndroidNativeRemuxEngine : RemuxEngine {
         )
     }
 
-    override fun remux(context: Context, sourceUri: Uri, outputTreeUri: Uri, selectedStreamIndexes: IntArray?): RemuxResult {
+    override fun remux(context: Context, sourceUri: Uri, outputTreeUri: Uri, selectedStreamIndexes: IntArray?): RemuxResult =
+        remuxTitle(context, sourceUri, outputTreeUri, null, selectedStreamIndexes, preserveChapters = true)
+
+    internal fun remuxTitle(
+        context: Context,
+        sourceUri: Uri,
+        outputTreeUri: Uri,
+        requestedTitle: Int?,
+        selectedStreamIndexes: IntArray? = null,
+        preserveChapters: Boolean = true,
+    ): RemuxResult {
         check(isAvailable) { unavailableReason ?: "Remux engine unavailable" }
         require(DocumentsContract.isTreeUri(outputTreeUri)) { "Output must be a document-tree folder" }
+        require(requestedTitle == null || requestedTitle > 0) { "DVD title must be greater than zero" }
         require(selectedStreamIndexes == null || selectedStreamIndexes.isNotEmpty()) { "Select at least one video, audio, or subtitle track before remuxing" }
         check(remuxLock.tryLock()) { "Another remux is still stopping. Try again shortly." }
         try {
             check(!cancelled.get()) { "Remux cancelled" }
-            return remuxLocked(context, sourceUri, outputTreeUri, selectedStreamIndexes)
+            return remuxLocked(context, sourceUri, outputTreeUri, requestedTitle, selectedStreamIndexes, preserveChapters)
         } finally {
             cancelled.set(false)
             remuxLock.unlock()
         }
     }
 
-    private fun remuxLocked(context: Context, sourceUri: Uri, outputTreeUri: Uri, selectedStreamIndexes: IntArray?): RemuxResult {
+    private fun remuxLocked(
+        context: Context,
+        sourceUri: Uri,
+        outputTreeUri: Uri,
+        requestedTitle: Int?,
+        selectedStreamIndexes: IntArray?,
+        preserveChapters: Boolean,
+    ): RemuxResult {
         val resolver = context.contentResolver
-        openTitle(context, sourceUri).use { title ->
+        openTitle(context, sourceUri, requestedTitle).use { title ->
             check(!cancelled.get()) { "Remux cancelled" }
             android.util.Log.i("MattMuxPlan", title.plan.diagnosticJson())
             val output = DvdDocumentOutput(resolver, outputTreeUri)
@@ -133,13 +186,15 @@ class AndroidNativeRemuxEngine : RemuxEngine {
                 val fds = IntArray(title.vobs.size) { title.vobs[it].fd }
                 val starts = LongArray(title.plan.cells.size) { title.plan.cells[it].startSector }
                 val ends = LongArray(title.plan.cells.size) { title.plan.cells[it].endSectorExclusive }
+                val chapterStarts = if (preserveChapters) title.plan.chapterStartsMs else LongArray(0)
+                val chapterEnds = if (preserveChapters) title.plan.chapterEndsMs else LongArray(0)
                 val nativeError = nativeRemux(
                     fds,
                     starts,
                     ends,
                     pending.descriptor.fd,
-                    title.plan.chapterStartsMs,
-                    title.plan.chapterEndsMs,
+                    chapterStarts,
+                    chapterEnds,
                     selectedStreamIndexes,
                     title.isoHandle,
                     title.plan.titleSet,
@@ -169,27 +224,40 @@ class AndroidNativeRemuxEngine : RemuxEngine {
         override fun close() = cleanup()
     }
 
-    private fun scanWithDvdNav(stageRoot: java.io.File): Int {
-        val values = nativeScanDvdNav(stageRoot.absolutePath)
-            ?: error("libdvdnav/libdvdread could not scan the staged DVD metadata")
+    private fun parseDvdNavScan(values: LongArray): DvdScanResult {
         require(values.size >= 3) { "libdvdnav scanner returned invalid data" }
         val count = values[0].toInt()
         val bestTitle = values[1].toInt()
         require(count > 0 && bestTitle in 1..count) { "libdvdnav scanner found no usable titles" }
-        android.util.Log.i(
-            "MattMuxDVDNav",
-            "libdvdnav/libdvdread scanned $count title(s); selected title $bestTitle as longest (duration ticks=${values[2]})",
-        )
-        return bestTitle
+        require(values.size >= count + 3) { "libdvdnav scanner did not return per-title durations" }
+        val titles = (1..count).map { title ->
+            val ticks = values[title + 2].coerceAtLeast(0)
+            DvdTitleScanInfo(title, ticks / DVDNAV_TICKS_PER_MS, title == bestTitle)
+        }
+        return DvdScanResult(titles, bestTitle)
     }
 
-    private fun openTitle(context: Context, uri: Uri): NativeTitle {
+    private fun scanWithDvdNav(stageRoot: java.io.File): Int {
+        val values = nativeScanDvdNav(stageRoot.absolutePath)
+            ?: error("libdvdnav/libdvdread could not scan the staged DVD metadata")
+        val result = parseDvdNavScan(values)
+        android.util.Log.i(
+            "MattMuxDVDNav",
+            "libdvdnav/libdvdread scanned ${result.titles.size} title(s); selected title ${result.longestTitle} as longest",
+        )
+        return result.longestTitle
+    }
+
+    private fun scanSourceWithDvdNav(context: Context, uri: Uri): DvdScanResult {
         val resolver = context.contentResolver
         if (DocumentsContract.isTreeUri(uri)) {
             val stageRoot = DvdNavScanner.stageTreeIfos(context, uri)
-            val bestTitle = try { scanWithDvdNav(stageRoot) } finally { stageRoot.deleteRecursively() }
-            val title = DvdDocumentSource(resolver, uri).openTitle(bestTitle)
-            return NativeTitle(title.plan, title.vobs, cleanup = { title.close() })
+            return try {
+                parseDvdNavScan(nativeScanDvdNav(stageRoot.absolutePath)
+                    ?: error("libdvdnav/libdvdread could not scan the staged DVD metadata"))
+            } finally {
+                stageRoot.deleteRecursively()
+            }
         }
 
         val handle = resolver.openFileDescriptor(uri, "r")?.use { nativeOpenIso(it.fd) }
@@ -198,8 +266,43 @@ class AndroidNativeRemuxEngine : RemuxEngine {
         try {
             val vmg = nativeReadIsoIfo(handle, 0) ?: error("ISO has no VIDEO_TS/VIDEO_TS.IFO")
             val stageRoot = DvdNavScanner.stageIsoIfos(context, vmg) { titleSet -> nativeReadIsoIfo(handle, titleSet) }
-            val bestTitle = try { scanWithDvdNav(stageRoot) } finally { stageRoot.deleteRecursively() }
-            val plan = DvdIfoParser.selectTitle(vmg, bestTitle) { titleSet ->
+            return try {
+                parseDvdNavScan(nativeScanDvdNav(stageRoot.absolutePath)
+                    ?: error("libdvdnav/libdvdread could not scan the staged DVD metadata"))
+            } finally {
+                stageRoot.deleteRecursively()
+            }
+        } finally {
+            nativeCloseIso(handle)
+        }
+    }
+
+    private fun openTitle(context: Context, uri: Uri, requestedTitle: Int? = null): NativeTitle {
+        require(requestedTitle == null || requestedTitle > 0) { "DVD title must be greater than zero" }
+        val resolver = context.contentResolver
+        if (DocumentsContract.isTreeUri(uri)) {
+            val titleNumber = if (requestedTitle != null) {
+                requestedTitle
+            } else {
+                val stageRoot = DvdNavScanner.stageTreeIfos(context, uri)
+                try { scanWithDvdNav(stageRoot) } finally { stageRoot.deleteRecursively() }
+            }
+            val title = DvdDocumentSource(resolver, uri).openTitle(titleNumber)
+            return NativeTitle(title.plan, title.vobs, cleanup = { title.close() })
+        }
+
+        val handle = resolver.openFileDescriptor(uri, "r")?.use { nativeOpenIso(it.fd) }
+            ?: error("Could not open ISO image")
+        check(handle != 0L) { "Could not open UDF filesystem" }
+        try {
+            val vmg = nativeReadIsoIfo(handle, 0) ?: error("ISO has no VIDEO_TS/VIDEO_TS.IFO")
+            val titleNumber = if (requestedTitle != null) {
+                requestedTitle
+            } else {
+                val stageRoot = DvdNavScanner.stageIsoIfos(context, vmg) { titleSet -> nativeReadIsoIfo(handle, titleSet) }
+                try { scanWithDvdNav(stageRoot) } finally { stageRoot.deleteRecursively() }
+            }
+            val plan = DvdIfoParser.selectTitle(vmg, titleNumber) { titleSet ->
                 check(!cancelled.get()) { "Remux cancelled" }
                 nativeReadIsoIfo(handle, titleSet)
             }

@@ -4,21 +4,40 @@ import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
 import java.io.File
+import java.util.Locale
 
 internal sealed class MattMuxCliCommand {
     data class Batch(val inputRoot: String, val outputRoot: String?, val logFile: String?) : MattMuxCliCommand()
+    data class Scan(val source: String) : MattMuxCliCommand()
+    data class Metadata(val source: String, val title: Int?) : MattMuxCliCommand()
+    data class Remux(val source: String, val title: Int?, val outputRoot: String?, val noChapters: Boolean) : MattMuxCliCommand()
     object Version : MattMuxCliCommand()
     object Help : MattMuxCliCommand()
 }
 
 internal object MattMuxCliSyntax {
+    private const val BATCH_USAGE = "Usage: mattmux-cli --batch [--log FILE] MOVIES_ROOT [OUTPUT_ROOT]"
+    private const val METADATA_USAGE = "Usage: mattmux-cli metadata [--title N] SOURCE"
+    private const val REMUX_USAGE = "Usage: mattmux-cli remux [--title N] [--output OUTPUT_ROOT] [--no-chapters] SOURCE"
+
     fun parse(commandLine: String): MattMuxCliCommand {
         val tokens = tokenize(commandLine).toMutableList()
         if (tokens.firstOrNull() == "mattmux-cli") tokens.removeAt(0)
-        if (tokens.isEmpty() || tokens == listOf("--help") || tokens == listOf("-h")) return MattMuxCliCommand.Help
-        if (tokens == listOf("--version")) return MattMuxCliCommand.Version
-        require(tokens.removeFirstOrNull() == "--batch") { "Usage: mattmux-cli --batch [--log FILE] MOVIES_ROOT [OUTPUT_ROOT]" }
+        if (tokens.isEmpty() || tokens == listOf("--help") || tokens == listOf("-h") || tokens == listOf("help")) return MattMuxCliCommand.Help
+        if (tokens == listOf("--version") || tokens == listOf("-version") || tokens == listOf("version")) return MattMuxCliCommand.Version
+        return when (tokens.removeAt(0)) {
+            "--batch" -> parseBatch(tokens)
+            "scan" -> {
+                require(tokens.size == 1) { "Usage: mattmux-cli scan SOURCE" }
+                MattMuxCliCommand.Scan(tokens.single())
+            }
+            "metadata" -> parseMetadata(tokens)
+            "remux" -> parseRemux(tokens)
+            else -> error("Unknown command. Run mattmux-cli --help")
+        }
+    }
 
+    private fun parseBatch(tokens: List<String>): MattMuxCliCommand.Batch {
         var logFile: String? = null
         val positional = mutableListOf<String>()
         var index = 0
@@ -38,8 +57,74 @@ internal object MattMuxCliSyntax {
                 else -> { positional += token; index++ }
             }
         }
-        require(positional.size in 1..2) { "Usage: mattmux-cli --batch [--log FILE] MOVIES_ROOT [OUTPUT_ROOT]" }
+        require(positional.size in 1..2) { BATCH_USAGE }
         return MattMuxCliCommand.Batch(positional[0], positional.getOrNull(1), logFile)
+    }
+
+    private fun parseMetadata(tokens: List<String>): MattMuxCliCommand.Metadata {
+        var title: Int? = null
+        val positional = mutableListOf<String>()
+        var index = 0
+        while (index < tokens.size) {
+            val token = tokens[index]
+            when {
+                token == "--title" -> {
+                    require(index + 1 < tokens.size) { "--title requires a number" }
+                    title = titleValue(tokens[index + 1])
+                    index += 2
+                }
+                token.startsWith("--title=") -> {
+                    title = titleValue(token.substringAfter("="))
+                    index++
+                }
+                token.startsWith("-") -> error("Unknown option: $token")
+                else -> { positional += token; index++ }
+            }
+        }
+        require(positional.size == 1) { METADATA_USAGE }
+        return MattMuxCliCommand.Metadata(positional.single(), title)
+    }
+
+    private fun parseRemux(tokens: List<String>): MattMuxCliCommand.Remux {
+        var title: Int? = null
+        var output: String? = null
+        var noChapters = false
+        val positional = mutableListOf<String>()
+        var index = 0
+        while (index < tokens.size) {
+            val token = tokens[index]
+            when {
+                token == "--title" -> {
+                    require(index + 1 < tokens.size) { "--title requires a number" }
+                    title = titleValue(tokens[index + 1])
+                    index += 2
+                }
+                token.startsWith("--title=") -> {
+                    title = titleValue(token.substringAfter("="))
+                    index++
+                }
+                token == "--output" -> {
+                    require(index + 1 < tokens.size) { "--output requires a document-tree URI" }
+                    output = tokens[index + 1]
+                    index += 2
+                }
+                token.startsWith("--output=") -> {
+                    output = token.substringAfter("=").also { require(it.isNotBlank()) { "--output requires a document-tree URI" } }
+                    index++
+                }
+                token == "--no-chapters" -> { noChapters = true; index++ }
+                token.startsWith("-") -> error("Unknown option: $token")
+                else -> { positional += token; index++ }
+            }
+        }
+        require(positional.size == 1) { REMUX_USAGE }
+        return MattMuxCliCommand.Remux(positional.single(), title, output, noChapters)
+    }
+
+    private fun titleValue(value: String): Int? {
+        val parsed = value.toIntOrNull() ?: throw IllegalArgumentException("--title must be an integer")
+        require(parsed >= 0) { "--title must be >= 0" }
+        return parsed.takeIf { it > 0 }
     }
 
     private fun tokenize(text: String): List<String> {
@@ -66,9 +151,13 @@ internal object MattMuxCliSyntax {
 }
 
 internal class MattMuxCliRunner(private val context: Context) {
+    private val engine = AndroidNativeRemuxEngine()
     @Volatile private var processor: AndroidBatchProcessor? = null
 
-    fun cancel() { processor?.cancel() }
+    fun cancel() {
+        processor?.cancel()
+        engine.cancel()
+    }
 
     fun execute(
         commandLine: String,
@@ -78,13 +167,67 @@ internal class MattMuxCliRunner(private val context: Context) {
         return when (val command = MattMuxCliSyntax.parse(commandLine)) {
             MattMuxCliCommand.Help -> {
                 emit("MattMux CLI ${BuildConfig.VERSION_NAME}")
-                emit("Usage: mattmux-cli --batch [--log FILE] MOVIES_ROOT [OUTPUT_ROOT]")
-                emit("Android uses Storage Access Framework content:// tree URIs for MOVIES_ROOT and OUTPUT_ROOT.")
-                emit("Use the CLI tab folder buttons to insert valid URIs.")
+                emit("Usage:")
+                emit("  mattmux-cli scan SOURCE")
+                emit("  mattmux-cli metadata [--title N] SOURCE")
+                emit("  mattmux-cli remux [--title N] [--output OUTPUT_ROOT] [--no-chapters] SOURCE")
+                emit("  mattmux-cli --batch [--log FILE] MOVIES_ROOT [OUTPUT_ROOT]")
+                emit("  mattmux-cli --version")
+                emit("Android SOURCE may be a persisted content:// DVD-folder tree URI or ISO document URI.")
+                emit("MOVIES_ROOT and OUTPUT_ROOT are persisted content:// document-tree URIs.")
+                emit("For ISO remux, --output is required. For a DVD-folder SOURCE, output defaults to that folder.")
                 0
             }
             MattMuxCliCommand.Version -> { emit("MattMux CLI ${BuildConfig.VERSION_NAME} (Android/ChromeOS native)"); 0 }
             is MattMuxCliCommand.Batch -> runBatch(command, emit, progress)
+            is MattMuxCliCommand.Scan -> runScan(command, emit)
+            is MattMuxCliCommand.Metadata -> runMetadata(command, emit)
+            is MattMuxCliCommand.Remux -> runRemux(command, emit, progress)
+        }
+    }
+
+    private fun runScan(command: MattMuxCliCommand.Scan, emit: (String) -> Unit): Int {
+        requireEngine()
+        val source = parseSourceUri(command.source, "SOURCE")
+        val scan = engine.scanTitles(context, source)
+        emit("TITLE   DURATION       DEFAULT")
+        scan.titles.forEach { title ->
+            emit(String.format(Locale.ROOT, "%-7d %-14s %s", title.title, formatDuration(title.durationMs), if (title.longest) "longest" else ""))
+        }
+        return 0
+    }
+
+    private fun runMetadata(command: MattMuxCliCommand.Metadata, emit: (String) -> Unit): Int {
+        requireEngine()
+        val source = parseSourceUri(command.source, "SOURCE")
+        val result = engine.probeTitleMetadata(context, source, command.title)
+        emit("Title: ${result.title}")
+        emit("Duration: ${formatDuration(result.durationMs)}")
+        emit("Chapters: ${result.chapterStartsMs.size}")
+        result.chapterStartsMs.indices.forEach { index ->
+            emit("  Chapter %02d  %s - %s".format(Locale.ROOT, index + 1, formatDuration(result.chapterStartsMs[index]), formatDuration(result.chapterEndsMs[index])))
+        }
+        emit("Streams: ${result.tracks.size}")
+        result.tracks.forEach { emit("  ${it.displayLabel()}") }
+        emit("Plan: ${result.planJson}")
+        return 0
+    }
+
+    private fun runRemux(command: MattMuxCliCommand.Remux, emit: (String) -> Unit, progress: (Int, String) -> Unit): Int {
+        requireEngine()
+        val source = parseSourceUri(command.source, "SOURCE")
+        val output = command.outputRoot?.let { parseTreeUri(it, "OUTPUT_ROOT") }
+            ?: source.takeIf { DocumentsContract.isTreeUri(it) }
+            ?: throw IllegalArgumentException("ISO remux requires --output OUTPUT_ROOT")
+        engine.setProgressListener { percent -> progress(percent, "Remuxing… $percent%") }
+        return try {
+            val result = engine.remuxTitle(context, source, output, command.title, null, preserveChapters = !command.noChapters)
+            emit("Output: ${result.outputUri}")
+            emit("Title: ${result.title}")
+            emit("Duration: ${formatDuration(result.durationMs)}")
+            0
+        } finally {
+            engine.setProgressListener(null)
         }
     }
 
@@ -116,9 +259,30 @@ internal class MattMuxCliRunner(private val context: Context) {
         }
     }
 
+    private fun requireEngine() {
+        check(engine.isAvailable) { engine.unavailableReason ?: "Native MattMux engine unavailable" }
+    }
+
+    private fun parseSourceUri(value: String, label: String): Uri {
+        val uri = Uri.parse(value)
+        require(uri.scheme == "content" && (DocumentsContract.isTreeUri(uri) || DocumentsContract.isDocumentUri(context, uri))) {
+            "$label must be a persisted content:// document or document-tree URI"
+        }
+        return uri
+    }
+
     private fun parseTreeUri(value: String, label: String): Uri {
         val uri = Uri.parse(value)
         require(uri.scheme == "content" && DocumentsContract.isTreeUri(uri)) { "$label must be a content:// document-tree URI" }
         return uri
+    }
+
+    private fun formatDuration(ms: Long): String {
+        val safe = ms.coerceAtLeast(0)
+        val hours = safe / 3_600_000
+        val minutes = (safe / 60_000) % 60
+        val seconds = (safe / 1_000) % 60
+        val millis = safe % 1_000
+        return String.format(Locale.ROOT, "%d:%02d:%02d.%03d", hours, minutes, seconds, millis)
     }
 }
