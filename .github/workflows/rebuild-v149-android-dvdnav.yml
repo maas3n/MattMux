@@ -1,0 +1,244 @@
+name: Rebuild v1.4.9 Android with DVDNav
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/rebuild-v149-android-dvdnav.yml'
+
+permissions:
+  contents: write
+
+env:
+  ANDROID_NDK_VERSION: '30.0.16248370'
+  SOURCE_COMMIT: '70f3eb6e35941de757081d7defa190a3fffd7f42'
+  TAG: 'v1.4.9'
+  VERSION: '1.4.9'
+  VERSION_CODE: '10409999'
+
+jobs:
+  android-only-hotfix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out validated Android source commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          fetch-depth: 0
+
+      - name: Snapshot Windows and Linux release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/guard"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" \
+            --jq '.assets[] | select(.name|test("Windows|Linux")) | [.id,.name,.size,.digest,.created_at,.updated_at] | @tsv' \
+            | sort > "$RUNNER_TEMP/guard/desktop-before.tsv"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'SHA256SUMS.txt' --dir "$RUNNER_TEMP/guard"
+          grep -E 'Windows|Linux' "$RUNNER_TEMP/guard/SHA256SUMS.txt" > "$RUNNER_TEMP/guard/desktop-checksums-before.txt"
+          test -s "$RUNNER_TEMP/guard/desktop-before.tsv"
+          test -s "$RUNNER_TEMP/guard/desktop-checksums-before.txt"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform and native toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y binutils curl patchelf xz-utils autoconf automake libtool pkg-config ffmpeg genisoimage libavformat-dev libavcodec-dev libavutil-dev
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' "ndk;${ANDROID_NDK_VERSION}"
+
+      - name: Set up Gradle 9.6
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+
+      - name: Require Android distribution signing secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_B64"
+          test -n "$STORE_PASSWORD"
+          test -n "$KEY_ALIAS"
+          test -n "$KEY_PASSWORD"
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/mattmux-upload.jks"
+          test -s "$RUNNER_TEMP/mattmux-upload.jks"
+
+      - name: Build and test Android DVDNav runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" bash android/native/build-ffmpeg-android.sh
+          python3 -m pip install pycdlib==1.14.0
+          bash android/native/tests/test-udf-source.sh "$PWD/android/native/.work/libudfread"
+          bash android/native/tests/test-host-remux.sh "$PWD/android/native/.work/libudfread" "$RUNNER_TEMP/remux-parity"
+
+      - name: Build signed v1.4.9 Android APK
+        env:
+          ORG_GRADLE_PROJECT_MATTMUX_UPLOAD_STORE_FILE: ${{ runner.temp }}/mattmux-upload.jks
+          ORG_GRADLE_PROJECT_MATTMUX_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_MATTMUX_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_MATTMUX_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle -p android \
+            -PMATTMUX_VERSION_NAME="$VERSION" \
+            -PMATTMUX_VERSION_CODE="$VERSION_CODE" \
+            :app:testDebugUnitTest :app:lintRelease :app:assembleRelease
+          APK="$(find android/app/build/outputs/apk/release -name '*.apk' -print -quit)"
+          test -n "$APK"
+          BADGING="$("${ANDROID_HOME}/build-tools/36.0.0/aapt" dump badging "$APK")"
+          grep -Fq "versionCode='$VERSION_CODE'" <<<"$BADGING"
+          grep -Fq "versionName='$VERSION'" <<<"$BADGING"
+          python3 android/native/verify-package.py "$APK"
+          unzip -p "$APK" assets/ffmpeg/ffmpeg-build-info.txt | grep -Fq 'Title discovery: libdvdnav 6.1.1 + libdvdread 6.1.3'
+          "${ANDROID_HOME}/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "$APK"
+          "${ANDROID_HOME}/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/apksigner.txt"
+          ! grep -Fq 'CN=Android Debug' "$RUNNER_TEMP/apksigner.txt"
+
+      - name: Prepare Android-only hotfix assets and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/android-hotfix"
+          old="$RUNNER_TEMP/old-release"
+          mkdir -p "$stage" "$old"
+          APK="$(find android/app/build/outputs/apk/release -name '*.apk' -print -quit)"
+          cp "$APK" "$stage/MattMux-$VERSION-Android.apk"
+          cp "android/native/.work/ffmpeg-9.0.1.tar.xz" "$stage/FFmpeg-9.0.1-source.tar.xz"
+          cp android/native/.work/libudfread-1.1.2-source.tar.gz "$stage/"
+          cp android/native/.work/libdvdread-6.1.3-source.tar.gz "$stage/"
+          cp android/native/.work/libdvdnav-6.1.1-source.tar.gz "$stage/"
+          cp android/app/src/main/assets/ffmpeg/LIBUDFREAD_COPYING.txt "$stage/"
+          cp android/app/src/main/assets/ffmpeg/DVDREAD_COPYING.txt "$stage/"
+          cp android/app/src/main/assets/ffmpeg/DVDNAV_COPYING.txt "$stage/"
+          cp android/app/src/main/assets/ffmpeg/ffmpeg-build-info.txt "$stage/FFmpeg-build-info.txt"
+          cp android/app/src/main/assets/ffmpeg/COPYING.LGPLv2.1 "$stage/COPYING.LGPLv2.1.txt"
+          cp android/app/src/main/assets/ffmpeg/FFMPEG_LICENSE.md "$stage/"
+          cp THIRD_PARTY.md "$stage/MattMux-$VERSION-THIRD-PARTY.md"
+          git archive --format=tar.gz --prefix="MattMux-$VERSION-Android-DVDNav-Source/" \
+            -o "$stage/MattMux-$VERSION-Android-DVDNav-Source.tar.gz" "$SOURCE_COMMIT"
+
+          (
+            cd "$stage"
+            sha256sum \
+              "MattMux-$VERSION-Android.apk" \
+              FFmpeg-9.0.1-source.tar.xz \
+              libudfread-1.1.2-source.tar.gz \
+              libdvdread-6.1.3-source.tar.gz \
+              libdvdnav-6.1.1-source.tar.gz \
+              LIBUDFREAD_COPYING.txt DVDREAD_COPYING.txt DVDNAV_COPYING.txt \
+              FFmpeg-build-info.txt COPYING.LGPLv2.1.txt FFMPEG_LICENSE.md \
+              "MattMux-$VERSION-Android-DVDNav-Source.tar.gz" \
+              > SHA256SUMS-Android.txt
+          )
+
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'SHA256SUMS.txt' --dir "$old"
+          python3 - "$old/SHA256SUMS.txt" "$stage" <<'PY'
+          from pathlib import Path
+          import sys
+          old = Path(sys.argv[1]).read_text().splitlines()
+          stage = Path(sys.argv[2])
+          replacing = {p.name for p in stage.iterdir() if p.is_file()}
+          replacing.add('SHA256SUMS-Android.txt')
+          kept = []
+          for line in old:
+              parts = line.split(maxsplit=1)
+              if len(parts) != 2:
+                  continue
+              name = parts[1].lstrip('*')
+              if name not in replacing and name != 'SHA256SUMS.txt':
+                  kept.append(line)
+          import hashlib
+          for p in sorted(stage.iterdir(), key=lambda x: x.name):
+              if p.name == 'SHA256SUMS.txt' or not p.is_file():
+                  continue
+              digest = hashlib.sha256(p.read_bytes()).hexdigest()
+              kept.append(f'{digest}  {p.name}')
+          Path(stage / 'SHA256SUMS.txt').write_text('\n'.join(sorted(set(kept), key=lambda x: x.split(maxsplit=1)[1])) + '\n')
+          PY
+
+          grep -E 'Windows|Linux' "$stage/SHA256SUMS.txt" > "$RUNNER_TEMP/guard/desktop-checksums-after.txt"
+          diff -u "$RUNNER_TEMP/guard/desktop-checksums-before.txt" "$RUNNER_TEMP/guard/desktop-checksums-after.txt"
+
+      - name: Upload only Android-related v1.4.9 assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/android-hotfix"
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+            "$stage/MattMux-$VERSION-Android.apk" \
+            "$stage/FFmpeg-9.0.1-source.tar.xz" \
+            "$stage/libudfread-1.1.2-source.tar.gz" \
+            "$stage/libdvdread-6.1.3-source.tar.gz" \
+            "$stage/libdvdnav-6.1.1-source.tar.gz" \
+            "$stage/LIBUDFREAD_COPYING.txt" \
+            "$stage/DVDREAD_COPYING.txt" \
+            "$stage/DVDNAV_COPYING.txt" \
+            "$stage/FFmpeg-build-info.txt" \
+            "$stage/COPYING.LGPLv2.1.txt" \
+            "$stage/FFMPEG_LICENSE.md" \
+            "$stage/MattMux-$VERSION-THIRD-PARTY.md" \
+            "$stage/MattMux-$VERSION-Android-DVDNav-Source.tar.gz" \
+            "$stage/SHA256SUMS-Android.txt" \
+            "$stage/SHA256SUMS.txt"
+
+      - name: Update release notes and verify desktop assets unchanged
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/verify"
+          mkdir -p "$work"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > "$work/release.json"
+          python3 - "$work/release.json" "$work/notes.md" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding='utf-8'))
+          body = (data.get('body') or '').rstrip()
+          note = '''### Android / ChromeOS DVDNav update
+
+`MattMux-1.4.9-Android.apk` has been rebuilt from Android hotfix source commit `70f3eb6e35941de757081d7defa190a3fffd7f42`. It keeps FFmpeg 9.0.1, libudfread, Advanced Merger, arm64-v8a + x86_64, and the normal MattMux distribution signing key, while restoring the tested libdvdnav 6.1.1 + libdvdread 6.1.3 longest-title discovery used by the 1.4.2 DVDNav Beta 1. No CSS decryption/circumvention is included.
+
+Windows and Linux v1.4.9 binaries were not rebuilt or modified. The original v1.4.9 tag remains unchanged; the exact Android hotfix source is attached as `MattMux-1.4.9-Android-DVDNav-Source.tar.gz`.'''
+          if note not in body:
+              body += '\n\n' + note
+          open(sys.argv[2], 'w', encoding='utf-8').write(body + '\n')
+          PY
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$work/notes.md"
+
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" \
+            --jq '.assets[] | select(.name|test("Windows|Linux")) | [.id,.name,.size,.digest,.created_at,.updated_at] | @tsv' \
+            | sort > "$RUNNER_TEMP/guard/desktop-after.tsv"
+          diff -u "$RUNNER_TEMP/guard/desktop-before.tsv" "$RUNNER_TEMP/guard/desktop-after.tsv"
+
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'SHA256SUMS.txt' --dir "$work"
+          grep -E 'Windows|Linux' "$work/SHA256SUMS.txt" > "$RUNNER_TEMP/guard/desktop-checksums-release.txt"
+          diff -u "$RUNNER_TEMP/guard/desktop-checksums-before.txt" "$RUNNER_TEMP/guard/desktop-checksums-release.txt"
+
+          expected="$(sha256sum "$RUNNER_TEMP/android-hotfix/MattMux-$VERSION-Android.apk" | awk '{print $1}')"
+          actual="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq ".assets[] | select(.name == \"MattMux-$VERSION-Android.apk\") | .digest" | sed 's/^sha256://')"
+          test "$expected" = "$actual"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.assets[].name' | grep -Fx "libdvdnav-6.1.1-source.tar.gz"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.assets[].name' | grep -Fx "libdvdread-6.1.3-source.tar.gz"
