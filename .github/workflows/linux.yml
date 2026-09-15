@@ -100,7 +100,7 @@ jobs:
             </titleset>
             <titleset>
               <titles>
-                <pgc><vob file="$work/long.mpg" /></pgc>
+                <pgc><vob file="$work/long.mpg" chapters="0,1.5" /></pgc>
               </titles>
             </titleset>
           </dvdauthor>
