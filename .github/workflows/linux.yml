@@ -31,7 +31,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            gcc g++ cmake ninja-build curl xz-utils file ffmpeg dvdauthor \
+            gcc g++ cmake ninja-build curl xz-utils file ffmpeg dvdauthor genisoimage \
             libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
 
       - name: Verify Go module metadata
@@ -186,6 +186,27 @@ jobs:
           audio_count="$("$ffprobe" -v error -select_streams a -show_entries stream=index -of csv=p=0 "$final" | wc -l)"
           test "$video_count" -eq 1
           test "$audio_count" -eq 2
+
+      - name: Real unmounted ISO, CLI streams and Advanced Merger parity
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/mattmux-batch-e2e"
+          pkg="$work/pkg"
+          export PATH="$pkg/usr/lib/mattmux/ffmpeg-bin:$pkg/usr/lib/mattmux/mediainfo-bin:$PATH"
+          cli="$pkg/usr/lib/mattmux/app/mattmux-cli-bin"
+          mkdir -p "$work/isos" "$work/selected"
+          genisoimage -quiet -dvd-video -udf -o "$work/isos/Integration.iso" "$work/movies/Integration Movie"
+          "$cli" scan "$work/isos/Integration.iso"
+          "$cli" metadata "$work/isos/Integration.iso" --title 2
+          "$cli" --batch "$work/isos"
+          test -s "$work/isos/Integration.mkv"
+          "$cli" remux "$work/isos/Integration.iso" --title 2 --streams 0 --no-chapters --output "$work/selected"
+          selected="$(find "$work/selected" -name '*.mkv' -print -quit)"
+          test -s "$selected"
+          test "$(ffprobe -v error -show_entries stream=index -of csv=p=0 "$selected" | wc -l)" -eq 1
+          test -z "$(ffprobe -v error -show_entries chapter=id -of csv=p=0 "$selected")"
+          export MATTMUX_TEST_DVD_ISO="$work/isos/Integration.iso"
+          (cd src && go test -tags cli -run TestRealDVDISOParity -v .)
 
       - name: Validate single-file standalone executable
         run: |

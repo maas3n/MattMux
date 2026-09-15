@@ -33,6 +33,7 @@ type payloadFile struct {
 
 var payload = []payloadFile{
 	{name: "mattmux-bin", mode: 0o755},
+	{name: "mattmux-cli-bin", mode: 0o755},
 	{name: "ffmpeg", mode: 0o755},
 	{name: "ffprobe", mode: 0o755},
 	{name: "mediainfo", mode: 0o755},
@@ -57,13 +58,23 @@ func main() {
 	}
 
 	app := filepath.Join(root, "mattmux-bin")
+	userArgs := os.Args[1:]
+	if len(userArgs) > 0 {
+		switch userArgs[0] {
+		case "--cli":
+			app = filepath.Join(root, "mattmux-cli-bin")
+			userArgs = userArgs[1:]
+		case "scan", "metadata", "remux", "--batch", "--version", "--help", "tools", "doctor":
+			app = filepath.Join(root, "mattmux-cli-bin")
+		}
+	}
 	path := root
 	if old := os.Getenv("PATH"); old != "" {
 		path += string(os.PathListSeparator) + old
 	}
 
 	env := replaceEnv(os.Environ(), "PATH", path)
-	args := append([]string{app}, os.Args[1:]...)
+	args := append([]string{app}, userArgs...)
 	if err := syscall.Exec(app, args, env); err != nil {
 		fatal(fmt.Sprintf("could not start MattMux: %v", err))
 	}
@@ -173,6 +184,7 @@ func replaceEnv(env []string, key, value string) []string {
 
 func selfTest(root string) error {
 	checks := [][]string{
+		{filepath.Join(root, "mattmux-cli-bin"), "--help"},
 		{filepath.Join(root, "ffmpeg"), "-hide_banner", "-version"},
 		{filepath.Join(root, "ffprobe"), "-hide_banner", "-version"},
 		{filepath.Join(root, "mediainfo"), "--Version"},

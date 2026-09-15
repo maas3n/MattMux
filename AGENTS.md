@@ -1,0 +1,22 @@
+# MattMux cross-platform release requirements
+
+- Keep Android, Windows and Linux improvements aligned. For every media feature
+  or bug fix, inspect all three implementations, update applicable counterparts,
+  and test their common behavior. Document unavoidable platform differences.
+- Never implement a MattMux-written IFO parser. DVD titles, navigation, planning
+  and chapters must come from libdvdnav/libdvdread, directly on Android or via
+  FFmpeg/FFprobe dvdvideo on desktop. Do not add parser fallbacks.
+- BATCH accepts DVD folders and unmounted ISOs. Blank output means an MKV beside
+  the ISO or beside VIDEO_TS in the movie folder, never inside VIDEO_TS. An
+  explicit output directory overrides this. Never overwrite existing outputs;
+  record an individual failure and continue the remaining batch items.
+- Maintain scan, metadata, remux, --batch, --title, --no-chapters and --streams
+  in the desktop standalone CLI and the in-app CLI. Keep the Windows/Linux
+  command parser and batch discovery shared. Android uses SAF content URIs.
+- A release is complete only when built from the same tag with Windows Setup,
+  All-in-One and Portable; Linux DEB, tarball and Standalone; Android APK;
+  exact source, dependency source/license notices, and verified checksums.
+- Run the shared desktop behavior tests on Windows and Linux. Run authored DVD
+  folder/ISO integration tests and Android native tests before release. Run
+  scripts/check-release-assets.py before publishing. Do not move published tags
+  or silently rebuild just one package variant.

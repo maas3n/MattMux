@@ -84,7 +84,7 @@ func (g *linuxGUI) buildBatch() fyne.CanvasObject {
 	})
 	oneClick.Importance = widget.HighImportance
 
-	help := widget.NewLabel("One-click batch scans each VIDEO_TS movie through FFmpeg dvdvideo (libdvdread/libdvdnav), automatically selects the longest title, includes all streams, preserves chapters, and remuxes with -analyzeduration 100M -probesize 100M -fflags +genpts. Leave Output Folder blank to place each completed MKV in its movie title folder.")
+	help := widget.NewLabel("One-click batch scans each VIDEO_TS movie or unmounted ISO through FFmpeg dvdvideo (libdvdread/libdvdnav), automatically selects the longest title, includes all streams, preserves chapters, and remuxes with -analyzeduration 100M -probesize 100M -fflags +genpts. Leave Output Folder blank to place each completed MKV beside its ISO or VIDEO_TS folder.")
 	help.Wrapping = fyne.TextWrapWord
 
 	inputRow := container.NewBorder(nil, nil, nil, chooseInput, input)

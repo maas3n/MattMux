@@ -214,7 +214,7 @@ jobs:
             "=========================",
             "",
             "Extract this entire folder and run MattMux-Portable.exe.",
-            "The included mattmux-cli.exe provides the Windows BATCH command-line mode.",
+            "The included mattmux-cli.exe supports scan, metadata, remux, --batch, --streams, --title and --no-chapters.",
             "No installer is required and no FFmpeg, FFprobe, or MediaInfo download is required.",
             "",
             "Keep the folder together. Portable settings, logs, and bundled tools are stored under:",
@@ -550,6 +550,11 @@ jobs:
               | sort -z \
               | xargs -0 sha256sum > SHA256SUMS.txt
           )
+
+      - name: Require every platform and package variant
+        run: |
+          python3 scripts/check-release-assets.py release-assets '${{ needs.metadata.outputs.version }}'
+          (cd release-assets && sha256sum -c SHA256SUMS.txt)
 
       - name: Refuse to overwrite an existing release
         env:

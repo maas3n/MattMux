@@ -69,20 +69,42 @@ func discoverBatchMovies(root string) ([]batchMovie, error) {
 	movies := make([]batchMovie, 0)
 	for _, entry := range entries {
 		if !entry.IsDir() {
+			if strings.EqualFold(filepath.Ext(entry.Name()), ".iso") {
+				info, err := entry.Info()
+				if err == nil && info.Mode().IsRegular() {
+					movies = append(movies, batchMovie{Name: strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name())), Dir: abs, Source: filepath.Join(abs, entry.Name())})
+				}
+			}
 			continue
 		}
 		movieDir := filepath.Join(abs, entry.Name())
 		videoTS := batchFindChildDirFold(movieDir, "VIDEO_TS")
 		if videoTS == "" || !batchFileExistsFold(videoTS, "VIDEO_TS.IFO") {
+			children, err := os.ReadDir(movieDir)
+			if err != nil {
+				return nil, fmt.Errorf("read movie folder %s: %w", movieDir, err)
+			}
+			for _, child := range children {
+				if !child.IsDir() && strings.EqualFold(filepath.Ext(child.Name()), ".iso") {
+					info, err := child.Info()
+					if err == nil && info.Mode().IsRegular() {
+						movies = append(movies, batchMovie{Name: strings.TrimSuffix(child.Name(), filepath.Ext(child.Name())), Dir: movieDir, Source: filepath.Join(movieDir, child.Name())})
+					}
+				}
+			}
 			continue
 		}
 		movies = append(movies, batchMovie{Name: entry.Name(), Dir: movieDir, Source: movieDir})
 	}
 	sort.Slice(movies, func(i, j int) bool {
-		return strings.ToLower(movies[i].Name) < strings.ToLower(movies[j].Name)
+		a, b := strings.ToLower(movies[i].Name), strings.ToLower(movies[j].Name)
+		if a == b {
+			return movies[i].Source < movies[j].Source
+		}
+		return a < b
 	})
 	if len(movies) == 0 {
-		return nil, errors.New("no movie title folders containing VIDEO_TS/VIDEO_TS.IFO were found")
+		return nil, errors.New("no DVD movie folders containing VIDEO_TS/VIDEO_TS.IFO or unmounted ISO files were found")
 	}
 	return movies, nil
 }

@@ -33,7 +33,7 @@ $env:GOARCH = 'amd64'
 
 go test ./...
 go build -trimpath -buildvcs=false -ldflags "-s -w -H=windowsgui" -o ..\MattMux.exe .
-go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=$buildVersion" -o ..\mattmux-cli.exe .\cmd\mattmux-cli-windows
+go build -trimpath -buildvcs=false -tags cli -ldflags "-s -w" -o ..\mattmux-cli.exe .
 Copy-Item .\MattMux.exe.manifest ..\MattMux.exe.manifest -Force
 Get-FileHash ..\MattMux.exe -Algorithm SHA256
 Get-FileHash ..\mattmux-cli.exe -Algorithm SHA256

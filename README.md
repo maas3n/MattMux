@@ -249,3 +249,26 @@ Desktop builds use FFmpeg/FFprobe and MediaInfo CLI. Android/ChromeOS uses nativ
 ## License
 
 MattMux is licensed under the [MIT License](LICENSE). Third-party components remain governed by their own licenses.
+
+### Cross-platform DVD and CLI parity (1.4.11)
+
+Windows and Linux now share `scan`, `metadata`, `remux` and `--batch`, with
+`--title`, `--no-chapters` and `--streams 0,2` for single-disc remuxing. Both GUIs
+include a CLI tab; installed/portable packages also include `mattmux-cli`.
+The Linux Standalone accepts these commands directly, or after `--cli`.
+
+BATCH accepts unmounted `.iso` files in the chosen collection folder or its
+immediate movie folders, as well as `Movie/VIDEO_TS` DVDs. Without an output
+folder, `Alien.iso` produces `Alien.mkv` beside the ISO, and
+`Movie/VIDEO_TS` produces `Movie/Movie.mkv`. An explicit output folder overrides
+both defaults. Existing MKVs are never overwritten; failed items are reported
+while the rest of the batch continues.
+
+Advanced Merger accepts DVD ISOs through `dvdvideo` backed by
+libdvdread/libdvdnav. It selects the longest title and keeps that title through
+stream selection and muxing, including optional DVD chapters. All media remains
+stream-copied. Android retains its direct native library engine and SAF paths.
+No platform uses a MattMux-written IFO parser.
+
+Every release includes Windows Setup, All-in-One and Portable, Linux DEB,
+tarball and Standalone, Android APK, exact source, notices and checksums.

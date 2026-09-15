@@ -55,7 +55,7 @@ func createMergerWindowsControls(hwnd, hInstance uintptr) {
 	}
 	mergerWindow.tab = add("SysTabControl32", "", WS_VISIBLE, 22, 5, 770, 32, 7199)
 	mergerWindow.controls = nil
-	for i, label := range []string{"DVD Remux", "Advanced Merger", "BATCH"} {
+	for i, label := range []string{"DVD Remux", "Advanced Merger", "BATCH", "CLI"} {
 		item := mergerTabItem{Mask: 1, Text: utf16Ptr(label)}
 		procSendMessageW.Call(mergerWindow.tab, 0x133e, uintptr(i), uintptr(unsafe.Pointer(&item)))
 	}
@@ -88,6 +88,7 @@ func createMergerWindowsControls(hwnd, hInstance uintptr) {
 	mergerWindow.cancelBtn = add("BUTTON", "Cancel", BS_PUSHBUTTON, 680, 574, 98, 34, mergerFirstID+7)
 	procEnableWindow.Call(mergerWindow.cancelBtn, 0)
 	createBatchWindowsControls(hwnd, hInstance)
+	createCLIWindowsControls(hwnd, hInstance)
 }
 
 func setWindowsMergerProgress(active bool) {
@@ -129,6 +130,7 @@ func showMergerWindowsTab() {
 	}
 	procShowWindow.Call(mergerWindow.progress, progressShow)
 	showWindowsBatchTab(selected)
+	showWindowsCLITab(selected)
 	redrawWindowsTabPage()
 }
 
@@ -223,7 +225,7 @@ func runWindowsMerger(label string, work func(context.Context) (func(), error)) 
 }
 
 func handleWindowsMergerCommand(id int) bool {
-	if handleWindowsBatchCommand(id) {
+	if handleWindowsCLICommand(id) || handleWindowsBatchCommand(id) {
 		return true
 	}
 	if id < mergerFirstID || id > mergerFirstID+7 {

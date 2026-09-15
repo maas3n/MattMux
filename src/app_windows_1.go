@@ -12,7 +12,7 @@ import (
 	"unsafe"
 )
 
-func main() {
+func windowsGUIMain() {
 	runtime.LockOSThread()
 	initLogging()
 	defer closeLogging()

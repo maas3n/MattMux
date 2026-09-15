@@ -1,4 +1,4 @@
-//go:build linux && cli
+//go:build linux || windows
 
 package main
 
@@ -9,12 +9,11 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 )
 
-func main() {
+func desktopCLI() {
 	if len(os.Args) == 1 {
 		printCLIUsage()
 		return
@@ -25,13 +24,17 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	watchCLICancellation(ctx, stop)
 	if os.Args[1] == "--batch" {
 		cliBatch(ctx, os.Args[2:])
 		return
 	}
 	switch os.Args[1] {
+	case "--help", "-h", "help":
+		printCLIUsage()
 	case "tools", "doctor":
-		fmt.Println(toolSummary(ctx))
+		t := mustTools(ctx, false)
+		fmt.Println("FFmpeg:", t.ffmpeg, "FFprobe:", t.ffprobe)
 	case "scan":
 		cliScan(ctx, os.Args[2:])
 	case "metadata":
@@ -52,17 +55,17 @@ Usage:
   mattmux-cli tools
   mattmux-cli scan SOURCE
   mattmux-cli metadata [--title N] SOURCE
-  mattmux-cli remux [--title N] [--output DIR] [--no-chapters] SOURCE
+  mattmux-cli remux [--title N] [--output DIR] [--no-chapters] [--streams 0,1,2] SOURCE
   mattmux-cli --batch [--log FILE] MOVIES_ROOT [OUTPUT_ROOT]
   mattmux-cli --version
 
 SOURCE may be a DVD directory/VIDEO_TS structure or an ISO image.
 If --title is omitted, MattMux scans the disc and selects the longest title.
 
-Batch mode expects MOVIES_ROOT to contain movie folders with VIDEO_TS subfolders.
+Batch mode accepts movie folders with VIDEO_TS subfolders and unmounted .iso files.
 Each movie is scanned through FFmpeg dvdvideo/libdvdread/libdvdnav, the longest title
 is selected automatically, and all streams are remuxed losslessly to MKV. When
-OUTPUT_ROOT is omitted, each MKV is written into its corresponding movie folder.
+OUTPUT_ROOT is omitted, each MKV is written beside its ISO or VIDEO_TS folder.
 --log is optional and appends batch activity to the chosen file.
 
 The CLI first uses compatible ffmpeg/ffprobe binaries already installed on PATH.
@@ -85,7 +88,7 @@ func cliBatch(ctx context.Context, args []string) {
 	fs := flag.NewFlagSet("--batch", flag.ExitOnError)
 	logPath := fs.String("log", "", "optional batch log file")
 	fs.Usage = func() { fmt.Fprintln(os.Stderr, "Usage: mattmux-cli --batch [--log FILE] MOVIES_ROOT [OUTPUT_ROOT]") }
-	_ = fs.Parse(args)
+	_ = fs.Parse(cliFlagsFirst(args))
 	if fs.NArg() < 1 || fs.NArg() > 2 {
 		fs.Usage()
 		os.Exit(2)
@@ -119,14 +122,14 @@ func cliBatch(ctx context.Context, args []string) {
 func cliScan(ctx context.Context, args []string) {
 	fs := flag.NewFlagSet("scan", flag.ExitOnError)
 	fs.Usage = func() { fmt.Fprintln(os.Stderr, "Usage: mattmux-cli scan SOURCE") }
-	_ = fs.Parse(args)
+	_ = fs.Parse(cliFlagsFirst(args))
 	if fs.NArg() != 1 {
 		fs.Usage()
 		os.Exit(2)
 	}
 	src := fs.Arg(0)
 	tools := mustTools(ctx, false)
-	titles, err := discoverDVDTitlesViaDVDVideo(ctx, src, tools, cliStatus)
+	titles, err := batchPlatformDeps().discoverDVDTitlesViaDVDVideo(ctx, src, tools, cliStatus)
 	fatalIf(err)
 	best, _ := longestTitle(titles)
 	fmt.Printf("%-7s %-12s %s\n", "TITLE", "DURATION", "DEFAULT")
@@ -141,7 +144,7 @@ func cliScan(ctx context.Context, args []string) {
 func cliMetadata(ctx context.Context, args []string) {
 	fs := flag.NewFlagSet("metadata", flag.ExitOnError)
 	titleN := fs.Int("title", 0, "DVD title number; 0 selects the longest title")
-	_ = fs.Parse(args)
+	_ = fs.Parse(cliFlagsFirst(args))
 	if fs.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "Usage: mattmux-cli metadata [--title N] SOURCE")
 		os.Exit(2)
@@ -149,37 +152,45 @@ func cliMetadata(ctx context.Context, args []string) {
 	src := fs.Arg(0)
 	tools := mustTools(ctx, true)
 	title := mustResolveTitle(ctx, src, *titleN, tools)
-	text, err := metadataText(ctx, src, title, tools, true)
+	text, err := desktopCLIMetadata(ctx, src, title, tools)
 	fatalIf(err)
 	fmt.Print(text)
 }
 func cliRemux(ctx context.Context, args []string) {
 	fs := flag.NewFlagSet("remux", flag.ExitOnError)
 	titleN := fs.Int("title", 0, "DVD title number; 0 selects the longest title")
-	output := fs.String("output", "", "output directory (default: current directory)")
+	output := fs.String("output", "", "output directory (default: beside ISO or VIDEO_TS)")
+	streams := fs.String("streams", "", "comma-separated absolute stream indexes")
 	noChapters := fs.Bool("no-chapters", false, "do not preserve DVD chapter markers")
-	_ = fs.Parse(args)
+	_ = fs.Parse(cliFlagsFirst(args))
 	if fs.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "Usage: mattmux-cli remux [--title N] [--output DIR] [--no-chapters] SOURCE")
+		fmt.Fprintln(os.Stderr, "Usage: mattmux-cli remux [--title N] [--output DIR] [--no-chapters] [--streams 0,1,2] SOURCE")
 		os.Exit(2)
 	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "streams" && *streams == "" {
+			fatalIf(fmt.Errorf("--streams must not be empty"))
+		}
+	})
+	indexes, err := parseCLIStreams(*streams)
+	fatalIf(err)
 	src := fs.Arg(0)
 	outDir := strings.TrimSpace(*output)
 	if outDir == "" {
 		var err error
-		outDir, err = os.Getwd()
+		outDir, err = defaultDVDOutputDir(src)
 		fatalIf(err)
 	}
 	outDir, _ = filepath.Abs(outDir)
 	tools := mustTools(ctx, false)
 	title := mustResolveTitle(ctx, src, *titleN, tools)
-	fmt.Fprintf(os.Stderr, "Using %s FFmpeg: %s\n", tools.source, tools.ffmpeg)
-	final, err := remuxTitle(ctx, src, title, outDir, !*noChapters, nil, tools, cliStatus)
+	fmt.Fprintf(os.Stderr, "Using %s FFmpeg: %s\n", "DVD-capable", tools.ffmpeg)
+	final, err := desktopCLIRemux(ctx, src, title, outDir, !*noChapters, indexes, tools)
 	fatalIf(err)
 	fmt.Println(final)
 }
 func mustTools(ctx context.Context, needMediaInfo bool) toolPaths {
-	tools, err := ensureTools(ctx, needMediaInfo, cliStatus)
+	tools, err := desktopCLITools(ctx, needMediaInfo)
 	fatalIf(err)
 	return tools
 }
@@ -192,7 +203,7 @@ func mustResolveTitle(ctx context.Context, src string, requested int, tools tool
 		fatalIf(err)
 		return titleInfo{Number: requested, Duration: d}
 	}
-	titles, err := discoverDVDTitlesViaDVDVideo(ctx, src, tools, cliStatus)
+	titles, err := batchPlatformDeps().discoverDVDTitlesViaDVDVideo(ctx, src, tools, cliStatus)
 	fatalIf(err)
 	best, err := longestTitle(titles)
 	fatalIf(err)
@@ -205,12 +216,4 @@ func fatalIf(err error) {
 	}
 	fmt.Fprintln(os.Stderr, "mattmux-cli:", err)
 	os.Exit(1)
-}
-func parseTitleLabel(label string) int {
-	fields := strings.Fields(label)
-	if len(fields) < 2 {
-		return 0
-	}
-	n, _ := strconv.Atoi(fields[1])
-	return n
 }

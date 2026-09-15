@@ -64,6 +64,10 @@ func longestTitle(titles []titleInfo) (titleInfo, error) {
 }
 
 func batchRemuxTitleWindows(ctx context.Context, src string, title titleInfo, outDir string, tools toolPaths, progress batchProgressFunc) (string, error) {
+	return remuxDVDWindows(ctx, src, title, outDir, true, nil, tools, progress)
+}
+
+func remuxDVDWindows(ctx context.Context, src string, title titleInfo, outDir string, chapters bool, indexes []int, tools toolPaths, progress batchProgressFunc) (string, error) {
 	src, err := normalizeSource(src)
 	if err != nil {
 		return "", err
@@ -90,7 +94,16 @@ func batchRemuxTitleWindows(ctx context.Context, src string, title titleInfo, ou
 	progress(0, fmt.Sprintf("Remuxing longest title %d with fixed timestamps and all streams…", title.Number))
 	args := []string{"-hide_banner", "-nostdin", "-y"}
 	args = appendDesktopDVDInput(args, title.Number, src)
-	args = append(args, "-map", "0", "-c", "copy", "-map_metadata", "0", "-map_chapters", "0", partial)
+	maps, err := ffmpegStreamMapArgs(indexes)
+	if err != nil {
+		return "", err
+	}
+	args = append(args, maps...)
+	chapterMap := "-1"
+	if chapters {
+		chapterMap = "0"
+	}
+	args = append(args, "-c", "copy", "-map_metadata", "0", "-map_chapters", chapterMap, partial)
 	if _, err := runHidden(ctx, tools.ffmpeg, args...); err != nil {
 		return "", fmt.Errorf("FFmpeg batch remux failed: %w", err)
 	}

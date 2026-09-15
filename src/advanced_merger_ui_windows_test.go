@@ -26,11 +26,11 @@ func TestWindowsAdvancedMergerAndBatchTabs(t *testing.T) {
 	if len(mergerWindow.dvd) == 0 || len(mergerWindow.controls) == 0 || len(batchWindow.controls) == 0 {
 		t.Fatal("missing tab page controls")
 	}
-	pages := [][]uintptr{mergerWindow.dvd, mergerWindow.controls, batchWindow.controls}
+	pages := [][]uintptr{mergerWindow.dvd, mergerWindow.controls, batchWindow.controls, cliWindow.controls}
 	setWindowsMergerProgress(true)
 	// Exercise the notification handler used by real clicks, including repeated
 	// returns to DVD Remux. TCM_SETCURSEL alone does not send TCN_SELCHANGE.
-	for _, selected := range []uintptr{1, 2, 0, 2, 1, 0} {
+	for _, selected := range []uintptr{1, 2, 3, 0, 2, 1, 3, 0} {
 		procSendMessageW.Call(mergerWindow.tab, 0x130c, selected, 0)
 		header := mergerNotifyHeader{From: mergerWindow.tab, Code: -551}
 		procSendMessageW.Call(app.hwnd, 0x004e, 0, uintptr(unsafe.Pointer(&header)))

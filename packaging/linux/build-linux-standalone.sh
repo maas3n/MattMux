@@ -15,11 +15,12 @@ OUT="$DIST/MattMux-$APP_VERSION-Linux-amd64Standalone"
 command -v go >/dev/null 2>&1 || { echo "Go is required." >&2; exit 1; }
 
 APP="$WORK/bin/mattmux-bin"
+CLI="$WORK/bin/mattmux-cli-bin"
 FFMPEG="$(find "$WORK/tools/ffmpeg" -type f -name ffmpeg -perm -u+x | head -n1 || true)"
 FFPROBE="$(find "$WORK/tools/ffmpeg" -type f -name ffprobe -perm -u+x | head -n1 || true)"
 MEDIAINFO="$WORK/tools/mediainfo-install/bin/mediainfo"
 
-for f in "$LAUNCHER_SRC" "$APP" "$FFMPEG" "$FFPROBE" "$MEDIAINFO"; do
+for f in "$LAUNCHER_SRC" "$APP" "$CLI" "$FFMPEG" "$FFPROBE" "$MEDIAINFO"; do
   [[ -f "$f" ]] || { echo "Required standalone payload is missing: $f" >&2; exit 1; }
 done
 
@@ -27,6 +28,7 @@ rm -rf "$STAGE"
 mkdir -p "$PAYLOAD"
 install -m 0644 "$LAUNCHER_SRC" "$STAGE/main.go"
 install -m 0755 "$APP" "$PAYLOAD/mattmux-bin"
+install -m 0755 "$CLI" "$PAYLOAD/mattmux-cli-bin"
 install -m 0755 "$FFMPEG" "$PAYLOAD/ffmpeg"
 install -m 0755 "$FFPROBE" "$PAYLOAD/ffprobe"
 install -m 0755 "$MEDIAINFO" "$PAYLOAD/mediainfo"

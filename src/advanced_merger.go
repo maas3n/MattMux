@@ -34,7 +34,28 @@ func probeMergerFile(ctx context.Context, probe, path, kind string) ([]mergerStr
 	if !st.Mode().IsRegular() {
 		return nil, errors.New("choose a regular media file")
 	}
-	data, err := runMergerCommand(ctx, probe, "-v", "error", "-show_streams", "-show_chapters", "-of", "json", abs)
+	title := 0
+	args := []string{"-v", "error", "-show_streams", "-show_chapters", "-of", "json"}
+	if strings.EqualFold(filepath.Ext(abs), ".iso") {
+		tools, e := desktopCLITools(ctx, false)
+		if e != nil {
+			return nil, e
+		}
+		probe = tools.ffprobe
+		titles, e := batchPlatformDeps().discoverDVDTitlesViaDVDVideo(ctx, abs, tools, func(float64, string) {})
+		if e != nil {
+			return nil, e
+		}
+		best, e := longestTitle(titles)
+		if e != nil {
+			return nil, e
+		}
+		title = best.Number
+		args = appendDesktopDVDInput(args, title, abs)
+	} else {
+		args = append(args, abs)
+	}
+	data, err := runMergerCommand(ctx, probe, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +68,7 @@ func probeMergerFile(ctx context.Context, probe, path, kind string) ([]mergerStr
 		if kind != "all" && raw.CodecType != kind {
 			continue
 		}
-		t := trackOption{Index: raw.Index, Kind: raw.CodecType, Codec: raw.CodecName, Language: raw.Tags["language"], Title: raw.Tags["title"], Width: raw.Width, Height: raw.Height, Channels: raw.Channels, ChannelLayout: raw.ChannelLayout}
+		t := trackOption{DVDTitle: title, Index: raw.Index, Kind: raw.CodecType, Codec: raw.CodecName, Language: raw.Tags["language"], Title: raw.Tags["title"], Width: raw.Width, Height: raw.Height, Channels: raw.Channels, ChannelLayout: raw.ChannelLayout}
 		if t.Kind == "attachment" && t.Title == "" {
 			t.Title = raw.Tags["filename"]
 		}
@@ -59,7 +80,7 @@ func probeMergerFile(ctx context.Context, probe, path, kind string) ([]mergerStr
 			return nil, err
 		}
 		if len(chapters.Chapters) > 0 {
-			streams = append(streams, mergerStream{abs, trackOption{Index: -1, Kind: "chapters", Title: fmt.Sprintf("%d chapters", len(chapters.Chapters))}})
+			streams = append(streams, mergerStream{abs, trackOption{DVDTitle: title, Index: -1, Kind: "chapters", Title: fmt.Sprintf("%d chapters", len(chapters.Chapters))}})
 		}
 	}
 	if len(streams) == 0 {
@@ -130,6 +151,19 @@ func resolveMergerSelection(streams []mergerStream, override string) ([]mergerSt
 }
 
 func mergerArgs(streams []mergerStream, chapters, output string) ([]string, error) {
+	titles := map[string]int{}
+	for _, s := range streams {
+		if n, ok := titles[s.Path]; ok && n != s.Track.DVDTitle {
+			return nil, errors.New("conflicting DVD titles for one input")
+		}
+		titles[s.Path] = s.Track.DVDTitle
+	}
+	input := func(args []string, path string) []string {
+		if titles[path] > 0 {
+			return appendDesktopDVDInput(args, titles[path], path)
+		}
+		return appendDesktopRobustInput(args, path)
+	}
 	var err error
 	streams, chapters, err = resolveMergerSelection(streams, chapters)
 	if err != nil {
@@ -146,7 +180,7 @@ func mergerArgs(streams []mergerStream, chapters, output string) ([]string, erro
 		}
 		if _, ok := inputs[s.Path]; !ok {
 			inputs[s.Path] = len(inputs)
-			args = appendDesktopRobustInput(args, s.Path)
+			args = input(args, s.Path)
 		}
 	}
 	chapterIndex := -1
@@ -155,7 +189,7 @@ func mergerArgs(streams []mergerStream, chapters, output string) ([]string, erro
 			chapterIndex = index
 		} else {
 			chapterIndex = len(inputs)
-			args = appendDesktopRobustInput(args, chapters)
+			args = input(args, chapters)
 		}
 	}
 	seen := map[string]bool{}
@@ -177,13 +211,28 @@ func mergerArgs(streams []mergerStream, chapters, output string) ([]string, erro
 
 func muxMerger(ctx context.Context, tools toolPaths, streams []mergerStream, chapters, output string) error {
 	movieChapters := chapters == ""
+	originalStreams := streams
+	dvdTitles := map[string]int{}
+	for _, s := range streams {
+		dvdTitles[s.Path] = s.Track.DVDTitle
+	}
+	for _, s := range streams {
+		if s.Track.DVDTitle > 0 {
+			var err error
+			tools, err = desktopCLITools(ctx, false)
+			if err != nil {
+				return err
+			}
+			break
+		}
+	}
 	var selectionErr error
 	streams, chapters, selectionErr = resolveMergerSelection(streams, chapters)
 	if selectionErr != nil {
 		return selectionErr
 	}
 	if chapters != "" {
-		if err := validateMergerChapterSource(ctx, tools.ffprobe, chapters, movieChapters); err != nil {
+		if err := validateSelectedMergerChapters(ctx, tools.ffprobe, chapters, movieChapters, dvdTitles[chapters]); err != nil {
 			return err
 		}
 	}
@@ -196,7 +245,7 @@ func muxMerger(ctx context.Context, tools toolPaths, streams []mergerStream, cha
 	if err != nil {
 		return err
 	}
-	args, err := mergerArgs(streams, chapters, partial)
+	args, err := mergerArgs(originalStreams, chapters, partial)
 	if err != nil {
 		os.Remove(partial)
 		return err

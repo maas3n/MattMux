@@ -10,6 +10,7 @@ import (
 )
 
 type trackOption struct {
+	DVDTitle      int
 	Index         int
 	Kind          string
 	Codec         string
