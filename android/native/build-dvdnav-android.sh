@@ -85,9 +85,12 @@ build_one() {
         esac
     done < <(patchelf --print-needed "$jni/libmattmux_jni.so")
 
-    "$NM" "$jni/libmattmux_jni.so" | grep -q 'dvdnav_get_number_of_titles'
-    "$NM" "$jni/libmattmux_jni.so" | grep -q 'dvdnav_describe_title_chapters'
-    "$NM" "$jni/libmattmux_jni.so" | grep -q 'DVDOpen'
+    # Capture the complete symbol table before checking it. With pipefail,
+    # grep -q can close the pipe early and make llvm-nm fail with exit 74.
+    "$NM" "$jni/libmattmux_jni.so" > "$nav_build/jni-symbols.txt"
+    grep -q 'dvdnav_get_number_of_titles' "$nav_build/jni-symbols.txt"
+    grep -q 'dvdnav_describe_title_chapters' "$nav_build/jni-symbols.txt"
+    grep -q 'DVDOpen' "$nav_build/jni-symbols.txt"
     patchelf --print-needed "$jni/libmattmux_jni.so" | grep -Eiq 'dvdcss' && {
         echo 'libdvdcss must not be bundled' >&2; exit 1;
     } || true
