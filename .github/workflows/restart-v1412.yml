@@ -1,0 +1,21 @@
+name: Restart v1.4.12 unified release
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/restart-v1412.yml']
+permissions:
+  contents: read
+  actions: write
+jobs:
+  restart:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify failed run ended and restart same tagged release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/35088630425/jobs" > /tmp/release-jobs.json
+          jq -e '.jobs | length > 0 and all(.status == "completed")' /tmp/release-jobs.json
+          jq -e '.jobs | any(.name == "publish" and .conclusion == "skipped")' /tmp/release-jobs.json
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag=v1.4.12
