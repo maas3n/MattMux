@@ -10,7 +10,7 @@ internal sealed class MattMuxCliCommand {
     data class Batch(val inputRoot: String, val outputRoot: String?, val logFile: String?) : MattMuxCliCommand()
     data class Scan(val source: String) : MattMuxCliCommand()
     data class Metadata(val source: String, val title: Int?) : MattMuxCliCommand()
-    data class Remux(val source: String, val title: Int?, val outputRoot: String?, val noChapters: Boolean) : MattMuxCliCommand()
+    data class Remux(val source: String, val title: Int?, val outputRoot: String?, val noChapters: Boolean, val streams: List<Int>? = null) : MattMuxCliCommand()
     object Version : MattMuxCliCommand()
     object Help : MattMuxCliCommand()
 }
@@ -18,7 +18,7 @@ internal sealed class MattMuxCliCommand {
 internal object MattMuxCliSyntax {
     private const val BATCH_USAGE = "Usage: mattmux-cli --batch [--log FILE] MOVIES_ROOT [OUTPUT_ROOT]"
     private const val METADATA_USAGE = "Usage: mattmux-cli metadata [--title N] SOURCE"
-    private const val REMUX_USAGE = "Usage: mattmux-cli remux [--title N] [--output OUTPUT_ROOT] [--no-chapters] SOURCE"
+    private const val REMUX_USAGE = "Usage: mattmux-cli remux [--title N] [--output OUTPUT_ROOT] [--no-chapters] [--streams 0,2] SOURCE"
 
     fun parse(commandLine: String): MattMuxCliCommand {
         val tokens = tokenize(commandLine).toMutableList()
@@ -89,6 +89,7 @@ internal object MattMuxCliSyntax {
         var title: Int? = null
         var output: String? = null
         var noChapters = false
+        var streams: List<Int>? = null
         val positional = mutableListOf<String>()
         var index = 0
         while (index < tokens.size) {
@@ -112,14 +113,28 @@ internal object MattMuxCliSyntax {
                     output = token.substringAfter("=").also { require(it.isNotBlank()) { "--output requires a document-tree URI" } }
                     index++
                 }
+                token == "--streams" -> {
+                    require(index + 1 < tokens.size) { "--streams requires comma-separated stream indexes" }
+                    streams = streamValues(tokens[index + 1])
+                    index += 2
+                }
+                token.startsWith("--streams=") -> {
+                    streams = streamValues(token.substringAfter("="))
+                    index++
+                }
                 token == "--no-chapters" -> { noChapters = true; index++ }
                 token.startsWith("-") -> error("Unknown option: $token")
                 else -> { positional += token; index++ }
             }
         }
         require(positional.size == 1) { REMUX_USAGE }
-        return MattMuxCliCommand.Remux(positional.single(), title, output, noChapters)
+        return MattMuxCliCommand.Remux(positional.single(), title, output, noChapters, streams)
     }
+
+    private fun streamValues(value: String): List<Int> = value.split(',').map { token ->
+        token.trim().toIntOrNull()?.takeIf { it >= 0 }
+            ?: throw IllegalArgumentException("--streams requires comma-separated nonnegative stream indexes")
+    }.distinct().sorted()
 
     private fun titleValue(value: String): Int? {
         val parsed = value.toIntOrNull() ?: throw IllegalArgumentException("--title must be an integer")
@@ -152,9 +167,11 @@ internal object MattMuxCliSyntax {
 
 internal class MattMuxCliRunner(private val context: Context) {
     private val engine = AndroidNativeRemuxEngine()
+    @Volatile private var cancelled = false
     @Volatile private var processor: AndroidBatchProcessor? = null
 
     fun cancel() {
+        cancelled = true
         processor?.cancel()
         engine.cancel()
     }
@@ -164,19 +181,22 @@ internal class MattMuxCliRunner(private val context: Context) {
         emit: (String) -> Unit,
         progress: (Int, String) -> Unit,
     ): Int {
+        cancelled = false
         return when (val command = MattMuxCliSyntax.parse(commandLine)) {
             MattMuxCliCommand.Help -> {
                 emit("MattMux CLI ${BuildConfig.VERSION_NAME}")
                 emit("Usage:")
                 emit("  mattmux-cli scan SOURCE")
                 emit("  mattmux-cli metadata [--title N] SOURCE")
-                emit("  mattmux-cli remux [--title N] [--output OUTPUT_ROOT] [--no-chapters] SOURCE")
+                emit("  mattmux-cli remux [--title N] [--output OUTPUT_ROOT] [--no-chapters] [--streams 0,2] SOURCE")
                 emit("  mattmux-cli --batch [--log FILE] MOVIES_ROOT [OUTPUT_ROOT]")
                 emit("  mattmux-cli --version")
                 emit("Android SOURCE may be a persisted content:// DVD-folder tree URI or ISO document URI.")
                 emit("MOVIES_ROOT and OUTPUT_ROOT are persisted content:// document-tree URIs.")
                 emit("BATCH accepts Movie/VIDEO_TS folders plus unmounted ISO files. With no OUTPUT_ROOT, VIDEO_TS outputs go in the movie folder beside VIDEO_TS and ISO outputs go beside the ISO.")
-                emit("For ISO remux, --output is required. For a DVD-folder SOURCE, output defaults to that folder.")
+                emit("--streams selects absolute stream indexes listed by metadata; omitted means all streams.")
+                emit("ISO output defaults to Movie.mkv beside Movie.iso when its parent folder is writable; otherwise specify --output.")
+                emit("For a DVD-folder SOURCE, output defaults to that folder. Existing MKVs are never overwritten.")
                 0
             }
             MattMuxCliCommand.Version -> { emit("MattMux CLI ${BuildConfig.VERSION_NAME} (Android/ChromeOS native)"); 0 }
@@ -217,12 +237,21 @@ internal class MattMuxCliRunner(private val context: Context) {
     private fun runRemux(command: MattMuxCliCommand.Remux, emit: (String) -> Unit, progress: (Int, String) -> Unit): Int {
         requireEngine()
         val source = parseSourceUri(command.source, "SOURCE")
-        val output = command.outputRoot?.let { parseTreeUri(it, "OUTPUT_ROOT") }
-            ?: source.takeIf { DocumentsContract.isTreeUri(it) }
-            ?: throw IllegalArgumentException("ISO remux requires --output OUTPUT_ROOT")
+        val explicitOutput = command.outputRoot?.let { parseTreeUri(it, "OUTPUT_ROOT") }
+        val destination = AndroidCliOutputResolver(context) {
+            check(!cancelled) { "Remux cancelled" }
+        }.resolve(source, explicitOutput)
+        var title = command.title
+        val indexes = command.streams?.let { requested ->
+            val metadata = engine.probeTitleMetadata(context, source, title)
+            validateCliStreamSelection(requested, metadata.tracks.filter { it.kind in listOf("video", "audio", "subtitle") }.map { it.index })
+            title = metadata.title
+            requested.toIntArray()
+        }
+        check(!cancelled) { "Remux cancelled" }
         engine.setProgressListener { percent -> progress(percent, "Remuxing… $percent%") }
         return try {
-            val result = engine.remuxTitle(context, source, output, command.title, null, preserveChapters = !command.noChapters)
+            val result = engine.remuxTitle(context, source, destination.folder, title, indexes, preserveChapters = !command.noChapters, outputName = destination.filename)
             emit("Output: ${result.outputUri}")
             emit("Title: ${result.title}")
             emit("Duration: ${formatDuration(result.durationMs)}")

@@ -75,9 +75,10 @@ internal class DvdDocumentOutput(
     private val resolver: ContentResolver,
     private val treeUri: Uri,
 ) {
-    internal data class Pending(val uri: Uri, val descriptor: ParcelFileDescriptor, val finalName: String)
+    internal data class Pending(val uri: Uri, val descriptor: ParcelFileDescriptor, val finalName: String, val reservedFinal: Boolean = false)
 
-    fun create(title: Int): Pending {
+    fun create(title: Int, requestedName: String? = null): Pending {
+        if (requestedName != null) return reserveNamedOutput(requestedName)
         val parentId = documentTreeRootId(treeUri)
         val parent = DocumentsContract.buildDocumentUriUsingTree(treeUri, parentId)
         val finalName = "MattMux-title-%02d.mkv".format(title)
@@ -92,8 +93,36 @@ internal class DvdDocumentOutput(
         }
     }
 
+    // SAF createDocument creates a new document (renaming on name collision).
+    // Reserve the final name before writing, never rename over an existing file.
+    private fun reserveNamedOutput(name: String): Pending {
+        require(name.endsWith(".mkv", true) && name.none { it == '/' || it == '\\' || it.code < 32 }) { "Invalid output filename" }
+        val parentId = documentTreeRootId(treeUri)
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentId)
+        resolver.query(children, arrayOf(Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { cursor ->
+            while (cursor.moveToNext()) {
+                check(!cursor.getString(0).equals(name, true)) { "Output already exists: $name" }
+            }
+        } ?: error("Cannot check the output folder; specify --output with a writable folder")
+        val parent = DocumentsContract.buildDocumentUriUsingTree(treeUri, parentId)
+        val uri = DocumentsContract.createDocument(resolver, parent, "video/x-matroska", name)
+            ?: error("Output folder required / no write access to ISO folder")
+        try {
+            val actualName = resolver.query(uri, arrayOf(Document.COLUMN_DISPLAY_NAME), null, null, null)?.use {
+                if (it.moveToFirst()) it.getString(0) else null
+            }
+            check(actualName == name) { "Output name unavailable: $name (provider created $actualName)" }
+            val descriptor = resolver.openFileDescriptor(uri, "rw") ?: error("Could not open output: $name")
+            return Pending(uri, descriptor, name, reservedFinal = true)
+        } catch (error: Throwable) {
+            runCatching { DocumentsContract.deleteDocument(resolver, uri) }
+            throw error
+        }
+    }
+
     fun commit(pending: Pending): Uri {
         pending.descriptor.close()
+        if (pending.reservedFinal) return pending.uri
         return DocumentsContract.renameDocument(resolver, pending.uri, pending.finalName)
             ?: error("Remux completed, but the output provider could not rename the temporary file. Completed MKV kept at ${pending.uri}")
     }

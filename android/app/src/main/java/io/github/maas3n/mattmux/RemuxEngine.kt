@@ -154,6 +154,7 @@ class AndroidNativeRemuxEngine : RemuxEngine {
         requestedTitle: Int?,
         selectedStreamIndexes: IntArray? = null,
         preserveChapters: Boolean = true,
+        outputName: String? = null,
     ): RemuxResult {
         check(isAvailable) { unavailableReason ?: "Remux engine unavailable" }
         require(DocumentsContract.isTreeUri(outputTreeUri)) { "Output must be a document-tree folder" }
@@ -162,7 +163,7 @@ class AndroidNativeRemuxEngine : RemuxEngine {
         check(remuxLock.tryLock()) { "Another remux is still stopping. Try again shortly." }
         try {
             check(!cancelled.get()) { "Remux cancelled" }
-            return remuxLocked(context, sourceUri, outputTreeUri, requestedTitle, selectedStreamIndexes, preserveChapters)
+            return remuxLocked(context, sourceUri, outputTreeUri, requestedTitle, selectedStreamIndexes, preserveChapters, outputName)
         } finally {
             cancelled.set(false)
             remuxLock.unlock()
@@ -222,13 +223,14 @@ class AndroidNativeRemuxEngine : RemuxEngine {
         requestedTitle: Int?,
         selectedStreamIndexes: IntArray?,
         preserveChapters: Boolean,
+        outputName: String?,
     ): RemuxResult {
         val resolver = context.contentResolver
         openTitle(context, sourceUri, requestedTitle).use { title ->
             check(!cancelled.get()) { "Remux cancelled" }
             android.util.Log.i("MattMuxPlan", title.plan.diagnosticJson())
             val output = DvdDocumentOutput(resolver, outputTreeUri)
-            val pending = output.create(title.plan.globalTitle)
+            val pending = output.create(title.plan.globalTitle, outputName)
             var remuxCompleted = false
             try {
                 val fds = IntArray(title.vobs.size) { title.vobs[it].fd }

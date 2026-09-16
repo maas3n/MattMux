@@ -94,3 +94,11 @@ mattmux_pro
 ```
 
 Price and availability belong in Play Console rather than in the APK. Follow [`PLAY_CONSOLE.md`](PLAY_CONSOLE.md) before enabling purchases or publishing a production Play build.
+
+## In-app CLI stream selection and ISO output
+
+`mattmux-cli remux --streams 0,2 --title 1 SOURCE` copies only the absolute stream indexes shown by `metadata --title 1 SOURCE`. Both `--streams 0,2` and `--streams=0,2` are accepted; omitting the option copies all streams. Unknown indexes fail before creating output. `--no-chapters` remains independent of stream selection.
+
+For a single unmounted `Movie.iso`, omitting `--output` creates `Movie.mkv` beside the ISO when MattMux has read/write access to its parent through a granted document tree. A standalone file grant may not include parent access: grant the containing folder or pass `--output OUTPUT_ROOT`. Provider document IDs are treated as opaque; MattMux verifies the parent through the provider instead of guessing a filesystem path. An explicit output folder overrides this default and retains the ISO-derived filename.
+
+Existing MKVs are never overwritten. The CLI reserves a new final-name document before writing, so it is visible while remuxing; cancellation/failure removes that newly created document. Providers that cannot supply the requested name or a writable seekable output fail cleanly.

@@ -55,4 +55,29 @@ class MattMuxCliSyntaxTest {
     @Test fun parsesVersion() {
         assertTrue(MattMuxCliSyntax.parse("mattmux-cli --version") === MattMuxCliCommand.Version)
     }
+    @Test fun parsesStreamSelectionWithOtherOptions() {
+        for (option in listOf("--streams 2,0,2", "--streams=2,0,2")) {
+            val parsed = MattMuxCliSyntax.parse("mattmux-cli remux content://provider/document/disc.iso $option --title 3 --no-chapters") as MattMuxCliCommand.Remux
+            assertEquals(listOf(0, 2), parsed.streams)
+            assertEquals(3, parsed.title)
+            assertTrue(parsed.noChapters)
+            assertNull(parsed.outputRoot)
+        }
+    }
+
+    @Test fun omittedStreamsMeansAllStreams() {
+        val parsed = MattMuxCliSyntax.parse("remux content://provider/document/disc.iso") as MattMuxCliCommand.Remux
+        assertNull(parsed.streams)
+    }
+
+    @Test fun rejectsMalformedStreamSelections() {
+        for (value in listOf("", "-1", "0,", ",0", "0,,2", "video", "2147483648")) {
+            org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+                MattMuxCliSyntax.parse("remux --streams=$value content://provider/document/disc.iso")
+            }
+        }
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+            MattMuxCliSyntax.parse("remux content://provider/document/disc.iso --streams")
+        }
+    }
 }
