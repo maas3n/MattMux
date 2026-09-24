@@ -27,7 +27,7 @@ def screen(name):
 try:
     print(adb("install", "-r", str(apk)))
     adb("shell", "am", "force-stop", package)
-    adb("logcat", "-c")
+    adb("logcat", "-b", "main", "-b", "system", "-b", "crash", "-c")
     launch = adb("shell", "am", "start", "-W", "-n", package + "/.MainActivity")
     (logs / "launch.txt").write_text(launch)
     if "Status: ok" not in launch or "Error:" in launch:
@@ -47,6 +47,11 @@ try:
     screen("final")
     print("APK installed, activity stayed alive, and all four tabs opened.")
 finally:
-    (logs / "logcat.txt").write_text(adb("logcat", "-d", "-v", "threadtime"))
+    logcat = adb("logcat", "-b", "main", "-b", "system", "-b", "crash", "-d", "-v", "threadtime")
+    (logs / "logcat.txt").write_text(logcat)
+    # Keep the crash reason visible in Actions logs as well as the artifact.
+    for line in logcat.splitlines():
+        if any(word in line for word in ("AndroidRuntime", "FATAL", "Fatal signal", "mattmux", "DEBUG   :")):
+            print(line, flush=True)
     with (logs / "screen.png").open("wb") as out:
         subprocess.run(["adb", "exec-out", "screencap", "-p"], stdout=out, check=False)
