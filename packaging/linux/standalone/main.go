@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"debug/elf"
 	"embed"
 	"encoding/hex"
 	"errors"
@@ -23,7 +24,7 @@ var appVersion = "dev"
 // immediately before compiling this launcher. The resulting ELF is a single
 // self-extracting MattMux executable.
 //
-//go:embed payload/*
+//go:embed all:payload
 var payloadFS embed.FS
 
 type payloadFile struct {
@@ -31,26 +32,42 @@ type payloadFile struct {
 	mode fs.FileMode
 }
 
-var payload = []payloadFile{
-	{name: "mattmux-bin", mode: 0o755},
-	{name: "mattmux-cli-bin", mode: 0o755},
-	{name: "ffmpeg", mode: 0o755},
-	{name: "ffprobe", mode: 0o755},
-	{name: "mediainfo", mode: 0o755},
+var payload []payloadFile
+
+func indexPayload() error {
+	return fs.WalkDir(payloadFS, "payload", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		name := strings.TrimPrefix(path, "payload/")
+		mode := fs.FileMode(0o644)
+		if !strings.Contains(name, "/") {
+			mode = 0o755
+		}
+		payload = append(payload, payloadFile{name: name, mode: mode})
+		return nil
+	})
 }
 
 func main() {
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		fatal("this standalone build supports Linux amd64 only")
 	}
+	if err := indexPayload(); err != nil {
+		fatal(err.Error())
+	}
 
 	root, err := extractPayload()
 	if err != nil {
 		fatal(err.Error())
 	}
+	env := runtimeEnv(root)
 
 	if len(os.Args) > 1 && os.Args[1] == "--standalone-self-test" {
-		if err := selfTest(root); err != nil {
+		if err := selfTest(root, env); err != nil {
 			fatal(err.Error())
 		}
 		fmt.Printf("MattMux %s standalone self-test: OK\n", appVersion)
@@ -68,16 +85,21 @@ func main() {
 			app = filepath.Join(root, "mattmux-cli-bin")
 		}
 	}
-	path := root
-	if old := os.Getenv("PATH"); old != "" {
-		path += string(os.PathListSeparator) + old
-	}
-
-	env := replaceEnv(os.Environ(), "PATH", path)
 	args := append([]string{app}, userArgs...)
 	if err := syscall.Exec(app, args, env); err != nil {
 		fatal(fmt.Sprintf("could not start MattMux: %v", err))
 	}
+}
+
+func runtimeEnv(root string) []string {
+	env := os.Environ()
+	for key, dir := range map[string]string{"PATH": root, "LD_LIBRARY_PATH": filepath.Join(root, "lib")} {
+		if old := os.Getenv(key); old != "" {
+			dir += string(os.PathListSeparator) + old
+		}
+		env = replaceEnv(env, key, dir)
+	}
+	return env
 }
 
 func extractPayload() (string, error) {
@@ -104,6 +126,9 @@ func extractPayload() (string, error) {
 			return "", fmt.Errorf("embedded %s is missing: %w", p.name, err)
 		}
 		dst := filepath.Join(root, p.name)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+			return "", err
+		}
 		if ok, err := fileMatches(dst, data, p.mode); err == nil && ok {
 			continue
 		}
@@ -182,7 +207,38 @@ func replaceEnv(env []string, key, value string) []string {
 	return append(out, prefix+value)
 }
 
-func selfTest(root string) error {
+func selfTest(root string, env []string) error {
+	// Ask the host ELF loader to resolve the GUI and bundled libraries. This
+	// catches missing GUI dependencies without requiring a running display or ldd.
+	app := filepath.Join(root, "mattmux-bin")
+	binary, err := elf.Open(app)
+	if err != nil {
+		return fmt.Errorf("invalid GUI ELF executable: %w", err)
+	}
+	defer binary.Close()
+	var loader string
+	for _, prog := range binary.Progs {
+		if prog.Type == elf.PT_INTERP {
+			data, err := io.ReadAll(prog.Open())
+			if err != nil {
+				return err
+			}
+			loader = strings.TrimRight(string(data), "\x00")
+		}
+	}
+	if loader != "" {
+		for _, p := range payload {
+			if p.name != "mattmux-bin" && !strings.HasPrefix(p.name, "lib/") {
+				continue
+			}
+			cmd := exec.Command(loader, "--list", filepath.Join(root, p.name))
+			cmd.Env = env
+			out, err := cmd.CombinedOutput()
+			if err != nil || bytes.Contains(out, []byte("not found")) {
+				return fmt.Errorf("%s dependency check failed: %v: %s", p.name, err, strings.TrimSpace(string(out)))
+			}
+		}
+	}
 	checks := [][]string{
 		{filepath.Join(root, "mattmux-cli-bin"), "--help"},
 		{filepath.Join(root, "ffmpeg"), "-hide_banner", "-version"},
@@ -191,23 +247,11 @@ func selfTest(root string) error {
 	}
 	for _, args := range checks {
 		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Env = env
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("%s self-test failed: %v: %s", filepath.Base(args[0]), err, strings.TrimSpace(string(out)))
 		}
-	}
-	app := filepath.Join(root, "mattmux-bin")
-	f, err := os.Open(app)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	magic := make([]byte, 4)
-	if _, err := io.ReadFull(f, magic); err != nil {
-		return err
-	}
-	if !bytes.Equal(magic, []byte{0x7f, 'E', 'L', 'F'}) {
-		return errors.New("embedded MattMux payload is not an ELF executable")
 	}
 	return nil
 }

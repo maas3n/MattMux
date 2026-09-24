@@ -8,6 +8,7 @@ on:
     paths:
       - 'android/**'
       - '.github/workflows/android.yml'
+      - '.github/workflows/android-startup.yml'
   workflow_dispatch:
 
 concurrency:
@@ -24,6 +25,12 @@ env:
   MATTMUX_CI_VERSION_CODE: '1'
 
 jobs:
+  startup:
+    needs: build
+    uses: ./.github/workflows/android-startup.yml
+    with:
+      artifact: MattMux-Android-ChromeOS-dev
+
   build:
     runs-on: ubuntu-latest
 

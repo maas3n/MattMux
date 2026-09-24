@@ -337,6 +337,7 @@ jobs:
 
       - name: Install Linux build prerequisites
         run: |
+          sudo sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
           sudo apt-get update
           sudo apt-get install -y \
             gcc g++ cmake ninja-build curl xz-utils file \
@@ -376,6 +377,8 @@ jobs:
           file "$standalone" | grep -E 'ELF 64-bit.*x86-64'
           cache="$(mktemp -d)"
           XDG_CACHE_HOME="$cache" "$standalone" --standalone-self-test
+          python3 packaging/linux/test-standalone-libs.py
+          bash packaging/linux/test-standalone-clean.sh "$standalone"
           rm -rf "$cache"
 
       - name: Create Linux checksums
@@ -521,8 +524,15 @@ jobs:
           if-no-files-found: error
           path: dist/android-release/*
 
+  android-startup:
+    needs: [metadata, android]
+    uses: ./.github/workflows/android-startup.yml
+    with:
+      artifact: release-android
+      source-ref: ${{ needs.metadata.outputs.tag }}
+
   publish:
-    needs: [metadata, windows, linux, android]
+    needs: [metadata, windows, linux, android, android-startup]
     runs-on: ubuntu-latest
     permissions:
       contents: write

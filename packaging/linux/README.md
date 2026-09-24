@@ -7,6 +7,29 @@ The Linux port provides two executables from the same source tree:
 
 ## Runtime tool policy
 
+### Single-file standalone
+
+The standalone build embeds private Wayland, X11, keyboard, and OpenGL dispatch
+libraries, their dependencies, and copyright notices alongside its multimedia
+tools. The launcher extracts them into its user cache and uses them through a
+process-local `LD_LIBRARY_PATH`. Users do not need to install `libwayland-client0`
+to start this build, and no administrator access is needed for extraction.
+
+The host must still provide compatible glibc (the release build targets Ubuntu
+24.04), a graphical session, and working graphics drivers. GPU vendor drivers
+and the system ELF loader are not copied from the build runner.
+
+`--standalone-self-test` resolves the GUI and every private shared library with
+the host ELF loader before exercising the embedded command-line tools. CI also
+runs this check in a clean Ubuntu container without GUI packages. Library source
+package names and exact versions are recorded in the extracted
+`licenses/library-packages.json`. The build downloads the exact corresponding
+source packages into `MattMux-VERSION-Linux-Library-Sources.tar.gz`. Build hosts
+need Debian/Ubuntu source repositories (`deb-src`) enabled; CI enables these
+before building. This is a build prerequisite, not an end-user requirement.
+
+### Other Linux packages
+
 MattMux always checks the user's existing tools first:
 
 1. Locate `ffmpeg` and `ffprobe` on `PATH`.

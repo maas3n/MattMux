@@ -13,6 +13,9 @@ OUT="$DIST/MattMux-$APP_VERSION-Linux-amd64Standalone"
 [[ "$(uname -s)" == "Linux" ]] || { echo "Standalone build requires Linux." >&2; exit 1; }
 [[ "$(uname -m)" == "x86_64" ]] || { echo "Standalone build currently supports amd64/x86_64 only." >&2; exit 1; }
 command -v go >/dev/null 2>&1 || { echo "Go is required." >&2; exit 1; }
+for cmd in python3 ldd ldconfig dpkg-query; do
+  command -v "$cmd" >/dev/null 2>&1 || { echo "Missing build tool: $cmd" >&2; exit 1; }
+done
 
 APP="$WORK/bin/mattmux-bin"
 CLI="$WORK/bin/mattmux-cli-bin"
@@ -32,6 +35,12 @@ install -m 0755 "$CLI" "$PAYLOAD/mattmux-cli-bin"
 install -m 0755 "$FFMPEG" "$PAYLOAD/ffmpeg"
 install -m 0755 "$FFPROBE" "$PAYLOAD/ffprobe"
 install -m 0755 "$MEDIAINFO" "$PAYLOAD/mediainfo"
+python3 "$ROOT/packaging/linux/bundle-standalone-libs.py" "$PAYLOAD"
+# Preserve the existing multimedia notices alongside the new GUI notices.
+cp -a "$WORK/deb-root/usr/share/doc/mattmux/." "$PAYLOAD/licenses/"
+python3 "$ROOT/packaging/linux/collect-standalone-sources.py" \
+  "$PAYLOAD/licenses/library-packages.json" \
+  "$DIST/MattMux-$APP_VERSION-Linux-Library-Sources.tar.gz"
 cat > "$STAGE/go.mod" <<'EOF'
 module mattmux-standalone
 

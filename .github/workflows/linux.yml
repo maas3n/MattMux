@@ -29,6 +29,7 @@ jobs:
 
       - name: Install Linux build prerequisites
         run: |
+          sudo sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
           sudo apt-get update
           sudo apt-get install -y \
             gcc g++ cmake ninja-build curl xz-utils file ffmpeg dvdauthor genisoimage \
@@ -217,6 +218,8 @@ jobs:
           cache="$(mktemp -d)"
           trap 'rm -rf "$cache"' EXIT
           XDG_CACHE_HOME="$cache" "$standalone" --standalone-self-test
+          python3 packaging/linux/test-standalone-libs.py
+          bash packaging/linux/test-standalone-clean.sh "$standalone"
           test -x "$cache/mattmux/standalone/"*/mattmux-bin
           test -x "$cache/mattmux/standalone/"*/ffmpeg
           test -x "$cache/mattmux/standalone/"*/ffprobe
