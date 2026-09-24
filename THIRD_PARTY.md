@@ -67,3 +67,20 @@ MattMux itself is licensed under MIT. Third-party projects keep their own licens
 The Windows and Linux FFmpeg distributions currently used by MattMux are GPL-enabled builds because the desktop DVD workflow depends on FFmpeg's `dvdvideo` support with the relevant DVD libraries. The Android FFmpeg build is handled separately under its own build configuration and licensing requirements.
 
 Anyone redistributing MattMux together with third-party binaries should review and satisfy the corresponding FFmpeg, BtbN/FFmpeg-Builds, MediaInfo, MediaInfoLib, ZenLib, zlib, libudfread, and other applicable license/source-distribution obligations.
+
+## Preserved desktop FFmpeg build inputs
+
+BtbN can remove old daily-build archives. Packaging can recover the same FFmpeg
+binaries already shipped in MattMux 1.4.13 from these immutable inputs, verified
+before extraction:
+
+- Linux: `MattMux-1.4.13-Linux-amd64.deb`, SHA-256
+  `680fce81c1562cac5c454c8eea2c5ac9b6a7d4a2710c91c7cfaa5d042fe248a9`.
+- Windows: `MattMux-1.4.13-Windows-Portable.zip`, SHA-256
+  `9a8127fb60684e86a3550d30a9f74ad9494a654218ad671d4c4527b0503d6bc9`.
+
+These contain the existing `N-126479-g08cd8df29d` FFmpeg build; recovery does not
+substitute a newer FFmpeg revision. The Linux standalone also includes private
+GUI library notices and records their binary/source package versions under
+`licenses/library-packages.json`. Exact source packages accompany each new
+release in `MattMux-VERSION-Linux-Library-Sources.tar.gz`.

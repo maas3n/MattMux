@@ -130,9 +130,6 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $ffTag = 'autobuild-2026-09-08-23-15'
-          $ffAsset = 'ffmpeg-N-126479-g08cd8df29d-win64-gpl-shared.zip'
-          $ffManifestSha = 'f64be162403094773397bfcc299a4a059507028afa7563591fd05c17d56b3214'
           $miVersion = '26.05'
           $miAsset = 'MediaInfo_CLI_26.05_Windows_x64.zip'
           $miSha = 'f7f80620ce6d14f4995f0de6f98e3ef18ad29496db01899571152ee3311229f9'
@@ -148,19 +145,11 @@ jobs:
             }
           }
 
-          $ffBase = "https://github.com/BtbN/FFmpeg-Builds/releases/download/$ffTag"
-          $manifest = Join-Path $work 'checksums.sha256'
-          Invoke-WebRequest -UseBasicParsing -Uri "$ffBase/checksums.sha256" -OutFile $manifest
-          Assert-Sha $manifest $ffManifestSha
-          $manifestText = Get-Content -LiteralPath $manifest -Raw
-          $escaped = [regex]::Escape($ffAsset)
-          $match = [regex]::Match($manifestText, "(?im)^([0-9a-f]{64})\s+\*?$escaped\s*$")
-          if (-not $match.Success) { throw "Verified FFmpeg manifest does not contain $ffAsset" }
-          $ffArchiveSha = $match.Groups[1].Value.ToLowerInvariant()
-          $ffArchive = Join-Path $work $ffAsset
-          Invoke-WebRequest -UseBasicParsing -Uri "$ffBase/$ffAsset" -OutFile $ffArchive
-          Assert-Sha $ffArchive $ffArchiveSha
-
+          # The daily upstream archive has expired. Recover the exact runtime
+          # from our immutable, checksum-verified portable release.
+          $ffArchive = Join-Path $work 'MattMux-1.4.13-Windows-Portable.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/maas3n/MattMux/releases/download/v1.4.13/MattMux-1.4.13-Windows-Portable.zip' -OutFile $ffArchive
+          Assert-Sha $ffArchive '9a8127fb60684e86a3550d30a9f74ad9494a654218ad671d4c4527b0503d6bc9'
           $ffExtract = Join-Path $work 'ffmpeg'
           Expand-Archive -LiteralPath $ffArchive -DestinationPath $ffExtract -Force
           $ffmpeg = Get-ChildItem $ffExtract -Filter ffmpeg.exe -File -Recurse | Select-Object -First 1

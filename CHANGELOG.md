@@ -4,7 +4,8 @@
 
 - Bundle private Wayland, X11, keyboard, and OpenGL dispatch libraries and their dependencies in the Linux standalone, so users do not need to install missing GUI packages manually.
 - Check GUI library resolution in the standalone self-test and add a clean Ubuntu runtime check to Linux CI and release validation.
-- This change concerns Linux packaging. Android's reported startup failure still needs its own diagnosis.
+- Fix the Android startup crash caused by legacy TabHost indicator layouts missing from the Material theme; supply explicit tab views and verify opening all four tabs on emulators.
+- Recover pinned desktop FFmpeg tools from checksum-verified MattMux 1.4.13 packages when upstream daily-build archives have expired.
 
 ## 1.4.8 — 2026-09-13
 

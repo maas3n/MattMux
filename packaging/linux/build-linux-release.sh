@@ -91,10 +91,21 @@ tar -C "$WORK" -czf "$DIST/MattMux-$APP_VERSION-Linux-amd64.tar.gz" "$(basename 
 FF_ARCHIVE="$WORK/tools/$FFMPEG_ASSET"
 FF_EXTRACT="$WORK/tools/ffmpeg"
 echo "Downloading pinned FFmpeg build for self-contained .deb..."
-curl --fail --location --retry 3 --proto '=https' --tlsv1.2 -o "$FF_ARCHIVE" "$FFMPEG_URL"
-printf '%s  %s\n' "$FFMPEG_SHA256" "$FF_ARCHIVE" | sha256sum --check --strict
 mkdir -p "$FF_EXTRACT"
-tar -xJf "$FF_ARCHIVE" -C "$FF_EXTRACT"
+if curl --fail --location --retry 3 --proto '=https' --tlsv1.2 -o "$FF_ARCHIVE" "$FFMPEG_URL"; then
+  printf '%s  %s\n' "$FFMPEG_SHA256" "$FF_ARCHIVE" | sha256sum --check --strict
+  tar -xJf "$FF_ARCHIVE" -C "$FF_EXTRACT"
+else
+  # Upstream prunes old daily builds. Recover the identical tools already
+  # distributed in our immutable release, never an unverified newer build.
+  PREVIOUS_DEB="$WORK/tools/MattMux-1.4.13-Linux-amd64.deb"
+  curl --fail --location --retry 3 --proto '=https' --tlsv1.2 \
+    -o "$PREVIOUS_DEB" "https://github.com/maas3n/MattMux/releases/download/v1.4.13/MattMux-1.4.13-Linux-amd64.deb"
+  printf '%s  %s\n' '680fce81c1562cac5c454c8eea2c5ac9b6a7d4a2710c91c7cfaa5d042fe248a9' "$PREVIOUS_DEB" | sha256sum --check --strict
+  dpkg-deb --extract "$PREVIOUS_DEB" "$WORK/tools/previous-release"
+  cp -a "$WORK/tools/previous-release/usr/lib/mattmux/ffmpeg-bin" "$FF_EXTRACT/bin"
+  cp "$WORK/tools/previous-release/usr/share/doc/mattmux/FFmpeg-LICENSE" "$FF_EXTRACT/LICENSE.txt"
+fi
 BUNDLED_FFMPEG="$(find "$FF_EXTRACT" -type f -name ffmpeg -perm -u+x | head -n1)"
 BUNDLED_FFPROBE="$(find "$FF_EXTRACT" -type f -name ffprobe -perm -u+x | head -n1)"
 [[ -n "$BUNDLED_FFMPEG" && -n "$BUNDLED_FFPROBE" ]] || { echo "FFmpeg archive did not contain ffmpeg/ffprobe" >&2; exit 1; }
