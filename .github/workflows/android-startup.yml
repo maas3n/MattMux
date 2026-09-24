@@ -1,0 +1,60 @@
+name: Android startup validation
+
+on:
+  workflow_call:
+    inputs:
+      artifact:
+        required: true
+        type: string
+      source-ref:
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  startup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api: 26
+            target: google_apis
+          - api: 35
+            target: google_apis
+          - api: 35
+            target: google_apis_ps16k
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source-ref }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact }}
+          path: startup-apk
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Launch APK and exercise tabs
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          target: ${{ matrix.target }}
+          arch: x86_64
+          profile: pixel_2
+          ram-size: 4096M
+          heap-size: 512M
+          script: python3 android/scripts/test-startup.py "$(find startup-apk -name '*.apk' -print -quit)" startup-logs
+      - name: Preserve startup diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: startup-${{ matrix.api }}-${{ matrix.target }}-${{ inputs.artifact }}
+          path: startup-logs
+          if-no-files-found: ignore

@@ -66,10 +66,12 @@ class MainActivity : Activity(), BillingManager.Listener {
         val frame = android.widget.FrameLayout(this).apply { id = android.R.id.tabcontent }
         layout.addView(tabs); layout.addView(frame, LinearLayout.LayoutParams(-1, 0, 1f)); host.addView(layout); host.setup()
         applySystemBarInsets(layout, 0, 0, 0, 0)
-        host.addTab(host.newTabSpec("dvd").setIndicator("DVD Remux").setContent { dvd })
-        host.addTab(host.newTabSpec("merger").setIndicator("Advanced Merger").setContent { advancedMerger.view })
-        host.addTab(host.newTabSpec("batch").setIndicator("BATCH").setContent { batchPanel.view })
-        host.addTab(host.newTabSpec("cli").setIndicator("CLI").setContent { cliPanel.view })
+        // Material themes may not supply the legacy TabHost indicator layout.
+        // Providing our own views avoids attempting to inflate resource ID 0.
+        host.addTab(host.newTabSpec("dvd").setIndicator(tabIndicator("DVD Remux")).setContent { dvd })
+        host.addTab(host.newTabSpec("merger").setIndicator(tabIndicator("Advanced Merger")).setContent { advancedMerger.view })
+        host.addTab(host.newTabSpec("batch").setIndicator(tabIndicator("BATCH")).setContent { batchPanel.view })
+        host.addTab(host.newTabSpec("cli").setIndicator(tabIndicator("CLI")).setContent { cliPanel.view })
         setContentView(host)
         restoreSelectionState(savedInstanceState)
 
@@ -84,6 +86,23 @@ class MainActivity : Activity(), BillingManager.Listener {
             buyButton.visibility = View.GONE
         }
         updateRemuxButton()
+    }
+
+    private fun tabIndicator(label: String): TextView = TextView(this).apply {
+        text = label
+        contentDescription = label
+        gravity = Gravity.CENTER
+        textSize = 13f
+        minHeight = dp(48)
+        setPadding(dp(8), dp(10), dp(8), dp(10))
+        setTypeface(typeface, Typeface.BOLD)
+        val accent = android.util.TypedValue()
+        theme.resolveAttribute(android.R.attr.colorAccent, accent, true)
+        background = android.graphics.drawable.StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_selected),
+                android.graphics.drawable.ColorDrawable((accent.data and 0x00ffffff) or 0x22000000))
+            addState(intArrayOf(), android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

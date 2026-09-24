@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Bundle private Wayland, X11, keyboard, and OpenGL dispatch libraries and their dependencies in the Linux standalone, so users do not need to install missing GUI packages manually.
+- Check GUI library resolution in the standalone self-test and add a clean Ubuntu runtime check to Linux CI and release validation.
+- Fix the Android startup crash caused by legacy TabHost indicator layouts missing from the Material theme; supply explicit tab views and verify opening all four tabs on emulators.
+- Recover pinned desktop FFmpeg tools from checksum-verified MattMux 1.4.13 packages when upstream daily-build archives have expired.
+
 ## 1.4.8 — 2026-09-13
 
 - Fix Windows native-tab repainting so switching among **DVD Remux**, **Advanced Merger**, and **BATCH** no longer leaves stale controls or apparent duplicate buttons behind.

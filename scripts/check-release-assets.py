@@ -12,6 +12,7 @@ required = [
     f"MattMux-{version}-Linux-amd64.deb",
     f"MattMux-{version}-Linux-amd64.tar.gz",
     f"MattMux-{version}-Linux-amd64Standalone",
+    f"MattMux-{version}-Linux-Library-Sources.tar.gz",
     f"MattMux-{version}-Android.apk",
     f"MattMux-{version}-Source.tar.gz",
     f"MattMux-{version}-THIRD-PARTY.md",
