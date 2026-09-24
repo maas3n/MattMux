@@ -27,7 +27,8 @@ def screen(name):
 try:
     print(adb("install", "-r", str(apk)))
     adb("shell", "am", "force-stop", package)
-    adb("logcat", "-b", "main", "-b", "system", "-b", "crash", "-c")
+    # Some API 26 images refuse log clearing. Preserve their logs instead;
+    # successful installation, launch, survival and tab navigation are required.
     launch = adb("shell", "am", "start", "-W", "-n", package + "/.MainActivity")
     (logs / "launch.txt").write_text(launch)
     if "Status: ok" not in launch or "Error:" in launch:
