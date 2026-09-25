@@ -815,21 +815,28 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeScanDvdNav(JNIEnv *
         return NULL;
     }
 
-    int32_t best_title = 1;
+    // libdvdnav takes one-based DVD title numbers; only libdvdread arrays are zero-based.
+    int32_t best_title = 0;
     uint64_t best_duration = 0;
     for (int32_t title = 1; title <= title_count; ++title) {
         uint64_t *chapter_times = NULL;
         uint64_t duration = 0;
-        uint32_t chapters = dvdnav_describe_title_chapters(nav, title - 1, &chapter_times, &duration);
+        uint32_t chapters = dvdnav_describe_title_chapters(nav, title, &chapter_times, &duration);
         __android_log_print(ANDROID_LOG_INFO, "MattMuxDVDNav",
                             "title %d/%d chapters=%u duration_ticks=%llu",
                             title, title_count, chapters, (unsigned long long)duration);
         free(chapter_times);
         values[title + 2] = (jlong)duration;
-        if (duration > best_duration) {
+        if (chapters > 0 && duration > best_duration) {
             best_duration = duration;
             best_title = title;
         }
+    }
+
+    if (!best_title) {
+        free(values);
+        dvdnav_close(nav);
+        return NULL;
     }
 
     values[0] = (jlong)title_count;
@@ -917,7 +924,9 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativePlanDvdNav(JNIEnv *
 } while (0)
 
     if (dvdnav_open(&nav, path) != DVDNAV_STATUS_OK || !nav) goto cleanup_plan;
-    uint32_t nav_chapters = dvdnav_describe_title_chapters(nav, global_title - 1, &chapter_times, &duration);
+    int32_t title_count = 0;
+    if (dvdnav_get_number_of_titles(nav, &title_count) != DVDNAV_STATUS_OK || global_title > title_count) goto cleanup_plan;
+    uint32_t nav_chapters = dvdnav_describe_title_chapters(nav, global_title, &chapter_times, &duration);
     if (!nav_chapters || !duration) goto cleanup_plan;
 
     dvd = DVDOpen(path);

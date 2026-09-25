@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Android: correct libdvdnav's one-based title numbering in title discovery and
+  planning. Batch, Remux, CLI and Advanced Merger now select the actual longest
+  title and keep its duration/chapters aligned with its video cells.
+- Add production JNI regressions for single-title DVDs and multi-title DVDs
+  with the main movie first/last, including staged IFO folder/ISO scans and
+  compressed-packet/chapter parity. Test mixed batch sources with opaque provider IDs.
+- Preserve emulator diagnostics containing non-UTF-8 bytes without failing a
+  successful startup test.
+
+
 - Bundle private Wayland, X11, keyboard, and OpenGL dispatch libraries and their dependencies in the Linux standalone, so users do not need to install missing GUI packages manually.
 - Check GUI library resolution in the standalone self-test and add a clean Ubuntu runtime check to Linux CI and release validation.
 - Fix the Android startup crash caused by legacy TabHost indicator layouts missing from the Material theme; supply explicit tab views and verify opening all four tabs on emulators.
