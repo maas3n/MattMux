@@ -20,14 +20,14 @@ jobs:
       BETA_APK: 'MattMux-1.4.2-Android-DVDNav-Beta1.apk'
     steps:
       - name: Check out build helper
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: main
           path: builder
           fetch-depth: 1
 
       - name: Check out original v1.4.2 source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: 1a2d74b71bbe3982490abe843ce9a62745c4534e
           path: source
