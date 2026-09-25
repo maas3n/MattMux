@@ -52,5 +52,6 @@ javac -d "$WORK/classes" \
   "$ROOT/android/native/tests/java/io/github/maas3n/mattmux/DvdTitleRegression.java"
 java -cp "$WORK/classes" io.github.maas3n.mattmux.DvdTitleRegression "$WORK/libmattmux_titles.so" "$WORK"
 for name in long-first long-last single; do
-    python3 "$ROOT/android/native/tests/remux_fingerprint.py" "$WORK/$name-folder.mkv" "$WORK/$name-iso.mkv" "$WORK/$name-main.vob"
+    python3 "$ROOT/android/native/tests/remux_fingerprint.py" "$WORK/$name-folder.mkv" "$WORK/$name-iso.mkv"
 done
+python3 "$ROOT/android/native/tests/verify-main-movie.py" "$WORK"
