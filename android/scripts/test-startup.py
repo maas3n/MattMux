@@ -14,7 +14,7 @@ package = "io.github.maas3n.mattmux"
 
 
 def adb(*args):
-    return subprocess.check_output(["adb", *args], text=True, stderr=subprocess.STDOUT)
+    return subprocess.check_output(["adb", *args], text=True, errors="replace", stderr=subprocess.STDOUT)
 
 
 def screen(name):

@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
-import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal data class AndroidBatchMovie(
@@ -26,7 +25,6 @@ internal class AndroidBatchProcessor(
     private val context: Context,
     private val engine: RemuxEngine = AndroidNativeRemuxEngine(),
 ) {
-    private data class Entry(val name: String, val documentId: String, val mimeType: String)
     private val cancelled = AtomicBoolean(false)
 
     val isAvailable: Boolean get() = engine.isAvailable
@@ -46,37 +44,13 @@ internal class AndroidBatchProcessor(
     fun discover(inputRoot: Uri): List<AndroidBatchMovie> {
         require(DocumentsContract.isTreeUri(inputRoot)) { "MOVIES_ROOT must be an Android document-tree URI" }
         val rootId = documentTreeRootId(inputRoot)
-        val items = mutableListOf<AndroidBatchMovie>()
-
-        listChildren(inputRoot, rootId).forEach { entry ->
-            when {
-                entry.mimeType == Document.MIME_TYPE_DIR -> {
-                    val folderUri = DocumentsContract.buildDocumentUriUsingTree(inputRoot, entry.documentId)
-                    if (containsVideoTs(inputRoot, entry.documentId)) {
-                        items += AndroidBatchMovie(entry.name, folderUri, folderUri)
-                    } else {
-                        listChildren(inputRoot, entry.documentId)
-                            .filter(::isIso)
-                            .forEach { iso ->
-                                items += AndroidBatchMovie(
-                                    isoBaseName(iso.name),
-                                    DocumentsContract.buildDocumentUriUsingTree(inputRoot, iso.documentId),
-                                    folderUri,
-                                )
-                            }
-                    }
-                }
-                isIso(entry) -> {
-                    items += AndroidBatchMovie(
-                        isoBaseName(entry.name),
-                        DocumentsContract.buildDocumentUriUsingTree(inputRoot, entry.documentId),
-                        inputRoot,
-                    )
-                }
-            }
+        val movies = discoverBatchDocuments(rootId) { id -> listChildren(inputRoot, id) }.map { movie ->
+            AndroidBatchMovie(
+                movie.name,
+                DocumentsContract.buildDocumentUriUsingTree(inputRoot, movie.sourceId),
+                DocumentsContract.buildDocumentUriUsingTree(inputRoot, movie.outputParentId),
+            )
         }
-
-        val movies = items.sortedWith(compareBy<AndroidBatchMovie> { it.name.lowercase(Locale.ROOT) }.thenBy { it.sourceUri.toString() })
         require(movies.isNotEmpty()) {
             "No immediate movie folders containing VIDEO_TS/VIDEO_TS.IFO or unmounted ISO files were found"
         }
@@ -115,7 +89,7 @@ internal class AndroidBatchProcessor(
                 val desiredName = BatchNaming.outputName(movie.name)
                 val basePercent = ((index.toDouble() / movies.size) * 100.0).toInt()
                 progress(basePercent, "[${index + 1}/${movies.size}] ${movie.name} — scanning DVD titles")
-                log("[${index + 1}/${movies.size}] scanning ${movie.name}")
+                log("[${index + 1}/${movies.size}] scanning ${movie.name}: ${movie.sourceUri}")
 
                 if (documentNameExists(targetTree, desiredName)) {
                     val message = "output already exists: $desiredName"
@@ -132,7 +106,7 @@ internal class AndroidBatchProcessor(
                     outputs += renamed
                     completed++
                     progress((((index + 1).toDouble() / movies.size) * 100.0).toInt(), "Completed ${index + 1} of ${movies.size} movie(s).")
-                    log("[${index + 1}/${movies.size}] completed ${movie.name} -> $renamed")
+                    log("[${index + 1}/${movies.size}] completed ${movie.name}: title=${remux.title} durationMs=${remux.durationMs} -> $renamed")
                 } catch (error: Throwable) {
                     if (cancelled.get()) return@forEachIndexed
                     val message = error.message ?: error.javaClass.simpleName
@@ -150,25 +124,10 @@ internal class AndroidBatchProcessor(
         return AndroidBatchResult(movies.size, completed, outputs, failures, wasCancelled)
     }
 
-    private fun containsVideoTs(treeUri: Uri, movieId: String): Boolean {
-        val videoTs = listChildren(treeUri, movieId).firstOrNull {
-            it.mimeType == Document.MIME_TYPE_DIR && it.name.equals("VIDEO_TS", true)
-        } ?: return false
-        return listChildren(treeUri, videoTs.documentId).any {
-            it.mimeType != Document.MIME_TYPE_DIR && it.name.equals("VIDEO_TS.IFO", true)
-        }
-    }
-
-    private fun isIso(entry: Entry): Boolean =
-        entry.mimeType != Document.MIME_TYPE_DIR && entry.name.endsWith(".iso", ignoreCase = true)
-
-    private fun isoBaseName(name: String): String =
-        name.substring(0, name.length - 4).trim().ifBlank { "DVD" }
-
     private fun documentNameExists(treeUri: Uri, name: String): Boolean =
         listChildren(treeUri, documentTreeRootId(treeUri)).any { it.name.equals(name, true) }
 
-    private fun listChildren(treeUri: Uri, parentId: String): List<Entry> {
+    private fun listChildren(treeUri: Uri, parentId: String): List<BatchDocument> {
         val children = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentId)
         return context.contentResolver.query(
             children,
@@ -180,7 +139,7 @@ internal class AndroidBatchProcessor(
             val mimeCol = cursor.getColumnIndexOrThrow(Document.COLUMN_MIME_TYPE)
             buildList {
                 while (cursor.moveToNext()) {
-                    add(Entry(cursor.getString(nameCol), cursor.getString(idCol), cursor.getString(mimeCol)))
+                    add(BatchDocument(cursor.getString(nameCol), cursor.getString(idCol), cursor.getString(mimeCol) == Document.MIME_TYPE_DIR))
                 }
             }
         } ?: error("Selected document provider did not return directory contents")

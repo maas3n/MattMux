@@ -2,18 +2,20 @@ package io.github.maas3n.mattmux;
 
 /** Host harness invokes the production JNI entry points, not a second remuxer. */
 public final class AndroidNativeRemuxEngine {
+    native long[] nativeScanDvdNav(String path);
+    native String[] nativePlanDvdNav(String path, int title);
     private boolean cancelled;
     private int progress;
     private boolean isNativeCancelled() { return cancelled; }
     private void onNativeProgress(int value) { progress = value; }
-    private native long nativeOpenIso(int fd);
-    private native void nativeCloseIso(long handle);
-    private native byte[] nativeReadIsoIfo(long handle, int titleSet);
+    native long nativeOpenIso(int fd);
+    native void nativeCloseIso(long handle);
+    native byte[] nativeReadIsoIfo(long handle, int titleSet);
     private native String[] nativeProbeTracks(int[] fds, long[] starts, long[] ends, long iso, int titleSet, String[] languages, int[] palette);
-    private native String nativeRemux(int[] fds, long[] starts, long[] ends, int output,
+    native String nativeRemux(int[] fds, long[] starts, long[] ends, int output,
         long[] chapterStarts, long[] chapterEnds, int[] selectedStreams, long iso, int titleSet, String[] languages, int[] palette);
-    private static native int openPath(String path, boolean output);
-    private static native void closePath(int fd);
+    static native int openPath(String path, boolean output);
+    static native void closePath(int fd);
 
     public static void main(String[] args) throws Exception {
         System.load(args[0]);
