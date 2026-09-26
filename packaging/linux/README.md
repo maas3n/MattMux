@@ -16,12 +16,20 @@ process-local `LD_LIBRARY_PATH`. Users do not need to install `libwayland-client
 to start this build, and no administrator access is needed for extraction.
 
 The host must still provide compatible glibc (the release build targets Ubuntu
-24.04), a graphical session, and working graphics drivers. GPU vendor drivers
-and the system ELF loader are not copied from the build runner.
+24.04) and a graphical session. On X11/WSLg, the launcher tests a real OpenGL
+context using the host driver first. If that fails, it retries with a private
+Mesa llvmpipe software renderer. This affects GUI drawing, not media remuxing.
+The fallback includes Mesa's dynamically loaded vendor and DRI libraries and
+their dependencies. Hardware GPU drivers and the system ELF loader are not
+copied from the build runner. A missing or unreachable display still needs to
+be fixed in the desktop/WSLg environment; a renderer cannot supply a display.
 
 `--standalone-self-test` resolves the GUI and every private shared library with
 the host ELF loader before exercising the embedded command-line tools. CI also
-runs this check in a clean Ubuntu container without GUI packages. Library source
+runs this check in a clean Ubuntu container without GUI packages, then opens
+the actual Fyne window with `--graphics-self-test` through an external Xvfb
+display. It verifies software fallback, failure with the bundled DRI driver
+removed, and preference for a working host driver. Library source
 package names and exact versions are recorded in the extracted
 `licenses/library-packages.json`. The build downloads the exact corresponding
 source packages into `MattMux-VERSION-Linux-Library-Sources.tar.gz`. Build hosts

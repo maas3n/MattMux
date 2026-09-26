@@ -40,7 +40,7 @@ func TestChooserRespondsToEveryAction(t *testing.T) {
 	send := user32.NewProc("SendMessageTimeoutW")
 	for _, action := range []int{idRun, idInstall, idExit} {
 		t.Run(strconv.Itoa(action), func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 20 * time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestChooserHelper$")
 			cmd.Env = append(os.Environ(), "MATTMUX_CHOOSER_TEST=1")
@@ -51,7 +51,7 @@ func TestChooserRespondsToEveryAction(t *testing.T) {
 			}
 			defer cmd.Process.Kill()
 			var hwnd uintptr
-			for deadline := time.Now().Add(10*time.Second); time.Now().Before(deadline); {
+			for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
 				hwnd, _, _ = find.Call(uintptr(unsafe.Pointer(utf16Ptr("MattMuxAllInOneWindow"))), 0)
 				var pid uint32
 				owner.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
@@ -59,7 +59,7 @@ func TestChooserRespondsToEveryAction(t *testing.T) {
 					break
 				}
 				hwnd = 0
-				time.Sleep(20*time.Millisecond)
+				time.Sleep(20 * time.Millisecond)
 			}
 			if hwnd == 0 {
 				t.Fatal("chooser window did not appear")
@@ -71,7 +71,7 @@ func TestChooserRespondsToEveryAction(t *testing.T) {
 				if ok == 0 {
 					t.Fatalf("chooser stopped responding: %v", err)
 				}
-				time.Sleep(10*time.Millisecond)
+				time.Sleep(10 * time.Millisecond)
 			}
 			var result uintptr
 			send.Call(hwnd, wmCommand, uintptr(action), 0, 2, 2000, uintptr(unsafe.Pointer(&result)))

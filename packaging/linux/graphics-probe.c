@@ -6,7 +6,8 @@ int main(void) {
     Display *display = XOpenDisplay(NULL);
     if (!display) { fputs("Cannot open X display\n", stderr); return 1; }
     int attrs[] = {GLX_RGBA, GLX_DOUBLEBUFFER, GLX_RED_SIZE, 8,
-                   GLX_GREEN_SIZE, 8, GLX_BLUE_SIZE, 8, None};
+                   GLX_GREEN_SIZE, 8, GLX_BLUE_SIZE, 8, GLX_ALPHA_SIZE, 8,
+                   GLX_DEPTH_SIZE, 24, GLX_STENCIL_SIZE, 8, None};
     XVisualInfo *visual = glXChooseVisual(display, DefaultScreen(display), attrs);
     if (!visual) { fputs("No usable GLX visual\n", stderr); return 1; }
     GLXContext context = glXCreateContext(display, visual, NULL, True);
