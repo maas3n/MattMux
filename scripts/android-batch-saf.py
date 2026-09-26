@@ -56,16 +56,25 @@ def click(label):
 def choose_directory(button, folder):
     click(button)
     tree = screen()
-    drawer = next((n for n in tree.iter("node") if n.get("content-desc", "").casefold() in ("show roots", "show navigation drawer")), None)
-    if drawer is None:
-        raise AssertionError("Missing DocumentsUI navigation drawer")
-    click_node(drawer)
-    tree = screen()
-    storage = next((n for n in tree.iter("node") if "sdk_gphone" in n.get("text", "") or n.get("text", "").casefold() in ("internal storage", "pixel 2")), None)
-    if storage is None:
-        raise AssertionError("Missing local storage root in DocumentsUI")
-    click_node(storage)
-    for part in ("Documents", "MattMuxBatchRegression", folder):
+    documents_crumb = next((n for n in tree.iter("node") if n.get("resource-id", "").endswith("breadcrumb_text") and n.get("text") == "Documents"), None)
+    if documents_crumb is not None:
+        click_node(documents_crumb)
+    else:
+        root_crumb = next((n for n in tree.iter("node") if n.get("resource-id", "").endswith("breadcrumb_text") and "sdk_gphone" in n.get("text", "")), None)
+        if root_crumb is not None:
+            click_node(root_crumb)
+        else:
+            drawer = next((n for n in tree.iter("node") if n.get("content-desc", "").casefold() in ("show roots", "show navigation drawer")), None)
+            if drawer is None:
+                raise AssertionError("Cannot navigate to local storage in DocumentsUI")
+            click_node(drawer)
+            tree = screen()
+            storage = next((n for n in tree.iter("node") if "sdk_gphone" in n.get("text", "") or n.get("text", "").casefold() in ("internal storage", "pixel 2")), None)
+            if storage is None:
+                raise AssertionError("Missing local storage root in DocumentsUI")
+            click_node(storage)
+        click("Documents")
+    for part in ("MattMuxBatchRegression", folder):
         click(part)
     click("Use this folder")
     click("Allow")
