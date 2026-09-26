@@ -33,6 +33,8 @@ Copy-Item -LiteralPath $thinSetup -Destination (Join-Path $assets 'MattMux-1.2.0
 Push-Location $PSScriptRoot
 try {
     $env:CGO_ENABLED = '0'
+    go test -v .\main.go .\main_test.go
+    if ($LASTEXITCODE -ne 0) { throw "All-in-one chooser regression failed with exit code $LASTEXITCODE" }
     go build -trimpath -buildvcs=false -ldflags '-s -w -H=windowsgui' -o $output .\main.go
     if ($LASTEXITCODE -ne 0) { throw "All-in-one build failed with exit code $LASTEXITCODE" }
 }
