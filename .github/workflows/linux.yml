@@ -34,6 +34,9 @@ jobs:
           sudo apt-get install -y \
             gcc g++ cmake ninja-build curl xz-utils file ffmpeg dvdauthor genisoimage \
             libgl1-mesa-dev libgl1-mesa-dri libglx-mesa0 libegl-mesa0 xvfb xorg-dev libwayland-dev libxkbcommon-dev
+          # Match preinstalled transitive libraries to the current deb-src index.
+          # Ubuntu removes superseded security sources from that index.
+          sudo apt-get upgrade -y
 
       - name: Verify Go module metadata
         working-directory: src
