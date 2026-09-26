@@ -330,7 +330,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             gcc g++ cmake ninja-build curl xz-utils file \
-            libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
+            libgl1-mesa-dev libgl1-mesa-dri libglx-mesa0 libegl-mesa0 xvfb xorg-dev libwayland-dev libxkbcommon-dev
 
       - name: Verify Go module metadata
         working-directory: src
