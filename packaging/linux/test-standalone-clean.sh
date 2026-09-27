@@ -26,13 +26,17 @@ docker run --rm --network none \
   --mount type=bind,src=/tmp/.X11-unix,dst=/tmp/.X11-unix,readonly \
   --mount "type=bind,src=$standalone,dst=/mattmux,readonly" \
   ubuntu:24.04 bash -euc '
-    timeout 120 /mattmux --graphics-self-test > /tmp/graphics.log 2>&1
+    if ! timeout 120 /mattmux --graphics-self-test > /tmp/graphics.log 2>&1; then
+      cat /tmp/graphics.log
+      exit 1
+    fi
     cat /tmp/graphics.log
     grep -F "using bundled software rendering" /tmp/graphics.log
     grep -F "MattMux GUI graphics self-test: OK" /tmp/graphics.log
     root=$(echo /root/.cache/mattmux/standalone/*)
-    # Prove success above depended on the bundled DRI driver, not a host one.
-    rm "$root/software/dri/swrast_dri.so"
+    # Disable the whole private stack: Mesa versions can load Gallium
+    # without going through the swrast_dri.so entry point.
+    mv "$root/software" "$root/software-disabled"
     if LD_LIBRARY_PATH="$root/software:$root/lib" \
       LIBGL_DRIVERS_PATH="$root/software/dri" LIBGL_ALWAYS_SOFTWARE=1 \
       GALLIUM_DRIVER=llvmpipe __GLX_VENDOR_LIBRARY_NAME=mesa \
@@ -43,7 +47,10 @@ docker run --rm --network none \
   '
 
 # A working host Mesa driver must still be preferred over the fallback.
-XDG_CACHE_HOME="$work/cache" timeout 120 "$standalone" --graphics-self-test >"$work/host.log" 2>&1
+if ! XDG_CACHE_HOME="$work/cache" timeout 120 "$standalone" --graphics-self-test >"$work/host.log" 2>&1; then
+  cat "$work/host.log"
+  exit 1
+fi
 cat "$work/host.log"
 grep -F 'MattMux GUI graphics self-test: OK' "$work/host.log"
 if grep -F 'using bundled software rendering' "$work/host.log"; then

@@ -28,7 +28,7 @@ be fixed in the desktop/WSLg environment; a renderer cannot supply a display.
 the host ELF loader before exercising the embedded command-line tools. CI also
 runs this check in a clean Ubuntu container without GUI packages, then opens
 the actual Fyne window with `--graphics-self-test` through an external Xvfb
-display. It verifies software fallback, failure with the bundled DRI driver
+display. It verifies software fallback, failure with the private renderer stack
 removed, and preference for a working host driver. Library source
 package names and exact versions are recorded in the extracted
 `licenses/library-packages.json`. The build downloads the exact corresponding
