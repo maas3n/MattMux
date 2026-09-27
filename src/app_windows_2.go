@@ -23,9 +23,9 @@ import (
 
 func setSource(p string) {
 	p = strings.TrimSpace(p)
-	normalized, err := normalizeSource(p)
+	normalized, err := normalizeTabSource(p)
 	if err != nil {
-		messageBox(app.hwnd, "Invalid DVD source", err.Error(), MB_OK|MB_ICONWARNING)
+		messageBox(app.hwnd, "Invalid source", err.Error(), MB_OK|MB_ICONWARNING)
 		return
 	}
 	setText(app.sourceEdit, normalized)
@@ -101,6 +101,7 @@ func setBusyUI(busy bool) {
 	procEnableWindow.Call(app.scanBtn, enabled)
 	procEnableWindow.Call(app.metaBtn, enabled)
 	procEnableWindow.Call(app.remuxBtn, enabled)
+	procEnableWindow.Call(app.demuxBtn, enabled)
 	procEnableWindow.Call(app.sourceEdit, enabled)
 	procEnableWindow.Call(app.sourceDVDButton, enabled)
 	procEnableWindow.Call(app.sourceISOButton, enabled)
@@ -116,9 +117,27 @@ func discoverDVDTitlesViaDVDVideo(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	tools, err := ensureTools(ctx, false)
+	tools, err := ensureTools(ctx, isMKVSource(src))
 	if err != nil {
 		return err
+	}
+
+	if isMKVSource(src) {
+		titles, err := scanMKV(ctx, tools, src)
+		if err != nil {
+			return err
+		}
+		app.titlesMu.Lock()
+		app.titles = titles
+		app.titlesSource = src
+		app.titlesMu.Unlock()
+		procSendMessageW.Call(app.titleCombo, CB_RESETCONTENT, 0, 0)
+		label := utf16Ptr("Title 1 — MKV — " + formatDuration(titles[0].Duration))
+		procSendMessageW.Call(app.titleCombo, CB_ADDSTRING, 0, uintptr(unsafe.Pointer(label)))
+		procSendMessageW.Call(app.titleCombo, CB_SETCURSEL, 0, 0)
+		setProgress(1)
+		setStatus("MKV scanned with MediaInfo. Show Metadata to select tracks.")
+		return nil
 	}
 
 	// FFmpeg's dvdvideo demuxer accepts title numbers 1..99 and uses
@@ -177,6 +196,17 @@ func showMetadata(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if isMKVSource(src) {
+		probe, details, err := probeTabMKV(ctx, tools, src)
+		if err != nil {
+			return err
+		}
+		requestWindowsTrackWindow(src, t.Number, trackOptionsFromProbe(probe), details)
+		setProgress(1)
+		setStatus("MKV metadata loaded with MediaInfo. Select tracks for remux or demux.")
+		return nil
+	}
+
 	setStatus(fmt.Sprintf("Reading metadata for title %d…", t.Number))
 	setProgress(.15)
 	probe, err := probeStreams(ctx, tools.ffprobe, src, t.Number)
@@ -289,6 +319,19 @@ func remuxSelected(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if isMKVSource(src) {
+		indexes, selected := windowsSelectedTrackIndexes(src, t.Number)
+		if !selected {
+			indexes = nil
+		}
+		final, err := remuxMKV(ctx, tools, src, outDir, indexes, isChecked(app.preserveChapters))
+		if err == nil {
+			setProgress(1)
+			setStatus("Complete: " + final)
+		}
+		return err
+	}
+
 	final := outputPath(src, outDir, t.Number)
 	if _, err := os.Stat(final); err == nil {
 		return fmt.Errorf("Output already exists:\n%s\n\nChoose another output folder or move/rename the existing file.", final)
@@ -383,4 +426,41 @@ type toolPaths struct {
 	ffmpeg    string
 	ffprobe   string
 	mediainfo string
+}
+
+func chooseWindowsDemux() {
+	// Yes/No/Cancel offers both lossless MPEG-2 forms without changing other codecs.
+	choice := messageBox(app.hwnd, "DVD video export format", "Save MPEG-2 video as VOB?\n\nYes: .VOB video\nNo: .mpeg2 elementary video\nCancel: return", 0x00000003|MB_ICONQUESTION)
+	if choice != 6 && choice != 7 {
+		return
+	}
+	video := "mpeg2"
+	if choice == 6 {
+		video = "vob"
+	}
+	startAsync("Demuxing selected streams…", func(ctx context.Context) error {
+		src, err := currentSource()
+		if err != nil {
+			return err
+		}
+		title, err := selectedTitle()
+		if err != nil {
+			return err
+		}
+		indexes, selected := windowsSelectedTrackIndexes(src, title.Number)
+		if !selected {
+			indexes = nil
+		}
+		tools, err := ensureTools(ctx, false)
+		if err != nil {
+			return err
+		}
+		final, err := demuxTab(ctx, tools, src, title.Number, strings.TrimSpace(getText(app.outputEdit)), indexes, isChecked(app.preserveChapters), video)
+		if err == nil {
+			setProgress(1)
+			setStatus("Demux complete: " + final)
+			messageBox(app.hwnd, "Demux complete", final, MB_OK|MB_ICONINFORMATION)
+		}
+		return err
+	})
 }

@@ -29,7 +29,7 @@ data class TrackInfo(
     }
 }
 
-data class TrackProbeResult(val title: Int, val tracks: List<TrackInfo>)
+data class TrackProbeResult(val title: Int, val tracks: List<TrackInfo>, val details: String = "")
 internal data class DvdTitleScanInfo(val title: Int, val durationMs: Long, val longest: Boolean)
 internal data class DvdScanResult(val titles: List<DvdTitleScanInfo>, val longestTitle: Int)
 internal data class DvdMetadataResult(

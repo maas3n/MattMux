@@ -167,7 +167,7 @@ func normalizeSource(p string) (string, error) {
 	return "", errors.New("the selected folder does not contain a VIDEO_TS DVD structure")
 }
 
-func currentSource() (string, error) { return normalizeSource(getText(app.sourceEdit)) }
+func currentSource() (string, error) { return normalizeTabSource(getText(app.sourceEdit)) }
 func selectedTitle() (titleInfo, error) {
 	idx, _, _ := procSendMessageW.Call(app.titleCombo, CB_GETCURSEL, 0, 0)
 	if int32(idx) < 0 {

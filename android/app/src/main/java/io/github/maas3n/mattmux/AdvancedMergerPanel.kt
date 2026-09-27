@@ -213,6 +213,7 @@ class AdvancedMergerPanel(private val activity: Activity) {
 class AdvancedMergerNative {
     val cancelled = AtomicBoolean(false)
     @Suppress("unused") private fun isNativeCancelled(): Boolean = cancelled.get()
+    external fun demux(path: String, directory: String, streams: IntArray, chapters: Boolean, vob: Boolean): String?
     external fun probe(path: String): Array<String>
     external fun validateChapters(path: String): String?
     external fun mux(paths: Array<String>, inputIndexes: IntArray, streamIndexes: IntArray, chapters: String?, output: String): String?

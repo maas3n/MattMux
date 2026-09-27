@@ -414,7 +414,7 @@ jobs:
       - name: Install Android platform and native toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y binutils curl patchelf xz-utils autoconf automake libtool pkg-config ffmpeg dvdauthor genisoimage libavformat-dev libavcodec-dev libavutil-dev
+          sudo apt-get install -y cmake ninja-build binutils curl patchelf xz-utils autoconf automake libtool pkg-config ffmpeg dvdauthor genisoimage libavformat-dev libavcodec-dev libavutil-dev
           sdkmanager \
             'platforms;android-36' \
             'build-tools;36.0.0' \
@@ -500,6 +500,8 @@ jobs:
           test -s "dist/android-release/MattMux-$version-Android.apk"
           cp "android/native/.work/ffmpeg-${FFMPEG_VERSION}.tar.xz" "dist/android-release/FFmpeg-${FFMPEG_VERSION}-source.tar.xz"
           cp android/native/.work/libudfread-1.1.2-source.tar.gz dist/android-release/
+          cp android/native/.work/MediaInfoLib-source.tar.gz android/native/.work/ZenLib-source.tar.gz dist/android-release/
+          cp android/app/src/main/assets/ffmpeg/*-License.* dist/android-release/
           cp android/app/src/main/assets/ffmpeg/LIBUDFREAD_COPYING.txt dist/android-release/
           cp android/app/src/main/assets/ffmpeg/ffmpeg-build-info.txt dist/android-release/FFmpeg-build-info.txt
           cp android/app/src/main/assets/ffmpeg/COPYING.LGPLv2.1 dist/android-release/COPYING.LGPLv2.1.txt
