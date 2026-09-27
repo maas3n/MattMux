@@ -93,4 +93,6 @@ Android ABIs. Pinned sources: MediaInfoLib
 `2ddc277fe7ecfcbfe45616bb9cd9e23079113ecd`. Their BSD-style notices are included
 as `MediaInfoLib-License.html` and `ZenLib-License.txt`; exact source archives are
 published with each release. Built statically into the JNI bridge with Android's
-system zlib; no runtime downloads are required for MKV metadata.
+system zlib. The NDK static C++ runtime notices accompany it as `NDK-NOTICE.txt`;
+the exact NDK revision is recorded in `ffmpeg-build-info.txt`. No runtime
+downloads are required for MKV metadata.

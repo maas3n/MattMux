@@ -15,6 +15,8 @@ class DemuxSmokeInstrumentation : Instrumentation() {
         val result = Bundle()
         val root = File(targetContext.cacheDir, "demux-smoke").apply { mkdirs() }
         try {
+            val runtime = AndroidNativeRemuxEngine()
+            check(runtime.isAvailable) { runtime.unavailableReason ?: "Native runtime unavailable" }
             val native = AdvancedMergerNative()
             for (name in listOf("mixed.mkv", "subtitles.mkv", "raw-h264.mkv")) {
                 val source = File(root, name)

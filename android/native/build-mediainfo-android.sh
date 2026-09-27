@@ -4,6 +4,10 @@ root="$(cd "$(dirname "$0")" && pwd)"
 work="$root/.work/mediainfo"
 assets="$root/../app/src/main/assets/ffmpeg"
 mkdir -p "$work" "$assets"
+# MediaInfo's static C++ runtime carries the NDK/LLVM notices with the APK.
+notices=("$ANDROID_NDK_HOME"/NOTICE*)
+test -f "${notices[0]}"
+cat "${notices[@]}" > "$assets/NDK-NOTICE.txt"
 checkout() {
   local name="$1" commit="$2"
   git init -q "$work/$name"

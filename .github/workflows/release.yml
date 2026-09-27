@@ -502,6 +502,7 @@ jobs:
           cp android/native/.work/libudfread-1.1.2-source.tar.gz dist/android-release/
           cp android/native/.work/MediaInfoLib-source.tar.gz android/native/.work/ZenLib-source.tar.gz dist/android-release/
           cp android/app/src/main/assets/ffmpeg/*-License.* dist/android-release/
+          cp android/app/src/main/assets/ffmpeg/NDK-NOTICE.txt dist/android-release/
           cp android/app/src/main/assets/ffmpeg/LIBUDFREAD_COPYING.txt dist/android-release/
           cp android/app/src/main/assets/ffmpeg/ffmpeg-build-info.txt dist/android-release/FFmpeg-build-info.txt
           cp android/app/src/main/assets/ffmpeg/COPYING.LGPLv2.1 dist/android-release/COPYING.LGPLv2.1.txt
