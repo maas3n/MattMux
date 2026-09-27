@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"debug/elf"
 	"embed"
@@ -16,6 +17,7 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 )
 
 var appVersion = "dev"
@@ -85,10 +87,46 @@ func main() {
 			app = filepath.Join(root, "mattmux-cli-bin")
 		}
 	}
+	if app == filepath.Join(root, "mattmux-bin") && os.Getenv("DISPLAY") != "" {
+		env, err = graphicsEnv(root, env)
+		if err != nil {
+			fatal(err.Error())
+		}
+	}
 	args := append([]string{app}, userArgs...)
 	if err := syscall.Exec(app, args, env); err != nil {
 		fatal(fmt.Sprintf("could not start MattMux: %v", err))
 	}
+}
+
+func softwareEnv(root string, env []string) []string {
+	env = replaceEnv(env, "LD_LIBRARY_PATH", filepath.Join(root, "software")+":"+filepath.Join(root, "lib"))
+	env = replaceEnv(env, "LIBGL_DRIVERS_PATH", filepath.Join(root, "software", "dri"))
+	env = replaceEnv(env, "LIBGL_ALWAYS_SOFTWARE", "1")
+	env = replaceEnv(env, "GALLIUM_DRIVER", "llvmpipe")
+	env = replaceEnv(env, "__GLX_VENDOR_LIBRARY_NAME", "mesa")
+	return env
+}
+
+func graphicsEnv(root string, env []string) ([]string, error) {
+	probe := func(candidate []string) ([]byte, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, filepath.Join(root, "graphics-probe"))
+		cmd.Env = candidate
+		return cmd.CombinedOutput()
+	}
+	first, err := probe(env)
+	if err == nil {
+		return env, nil
+	}
+	fallback := softwareEnv(root, env)
+	second, err := probe(fallback)
+	if err != nil {
+		return nil, fmt.Errorf("could not initialize OpenGL using either the system driver or bundled software renderer. Check that your desktop/WSLg display is available.\nSystem: %s\nSoftware: %s", first, second)
+	}
+	fmt.Fprintln(os.Stderr, "MattMux: using bundled software rendering for this display")
+	return fallback, nil
 }
 
 func runtimeEnv(root string) []string {
@@ -228,11 +266,14 @@ func selfTest(root string, env []string) error {
 	}
 	if loader != "" {
 		for _, p := range payload {
-			if p.name != "mattmux-bin" && !strings.HasPrefix(p.name, "lib/") {
+			if p.name != "mattmux-bin" && p.name != "graphics-probe" && !strings.HasPrefix(p.name, "lib/") && !strings.HasPrefix(p.name, "software/") {
 				continue
 			}
 			cmd := exec.Command(loader, "--list", filepath.Join(root, p.name))
 			cmd.Env = env
+			if strings.HasPrefix(p.name, "software/") {
+				cmd.Env = softwareEnv(root, env)
+			}
 			out, err := cmd.CombinedOutput()
 			if err != nil || bytes.Contains(out, []byte("not found")) {
 				return fmt.Errorf("%s dependency check failed: %v: %s", p.name, err, strings.TrimSpace(string(out)))

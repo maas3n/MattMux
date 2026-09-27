@@ -35,6 +35,7 @@ install -m 0755 "$CLI" "$PAYLOAD/mattmux-cli-bin"
 install -m 0755 "$FFMPEG" "$PAYLOAD/ffmpeg"
 install -m 0755 "$FFPROBE" "$PAYLOAD/ffprobe"
 install -m 0755 "$MEDIAINFO" "$PAYLOAD/mediainfo"
+gcc -O2 -Wall -Wextra "$ROOT/packaging/linux/graphics-probe.c" -o "$PAYLOAD/graphics-probe" -lGL -lX11
 python3 "$ROOT/packaging/linux/bundle-standalone-libs.py" "$PAYLOAD"
 # Preserve the existing multimedia notices alongside the new GUI notices.
 cp -a "$WORK/deb-root/usr/share/doc/mattmux/." "$PAYLOAD/licenses/"

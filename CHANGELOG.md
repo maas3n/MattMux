@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Keep the Windows All-in-One chooser and its message loop on the same OS
+  thread to prevent the launcher becoming unresponsive. Test all three buttons.
+- Add an isolated Mesa software renderer to the Linux standalone, with exact
+  dependency sources and notices. Prefer a working system OpenGL driver and
+  automatically fall back when graphics initialization fails.
+- Validate actual Linux GUI startup on a clean runtime without host graphics
+  client libraries, in addition to checking library loading.
+
 - Android: correct libdvdnav's one-based title numbering in title discovery and
   planning. Batch, Remux, CLI and Advanced Merger now select the actual longest
   title and keep its duration/chapters aligned with its video cells.

@@ -35,6 +35,16 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Test All-in-One chooser responsiveness
+        working-directory: packaging/all-in-one
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force assets | Out-Null
+          Set-Content assets/MattMux-1.2.0-Portable.zip 'test payload'
+          Set-Content assets/MattMux-1.2.0-Thin-Setup.exe 'test payload'
+          go test -v main.go main_test.go
+          if ($LASTEXITCODE -ne 0) { throw 'All-in-One chooser test failed' }
+
       - name: Build Windows GUI
         shell: pwsh
         run: |

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -155,6 +156,10 @@ func createControl(className, text string, style uint32, x, y, w, h int32, paren
 }
 
 func chooseAction() error {
+	// Win32 windows and their message queues belong to the creating OS thread.
+	// A Go goroutine may otherwise migrate while a syscall is blocked.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	instance, _, _ := procGetModuleHandleW.Call(0)
 	className := utf16Ptr("MattMuxAllInOneWindow")
 	cursor, _, _ := procLoadCursorW.Call(0, 32512)

@@ -9,6 +9,7 @@ on:
       - 'android/**'
       - '.github/workflows/android.yml'
       - '.github/workflows/android-startup.yml'
+      - '.github/workflows/release.yml'
   workflow_dispatch:
 
 concurrency:

@@ -59,6 +59,17 @@ func main() {
 	w.Resize(fyne.NewSize(840, 620))
 	w.CenterOnScreen()
 	w.Show()
+	if len(os.Args) > 1 && os.Args[1] == "--graphics-self-test" {
+		// Exercise the same Fyne window/context as normal startup, then let the
+		// event loop render before closing. Used by the clean-runtime CI check.
+		go func() {
+			time.Sleep(time.Second)
+			fyne.Do(func() { w.Close() })
+		}()
+		a.Run()
+		fmt.Println("MattMux GUI graphics self-test: OK")
+		return
+	}
 	go g.checkInstalledTools()
 	a.Run()
 }
