@@ -203,7 +203,11 @@ func demuxTab(ctx context.Context, tools toolPaths, source string, title int, ou
 			os.RemoveAll(final)
 		}
 	}()
-	args = tabInput([]string{"-hide_banner", "-v", "error", "-nostdin", "-n"}, source, title)
+	args = []string{"-hide_banner", "-v", "error", "-nostdin", "-n"}
+	if isMKVSource(source) {
+		args = append(args, "-copyts")
+	}
+	args = tabInput(args, source, title)
 	for _, e := range exports {
 		name := filepath.Join(final, fmt.Sprintf("track-%02d.%s", e.index, e.format.Extension))
 		args = append(args, "-map", fmt.Sprintf("0:%d", e.index), "-c", "copy", "-map_metadata", "-1", "-map_chapters", "-1")
@@ -211,7 +215,7 @@ func demuxTab(ctx context.Context, tools toolPaths, source string, title int, ou
 			args = append(args, "-bsf:v", e.format.Filter)
 		}
 		if e.format.Muxer == "vob" {
-			args = append(args, "-muxdelay", "0", "-muxpreload", "0")
+			args = append(args, "-muxdelay", "0", "-preload", "0")
 		}
 		args = append(args, "-f", e.format.Muxer, name)
 	}

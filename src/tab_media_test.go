@@ -3,7 +3,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -72,9 +74,16 @@ func TestMKVTabRemuxDemux(t *testing.T) {
 	if !strings.Contains(string(b), "CHAPTER01NAME=Opening") {
 		t.Fatalf("chapters: %s", b)
 	}
-	b, _ = os.ReadFile(filepath.Join(output, "track-02.srt"))
-	if !strings.Contains(string(b), "00:00:00,206") {
-		t.Fatalf("subtitle timing: %s", b)
+	packetTimes := func(path string) string {
+		t.Helper()
+		b, e := exec.Command(ffprobe, "-v", "error", "-select_streams", "s", "-show_packets", "-show_entries", "packet=pts_time,data_hash", "-show_data_hash", "sha256", "-of", "json", path).Output()
+		if e != nil {
+			t.Fatal(e)
+		}
+		return string(b)
+	}
+	if packetTimes(source) != packetTimes(filepath.Join(output, "track-02.srt")) {
+		t.Fatalf("subtitle timing/payload changed: %s -> %s", packetTimes(source), packetTimes(filepath.Join(output, "track-02.srt")))
 	}
 	remux, e := remuxMKV(ctx, tools, source, dir, []int{1, 2}, false)
 	if e != nil {
@@ -105,5 +114,73 @@ func TestMKVTabRemuxDemux(t *testing.T) {
 	cancel()
 	if _, e = demuxTab(cancelled, tools, source, 1, dir, nil, true, "mpeg2"); e == nil {
 		t.Fatal("ignored cancellation")
+	}
+}
+
+func TestDVDSubtitleExport(t *testing.T) {
+	ffmpeg, e := exec.LookPath("ffmpeg")
+	if e != nil {
+		t.Skip("ffmpeg unavailable")
+	}
+	ffprobe, e := exec.LookPath("ffprobe")
+	if e != nil {
+		t.Skip("ffprobe unavailable")
+	}
+	dir := t.TempDir()
+	idx := filepath.Join(dir, "input.idx")
+	sub := filepath.Join(dir, "input.sub")
+	// Small synthetic DVD SPU packets, in ordinary VobSub packs (no IFO parsing).
+	spu, _ := hex.DecodeString("001e000611110000000603012304fff005000001000001060004000501ff")
+	var packs []byte
+	for _, ms := range []int64{200, 600} {
+		pts := ms * 90
+		stamp := []byte{0x21 | byte((pts>>29)&14), byte(pts >> 22), byte((pts>>14)&254) | 1, byte(pts >> 7), byte((pts<<1)&254) | 1}
+		data := append([]byte{0x80, 0x80, 5}, stamp...)
+		data = append(data, 0x20)
+		data = append(data, spu...)
+		pack, _ := hex.DecodeString("000001ba4400040004010189c3f8")
+		pack = append(pack, 0, 0, 1, 0xbd, byte(len(data)>>8), byte(len(data)))
+		pack = append(pack, data...)
+		padding := 2048 - len(pack) - 6
+		pack = append(pack, 0, 0, 1, 0xbe, byte(padding>>8), byte(padding))
+		pack = append(pack, bytes.Repeat([]byte{255}, padding)...)
+		packs = append(packs, pack...)
+	}
+	os.WriteFile(sub, packs, 0600)
+	palette := "size: 720x576\npalette: 000000, ffffff, ff0000, 00ff00, 0000ff, 000000, 000000, 000000, 000000, 000000, 000000, 000000, 000000, 000000, 000000, 000000\n"
+	os.WriteFile(idx, []byte("# VobSub index file, v7 (do not modify this line!)\n"+palette+"id: en, index: 0\ntimestamp: 00:00:00:200, filepos: 000000000\ntimestamp: 00:00:00:600, filepos: 000000800\n"), 0600)
+	source := filepath.Join(dir, "dvd.mkv")
+	b, e := exec.Command(ffmpeg, "-v", "error", "-f", "lavfi", "-i", "color=size=32x32:rate=25:duration=1", "-i", idx, "-map", "0:v", "-map", "1:s", "-c:v", "mpeg2video", "-bf", "0", "-c:s", "copy", source).CombinedOutput()
+	if e != nil {
+		t.Fatalf("fixture: %v %s", e, b)
+	}
+	tools := toolPaths{ffmpeg: ffmpeg, ffprobe: ffprobe}
+	for _, format := range []string{"mpeg2", "vob"} {
+		out, e := demuxTab(context.Background(), tools, source, 1, dir, nil, false, format)
+		if e != nil {
+			t.Fatal(e)
+		}
+		b, e = os.ReadFile(filepath.Join(out, "track-01.idx"))
+		if e != nil || !strings.Contains(string(b), palette) || !strings.Contains(string(b), "00:00:00:200") || !strings.Contains(string(b), "00:00:00:600") {
+			t.Fatalf("IDX timing/palette: %v %s", e, b)
+		}
+		hash := func(path string) string {
+			t.Helper()
+			b, e := exec.Command(ffprobe, "-v", "error", "-select_streams", "s", "-show_packets", "-show_entries", "packet=pts_time,data_hash", "-show_data_hash", "sha256", "-of", "json", path).Output()
+			if e != nil {
+				t.Fatal(e)
+			}
+			return string(b)
+		}
+		if hash(idx) != hash(filepath.Join(out, "track-01.idx")) {
+			t.Fatal("DVD subtitle payload/timing changed")
+		}
+		ext := "mpeg2"
+		if format == "vob" {
+			ext = "VOB"
+		}
+		if _, e = exec.Command(ffprobe, "-v", "error", filepath.Join(out, "track-00."+ext)).CombinedOutput(); e != nil {
+			t.Fatal(e)
+		}
 	}
 }

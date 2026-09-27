@@ -19,6 +19,8 @@ required = [
     "DVDNAV_COPYING.txt", "DVDREAD_COPYING.txt", "LIBUDFREAD_COPYING.txt",
     "libdvdnav-6.1.1-source.tar.gz", "libdvdread-6.1.3-source.tar.gz",
     "libudfread-1.1.2-source.tar.gz", "FFmpeg-9.0.1-source.tar.xz",
+    "MediaInfoLib-source.tar.gz", "ZenLib-source.tar.gz",
+    "MediaInfoLib-License.html", "ZenLib-License.txt",
     "SHA256SUMS-Windows.txt", "SHA256SUMS-Linux.txt", "SHA256SUMS-Android.txt",
     "SHA256SUMS.txt",
 ]

@@ -430,7 +430,10 @@ type toolPaths struct {
 
 func chooseWindowsDemux() {
 	// Yes/No/Cancel offers both lossless MPEG-2 forms without changing other codecs.
-	choice := messageBox(app.hwnd, "DVD video export format", "Save MPEG-2 video as VOB?\n\nYes: .VOB video\nNo: .mpeg2 elementary video\nCancel: return", 0x00000003|MB_ICONQUESTION)
+	choice := 7
+	if src, err := currentSource(); err == nil && !isMKVSource(src) {
+		choice = messageBox(app.hwnd, "DVD video export format", "Save MPEG-2 video as VOB?\n\nYes: .VOB video\nNo: .mpeg2 elementary video\nCancel: return", 0x00000003|MB_ICONQUESTION)
+	}
 	if choice != 6 && choice != 7 {
 		return
 	}

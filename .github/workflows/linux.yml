@@ -32,7 +32,7 @@ jobs:
           sudo sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
           sudo apt-get update
           sudo apt-get install -y \
-            gcc g++ cmake ninja-build curl xz-utils file ffmpeg dvdauthor genisoimage \
+            gcc g++ cmake ninja-build curl xz-utils file ffmpeg mediainfo dvdauthor genisoimage \
             libgl1-mesa-dev libgl1-mesa-dri libglx-mesa0 libegl-mesa0 xvfb xorg-dev libwayland-dev libxkbcommon-dev
           # Match preinstalled transitive libraries to the current deb-src index.
           # Ubuntu removes superseded security sources from that index.
@@ -210,6 +210,7 @@ jobs:
           test "$(ffprobe -v error -show_entries stream=index -of csv=p=0 "$selected" | wc -l)" -eq 1
           test -z "$(ffprobe -v error -show_entries chapter=id -of csv=p=0 "$selected")"
           export MATTMUX_TEST_DVD_ISO="$work/isos/Integration.iso"
+          export MATTMUX_TEST_DVD_FOLDER="$work/movies/Integration Movie"
           (cd src && go test -tags cli -run TestRealDVDISOParity -v .)
 
       - name: Validate single-file standalone executable

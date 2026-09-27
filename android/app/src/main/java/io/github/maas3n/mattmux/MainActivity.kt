@@ -55,6 +55,7 @@ class MainActivity : Activity(), BillingManager.Listener {
     private var selectedTrackIndexes: Set<Int>? = null
     private var proOwned = false
     @Volatile private var remuxRunning = false
+    private var tabOperation = false
     @Volatile private var metadataBusy = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -244,8 +245,8 @@ class MainActivity : Activity(), BillingManager.Listener {
             addView(remuxButton, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             addView(demuxButton, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         })
-        cancelButton = button("Cancel remux") {
-            engine.cancel(); tabMedia.cancel()
+        cancelButton = button("Cancel") {
+            if (tabOperation) tabMedia.cancel() else engine.cancel()
             remuxStatus.text = "Cancelling…"
         }.apply { isEnabled = false }
         root.addView(cancelButton)
@@ -290,13 +291,14 @@ class MainActivity : Activity(), BillingManager.Listener {
             return
         }
 
+        tabOperation = tabMedia.isMKV(source)
         val preserve = includeChapters.isChecked
         remuxRunning = true
         remuxStatus.text = "Preparing source…"
         updateRemuxButton()
         Thread {
             val result = runCatching {
-                if (tabMedia.isMKV(source)) tabMedia.remuxMKV(source, output, selectedStreams, preserve)
+                if (tabOperation) tabMedia.remuxMKV(source, output, selectedStreams, preserve)
                 else (engine as AndroidNativeRemuxEngine).remuxTitle(this, source, output, null, selectedStreams, preserve).outputUri
             }
             runOnUiThread {
@@ -327,6 +329,7 @@ class MainActivity : Activity(), BillingManager.Listener {
         if (BuildConfig.ENABLE_BILLING_PURCHASES && !proOwned) { billing?.launchProPurchase(this); return }
         val selection = selectedTrackIndexes?.sorted()?.toIntArray()
         val chapters = includeChapters.isChecked
+        tabOperation = true
         remuxRunning = true; remuxStatus.text = "Preparing selected streams for demux…"; updateRemuxButton()
         Thread {
             val result = runCatching { tabMedia.demux(source, output, selection, chapters, vob) }
@@ -339,7 +342,7 @@ class MainActivity : Activity(), BillingManager.Listener {
     }
 
     private fun showTrackMetadata() {
-        val source = sourceUri ?: run { toast("Choose a DVD source first"); return }
+        val source = sourceUri ?: run { toast("Choose a DVD or MKV source first"); return }
         if (!engine.isAvailable) { toast(engine.unavailableReason ?: "Remux engine unavailable"); return }
         if (metadataBusy || remuxRunning) return
         metadataBusy = true
@@ -352,7 +355,7 @@ class MainActivity : Activity(), BillingManager.Listener {
                 result.onSuccess { probe ->
                     if (probe.tracks.isEmpty()) {
                         remuxStatus.text = "No selectable tracks were found"
-                        toast("This DVD title contains no selectable tracks")
+                        toast("This source contains no selectable tracks")
                     } else {
                         showTrackDialog(probe)
                         remuxStatus.text = "Metadata loaded for title ${probe.title}. Choose tracks to include."
@@ -378,7 +381,7 @@ class MainActivity : Activity(), BillingManager.Listener {
             .setPositiveButton("Use selection") { _, _ ->
                 selectedTrackIndexes = probe.tracks.indices.filter { checked[it] }.map { probe.tracks[it].index }.toSet()
                 val count = selectedTrackIndexes?.size ?: 0
-                remuxStatus.text = if (count == 0) "No tracks selected. Select at least one track before remuxing." else "$count track(s) selected for the next remux."
+                remuxStatus.text = if (count == 0) "No tracks selected. Select at least one track before remuxing or demuxing." else "$count track(s) selected for the next remux or demux."
                 updateRemuxButton()
             }
             .setNegativeButton("Close", null)
@@ -422,7 +425,7 @@ class MainActivity : Activity(), BillingManager.Listener {
         tracksButton.isEnabled = sourceUri != null && !remuxRunning && !metadataBusy && engine.isAvailable
         cancelButton.isEnabled = remuxRunning
         remuxButton.text = when {
-            remuxRunning -> "Remuxing…"
+            remuxRunning -> "Working…"
             !engine.isAvailable -> "Remux engine unavailable"
             selectedTrackIndexes != null && selectedTrackIndexes!!.isEmpty() -> "Select at least one track"
             BuildConfig.ENABLE_BILLING_PURCHASES && !proOwned -> "Unlock Pro to remux"

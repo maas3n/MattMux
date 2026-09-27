@@ -100,11 +100,6 @@ static int demux_media(const char *path, const char *directory, const int *selec
         int i=packet->stream_index; DemuxOutput *out=&outputs[i];
         if (!out->format) { av_packet_unref(packet); continue; }
         AVRational tb=input->streams[i]->time_base;
-        if (input->start_time!=AV_NOPTS_VALUE) {
-            int64_t origin=av_rescale_q(input->start_time,AV_TIME_BASE_Q,tb);
-            if (packet->pts!=AV_NOPTS_VALUE) packet->pts-=origin;
-            if (packet->dts!=AV_NOPTS_VALUE) packet->dts-=origin;
-        }
         if (out->bsf) {
             if ((ret=av_bsf_send_packet(out->bsf,packet))<0) goto done;
             while ((ret=av_bsf_receive_packet(out->bsf,filtered))>=0) { if ((ret=demux_write(out,filtered,out->bsf->time_base_out))<0) goto done; }

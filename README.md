@@ -272,3 +272,20 @@ No platform uses a MattMux-written IFO parser.
 
 Every release includes Windows Setup, All-in-One and Portable, Linux DEB,
 tarball and Standalone, Android APK, exact source, notices and checksums.
+
+### DVD Remux tab: MKV and Demux
+
+On Windows, Linux, and Android, the DVD Remux tab accepts an ISO, DVD folder,
+or MKV file. Scan/show metadata, tick the video/audio/subtitle tracks to include,
+and choose **Start Remux** for one MKV or **Demux** for separate stream files.
+MKV metadata is displayed with MediaInfo. The chapters checkbox applies to both actions.
+
+Demux exports MPEG-2 video as `.mpeg2` or video-only `.VOB`, H.264/HEVC as
+`.h264`/`.h265`, audio in its codec format (including AC3/DTS), SRT/ASS text,
+PGS `.sup`, and DVD subtitles as a paired `.idx`/`.sub`. Chapters are written
+as `Chapters.txt` in the simple OGM format. VOB export is a video stream in an
+MPEG program-stream container, not a recreated DVD. Streams are copied without
+re-encoding; unsupported selected codecs produce an error asking you to deselect them.
+Each demux operation creates a new output folder. Android stages the source and
+exports in private temporary storage before copying them to the selected folder,
+so sufficient free space is required. BATCH and CLI retain their DVD-only behavior.

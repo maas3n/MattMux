@@ -608,7 +608,7 @@ func (g *linuxGUI) saveSettings() {
 func (g *linuxGUI) chooseDemux() {
 	format := widget.NewSelect([]string{"MPEG2 elementary video (.mpeg2)", "VOB video (.VOB)"}, nil)
 	format.SetSelectedIndex(0)
-	dialog.NewCustomConfirm("Demux selected tracks", "Demux", "Cancel", container.NewVBox(widget.NewLabel("DVD MPEG-2 video export format"), format), func(ok bool) {
+	confirm := func(ok bool) {
 		if !ok {
 			return
 		}
@@ -640,5 +640,10 @@ func (g *linuxGUI) chooseDemux() {
 			})
 			return nil
 		})
-	}, g.window).Show()
+	}
+	if src, _, err := g.selectedTitle(); err == nil && isMKVSource(src) {
+		confirm(true)
+		return
+	}
+	dialog.NewCustomConfirm("Demux selected tracks", "Demux", "Cancel", container.NewVBox(widget.NewLabel("DVD MPEG-2 video export format"), format), confirm, g.window).Show()
 }

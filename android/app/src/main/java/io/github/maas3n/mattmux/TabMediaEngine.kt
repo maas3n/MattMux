@@ -18,6 +18,7 @@ class TabMediaEngine(private val context: Context, private val dvd: AndroidNativ
     private val root = File(context.cacheDir, "dvd-tab-${System.nanoTime()}").apply { mkdirs() }
     private val destroyed = AtomicBoolean(false)
     @Volatile private var busy = false
+    @Volatile private var preparingDVD = false
     private var cachedUri: Uri? = null
     private var cachedFile: File? = null
     private var dvdOriginalTracks: List<TrackInfo> = emptyList()
@@ -29,7 +30,7 @@ class TabMediaEngine(private val context: Context, private val dvd: AndroidNativ
     }
 
     private fun checkCancelled() { check(!destroyed.get() && !native.cancelled.get()) { "Operation cancelled" } }
-    fun cancel() { native.cancelled.set(true); dvd.cancel() }
+    fun cancel() { native.cancelled.set(true); if (preparingDVD) dvd.cancel() }
     fun destroy() { destroyed.set(true); cancel(); if (!busy) root.deleteRecursively() }
 
     private fun <T> operation(work: () -> T): T {
@@ -51,8 +52,13 @@ class TabMediaEngine(private val context: Context, private val dvd: AndroidNativ
                     while (true) { checkCancelled(); val n = input.read(buffer); if (n < 0) break; output.write(buffer, 0, n) }
                 } } ?: error("Cannot read MKV source")
             } else {
-                dvdOriginalTracks = dvd.probeTracks(context, uri).tracks
-                dvd.remuxTitleToFile(context, uri, file, preserveChapters = true)
+                preparingDVD = true
+                try {
+                    checkCancelled()
+                    dvdOriginalTracks = dvd.probeTracks(context, uri).tracks
+                    checkCancelled()
+                    dvd.remuxTitleToFile(context, uri, file, preserveChapters = true)
+                } finally { preparingDVD = false }
             }
             checkCancelled()
             cachedUri = uri; cachedFile = file
