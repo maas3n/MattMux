@@ -84,6 +84,11 @@ jobs:
           if-no-files-found: ignore
           path: ${{ runner.temp }}/remux-parity/*.fingerprint.json
 
+      - name: Include native demux smoke fixtures in development APK only
+        run: |
+          mkdir -p android/app/src/debug/assets/demux-smoke
+          cp "$RUNNER_TEMP/remux-parity/merger/"{mixed,subtitles,raw-h264}.mkv android/app/src/debug/assets/demux-smoke/
+
       - name: Test, lint and build development artifacts
         run: |
           gradle -p android \

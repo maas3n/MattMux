@@ -372,11 +372,9 @@ class MainActivity : Activity(), BillingManager.Listener {
     private fun showTrackDialog(probe: TrackProbeResult) {
         val previous = selectedTrackIndexes
         val checked = BooleanArray(probe.tracks.size) { index -> previous?.contains(probe.tracks[index].index) ?: true }
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Title ${probe.title} — Tracks / Metadata")
-            .setNeutralButton("MediaInfo details") { _, _ ->
-                AlertDialog.Builder(this).setTitle("Source metadata").setMessage(probe.details.ifBlank { "DVD metadata is supplied by libdvdnav/libdvdread." }).setPositiveButton("OK", null).show()
-            }
+            .setNeutralButton("MediaInfo details", null)
             .setMultiChoiceItems(probe.tracks.map { it.displayLabel() }.toTypedArray(), checked) { _, which, value -> checked[which] = value }
             .setPositiveButton("Use selection") { _, _ ->
                 selectedTrackIndexes = probe.tracks.indices.filter { checked[it] }.map { probe.tracks[it].index }.toSet()
@@ -385,7 +383,13 @@ class MainActivity : Activity(), BillingManager.Listener {
                 updateRemuxButton()
             }
             .setNegativeButton("Close", null)
-            .show()
+            .create()
+        dialog.show()
+        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+            AlertDialog.Builder(this).setTitle("Source metadata")
+                .setMessage(probe.details.ifBlank { "DVD metadata is supplied by libdvdnav/libdvdread." })
+                .setPositiveButton("OK", null).show()
+        }
     }
 
     private fun clearTrackSelection() {
