@@ -88,7 +88,8 @@ jobs:
         run: |
           mkdir -p android/app/src/debug/assets/demux-smoke
           cp "$RUNNER_TEMP/remux-parity/merger/"{mixed,subtitles,raw-h264}.mkv android/app/src/debug/assets/demux-smoke/
-          cp -r "$RUNNER_TEMP/title-selection/single/VIDEO_TS" android/app/src/debug/assets/demux-smoke/
+          python3 android/native/tests/make-dvd-demux-fixture.py "$RUNNER_TEMP/dvd-demux"
+          cp -r "$RUNNER_TEMP/dvd-demux/dvd/VIDEO_TS" android/app/src/debug/assets/demux-smoke/
 
       - name: Test, lint and build development artifacts
         run: |
