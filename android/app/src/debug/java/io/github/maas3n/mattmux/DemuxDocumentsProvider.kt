@@ -12,7 +12,8 @@ import java.io.File
 class DemuxDocumentsProvider : DocumentsProvider() {
     private val root get() = File(context!!.cacheDir, "dvd-saf-test")
     private fun file(id: String): File = File(root, id).canonicalFile.also {
-        require(it.path.startsWith(root.canonicalPath + File.separator))
+        val base = root.canonicalFile
+        require(it == base || it.path.startsWith(base.path + File.separator))
     }
     override fun onCreate() = true
     override fun isChildDocument(parentDocumentId: String, documentId: String) = file(documentId).path.startsWith(file(parentDocumentId).path + File.separator)
