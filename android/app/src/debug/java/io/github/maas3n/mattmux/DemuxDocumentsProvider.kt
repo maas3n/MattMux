@@ -15,6 +15,7 @@ class DemuxDocumentsProvider : DocumentsProvider() {
         require(it.path.startsWith(root.canonicalPath + File.separator))
     }
     override fun onCreate() = true
+    override fun isChildDocument(parentDocumentId: String, documentId: String) = file(documentId).path.startsWith(file(parentDocumentId).path + File.separator)
     override fun queryRoots(projection: Array<out String>?): Cursor = MatrixCursor(projection ?: emptyArray())
     private fun rows(projection: Array<out String>?, files: List<File>): Cursor {
         val columns = projection ?: arrayOf(Document.COLUMN_DOCUMENT_ID, Document.COLUMN_DISPLAY_NAME, Document.COLUMN_MIME_TYPE, Document.COLUMN_SIZE, Document.COLUMN_FLAGS)

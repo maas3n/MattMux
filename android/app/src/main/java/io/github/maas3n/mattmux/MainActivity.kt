@@ -80,7 +80,10 @@ class MainActivity : Activity(), BillingManager.Listener {
         restoreSelectionState(savedInstanceState)
 
         engine.setProgressListener { percent ->
-            runOnUiThread { remuxStatus.text = "Remuxing… $percent%" }
+            runOnUiThread {
+                // DVD staging is only the first phase of demux; its 100% is not completion.
+                if (remuxRunning && !tabOperation) remuxStatus.text = "Remuxing… $percent%"
+            }
         }
         if (BuildConfig.ENABLE_BILLING_PURCHASES) {
             billing = BillingManager(this, this).also { it.start() }
@@ -332,10 +335,15 @@ class MainActivity : Activity(), BillingManager.Listener {
         tabOperation = true
         remuxRunning = true; remuxStatus.text = "Preparing selected streams for demux…"; updateRemuxButton()
         Thread {
-            val result = runCatching { tabMedia.demux(source, output, selection, chapters, vob) }
+            val result = runCatching {
+                tabMedia.demux(source, output, selection, chapters, vob) { message ->
+                    runOnUiThread { remuxStatus.text = message }
+                }
+            }
             runOnUiThread {
                 remuxRunning = false
                 remuxStatus.text = result.fold({ "Demux complete: $it" }, { "Demux failed: ${it.message}" })
+                toast(result.fold({ "Demux complete" }, { "Demux failed: ${it.message}" }))
                 updateRemuxButton()
             }
         }.apply { name = "MattMux-demux" }.start()

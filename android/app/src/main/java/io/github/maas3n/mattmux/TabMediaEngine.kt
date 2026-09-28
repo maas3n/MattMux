@@ -93,12 +93,19 @@ class TabMediaEngine(private val context: Context, private val dvd: AndroidNativ
         return staged.filter { wanted == null || it.index in wanted }.map { it.index }.toIntArray()
     }
 
-    private fun copy(file: File, parent: Uri, mime: String): Uri {
+    private fun copy(file: File, parent: Uri, mime: String, progress: (Int) -> Unit = {}): Uri {
         val document = DocumentsContract.createDocument(context.contentResolver, parent, mime, file.name) ?: error("Cannot create output file")
         try {
             context.contentResolver.openOutputStream(document, "w")?.use { out -> file.inputStream().use { input ->
                 val buffer = ByteArray(256 * 1024)
-                while (true) { checkCancelled(); val n = input.read(buffer); if (n < 0) break; out.write(buffer, 0, n) }
+                var copied = 0L
+                var reported = -1
+                while (true) {
+                    checkCancelled(); val n = input.read(buffer); if (n < 0) break
+                    out.write(buffer, 0, n); copied += n
+                    val percent = (copied * 100 / file.length().coerceAtLeast(1)).toInt().coerceAtMost(99)
+                    if (percent != reported) { reported = percent; progress(percent) }
+                }
             } } ?: error("Cannot write output file")
             checkCancelled()
             return document
@@ -117,12 +124,18 @@ class TabMediaEngine(private val context: Context, private val dvd: AndroidNativ
         } finally { output.delete() }
     }
 
-    fun demux(uri: Uri, tree: Uri, indexes: IntArray?, chapters: Boolean, vob: Boolean): Uri = operation {
+    fun demux(uri: Uri, tree: Uri, indexes: IntArray?, chapters: Boolean, vob: Boolean, status: (String) -> Unit = {}): Uri = operation {
+        fun report(message: String) {
+            android.util.Log.i("MattMuxDemux", message)
+            status(message)
+        }
+        report("Preparing source for demux…")
         val source = prepare(uri); val selection = selected(source, indexes)
         require(selection.isNotEmpty()) { "Select at least one track" }
         val directory = File(root, "export-${System.nanoTime()}").apply { check(mkdir()) }
         var destination: Uri? = null
         try {
+            report("Extracting selected streams…")
             native.demux(source.absolutePath, directory.absolutePath, selection, chapters, vob)?.let { error("Demux failed: $it") }
             checkCancelled()
             val files = directory.listFiles()?.sortedBy { it.name } ?: error("No output files")
@@ -130,7 +143,14 @@ class TabMediaEngine(private val context: Context, private val dvd: AndroidNativ
             val parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
             val folder = DocumentsContract.createDocument(context.contentResolver, parent, DocumentsContract.Document.MIME_TYPE_DIR, "Demux-${System.currentTimeMillis()}") ?: error("Cannot create export folder")
             destination = folder
-            for (file in files) copy(file, folder, "application/octet-stream")
+            for ((index, file) in files.withIndex()) {
+                report("Saving ${index + 1}/${files.size}: ${file.name}…")
+                copy(file, folder, "application/octet-stream") { percent ->
+                    status("Saving ${index + 1}/${files.size}: ${file.name} — $percent%")
+                }
+            }
+            checkCancelled()
+            report("Export saved: ${files.size} files")
             folder
         } catch (error: Throwable) {
             destination?.let { runCatching { DocumentsContract.deleteDocument(context.contentResolver, it) } }
