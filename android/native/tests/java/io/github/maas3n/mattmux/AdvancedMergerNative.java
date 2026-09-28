@@ -6,6 +6,7 @@ public final class AdvancedMergerNative {
     private native String[] probe(String path);
     private native String validateChapters(String path);
     private native String mux(String[] paths, int[] sources, int[] streams, String chapters, String output);
+    private native String demux(String source, String directory, int[] streams, boolean chapters, boolean vob);
     public static void main(String[] args) {
         System.load(args[0]);
         AdvancedMergerNative engine = new AdvancedMergerNative();
@@ -29,9 +30,24 @@ public final class AdvancedMergerNative {
         error = engine.mux(paths, new int[]{0}, new int[]{1}, null, dir + "/cancelled.mkv");
         if (error == null) throw new AssertionError("Cancellation ignored");
         engine.cancelled = false;
+        new java.io.File(dir + "/demux-subtitles").mkdir();
+        error = engine.demux(dir + "/subtitles.mkv", dir + "/demux-subtitles", new int[]{0,1}, false, false);
+        if (error != null) throw new AssertionError("DVD subtitle demux: " + error);
+        for (String format : new String[]{"elementary", "vob"}) {
+            String output = dir + "/demux-" + format;
+            new java.io.File(output).mkdir();
+            error = engine.demux(dir + "/mixed.mkv", output, new int[]{1,3,4}, true, format.equals("vob"));
+            if (error != null) throw new AssertionError("Demux: " + error);
+        }
+
         for (String ext : new String[]{"h264", "m2v", "vob"}) {
             error = engine.mux(new String[]{dir + "/raw." + ext}, new int[]{0}, new int[]{0}, null, dir + "/raw-" + ext + ".mkv");
             if (error != null) throw new AssertionError(ext + ": " + error);
+            String output = dir + "/demux-" + ext;
+            new java.io.File(output).mkdir();
+            error = engine.demux(dir + "/raw-" + ext + ".mkv", output, new int[]{0}, false, ext.equals("vob"));
+            if (error != null) throw new AssertionError("Raw demux " + ext + ": " + error);
+
         }
     }
 }

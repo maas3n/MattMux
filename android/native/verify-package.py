@@ -7,7 +7,7 @@ import sys
 import tempfile
 import zipfile
 
-EXPECTED = {'libavutil.so', 'libavcodec.so', 'libavformat.so', 'libudfread.so', 'libmattmux_jni.so'}
+EXPECTED = {'libavutil.so', 'libavcodec.so', 'libavformat.so', 'libudfread.so', 'libmattmux_jni.so', 'libmediainfo_jni.so'}
 ABIS = {'arm64-v8a', 'x86_64'}
 
 for filename in sys.argv[1:]:
@@ -38,7 +38,7 @@ for filename in sys.argv[1:]:
                 raise SystemExit(f'{filename}: forbidden or versioned dependency: {name}\n{needed}')
         if set(found) != ABIS or any(found[abi] != EXPECTED for abi in ABIS):
             raise SystemExit(f'{filename}: unexpected native package contents: {found}')
-        for notice in ('COPYING.LGPLv2.1', 'LIBUDFREAD_COPYING.txt', 'DVDREAD_COPYING.txt', 'DVDNAV_COPYING.txt', 'ffmpeg-build-info.txt'):
+        for notice in ('COPYING.LGPLv2.1', 'LIBUDFREAD_COPYING.txt', 'DVDREAD_COPYING.txt', 'DVDNAV_COPYING.txt', 'ffmpeg-build-info.txt', 'MediaInfoLib-License.html', 'ZenLib-License.txt', 'NDK-NOTICE.txt'):
             if not archive.read(prefix + 'assets/ffmpeg/' + notice):
                 raise SystemExit(f'{filename}: missing/empty notice {notice}')
         print(f'{filename}: both ABIs, all native ELFs, 16 KB alignment, dependency and notice audit PASS')

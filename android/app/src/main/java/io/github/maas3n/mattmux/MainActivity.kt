@@ -35,6 +35,9 @@ class MainActivity : Activity(), BillingManager.Listener {
     private lateinit var cliPanel: CliPanel
 
     private val engine: RemuxEngine = AndroidNativeRemuxEngine()
+    private val tabMedia by lazy { TabMediaEngine(this, engine as AndroidNativeRemuxEngine) }
+    private lateinit var demuxButton: Button
+    private lateinit var includeChapters: android.widget.CheckBox
     private var billing: BillingManager? = null
 
     private lateinit var sourceValue: TextView
@@ -52,6 +55,7 @@ class MainActivity : Activity(), BillingManager.Listener {
     private var selectedTrackIndexes: Set<Int>? = null
     private var proOwned = false
     @Volatile private var remuxRunning = false
+    private var tabOperation = false
     @Volatile private var metadataBusy = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -117,6 +121,7 @@ class MainActivity : Activity(), BillingManager.Listener {
         if (::advancedMerger.isInitialized) advancedMerger.destroy()
         if (::batchPanel.isInitialized) batchPanel.destroy()
         if (::cliPanel.isInitialized) cliPanel.destroy()
+        tabMedia.destroy()
         if (remuxRunning) engine.cancel()
         engine.setProgressListener(null)
         billing?.close()
@@ -141,7 +146,7 @@ class MainActivity : Activity(), BillingManager.Listener {
         if (advancedMerger.onResult(requestCode, resultCode, data)) return
         if (batchPanel.onResult(requestCode, resultCode, data)) return
         if (cliPanel.onResult(requestCode, resultCode, data)) return
-        if (resultCode != RESULT_OK) return
+        if (resultCode != RESULT_OK || remuxRunning || metadataBusy) return
         val resultData = data ?: return
         val uri = resultData.data ?: return
         persistUriPermission(uri, resultData)
@@ -195,7 +200,7 @@ class MainActivity : Activity(), BillingManager.Listener {
             setTypeface(typeface, Typeface.BOLD)
         })
         root.addView(TextView(this).apply {
-            text = "DVD / VIDEO_TS / ISO → MKV without transcoding"
+            text = "DVD / VIDEO_TS / ISO / MKV → Remux or Demux"
             textSize = 16f
             setPadding(0, dp(4), 0, dp(22))
         })
@@ -204,7 +209,7 @@ class MainActivity : Activity(), BillingManager.Listener {
         sourceValue = value("No source selected")
         root.addView(sourceValue)
         val sourceButtons = sourceButtonContainer()
-        sourceButtons.addView(button("Choose ISO") { chooseIso() })
+        sourceButtons.addView(button("Choose ISO / MKV") { chooseIso() })
         sourceButtons.addView(button("Choose DVD folder") { chooseSourceFolder() })
         root.addView(sourceButtons)
 
@@ -226,14 +231,22 @@ class MainActivity : Activity(), BillingManager.Listener {
             "Bundled native runtime: $it\n\nVIDEO_TS folders and UDF ISO images use the same DVD title/cell planner. Select an unencrypted DVD; ISO files must be on storage that supports seeking. Interleaved multi-angle discs are not supported in this alpha."
         } ?: "The bundled native FFmpeg runtime could not be loaded in this build."
         root.addView(value(runtimeMessage))
-        tracksButton = button("Show Metadata") { showTrackMetadata() }
+        tracksButton = button("Scan / Show Metadata") { showTrackMetadata() }
         root.addView(tracksButton)
         remuxStatus = value("Ready")
         root.addView(remuxStatus)
-        remuxButton = button("Remux to MKV") { startRemux() }
-        root.addView(remuxButton)
-        cancelButton = button("Cancel remux") {
-            engine.cancel()
+        includeChapters = android.widget.CheckBox(this).apply { text = "Include chapters"; isChecked = true }
+        root.addView(includeChapters)
+        root.addView(value("MKV and demux operations need temporary space for an input copy or prepared DVD title and the exported files."))
+        remuxButton = button("Start Remux") { startRemux() }
+        demuxButton = button("Demux") { chooseDemux() }
+        root.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(remuxButton, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(demuxButton, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        })
+        cancelButton = button("Cancel") {
+            if (tabOperation) tabMedia.cancel() else engine.cancel()
             remuxStatus.text = "Cancelling…"
         }.apply { isEnabled = false }
         root.addView(cancelButton)
@@ -278,15 +291,20 @@ class MainActivity : Activity(), BillingManager.Listener {
             return
         }
 
+        tabOperation = tabMedia.isMKV(source)
+        val preserve = includeChapters.isChecked
         remuxRunning = true
-        remuxStatus.text = "Preparing DVD title…"
+        remuxStatus.text = "Preparing source…"
         updateRemuxButton()
         Thread {
-            val result = runCatching { engine.remux(this, source, output, selectedStreams) }
+            val result = runCatching {
+                if (tabOperation) tabMedia.remuxMKV(source, output, selectedStreams, preserve)
+                else (engine as AndroidNativeRemuxEngine).remuxTitle(this, source, output, null, selectedStreams, preserve).outputUri
+            }
             runOnUiThread {
                 remuxRunning = false
                 result.onSuccess {
-                    remuxStatus.text = "Complete: title ${it.title} → ${describeUri(it.outputUri)}"
+                    remuxStatus.text = "Complete: ${describeUri(it)}"
                     toast("Remux complete")
                 }.onFailure {
                     remuxStatus.text = "Remux failed: ${it.message ?: it.javaClass.simpleName}"
@@ -297,21 +315,47 @@ class MainActivity : Activity(), BillingManager.Listener {
         }.apply { name = "MattMux-remux" }.start()
     }
 
+    private fun chooseDemux() {
+        if (sourceUri?.let { tabMedia.isMKV(it) } == true) { startDemux(false); return }
+        AlertDialog.Builder(this).setTitle("DVD video export format")
+            .setItems(arrayOf("MPEG2 elementary video (.mpeg2)", "VOB video (.VOB)")) { _, choice -> startDemux(choice == 1) }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun startDemux(vob: Boolean) {
+        val source = sourceUri ?: return
+        val output = outputUri ?: return
+        if (remuxRunning || metadataBusy || !engine.isAvailable) return
+        if (BuildConfig.ENABLE_BILLING_PURCHASES && !proOwned) { billing?.launchProPurchase(this); return }
+        val selection = selectedTrackIndexes?.sorted()?.toIntArray()
+        val chapters = includeChapters.isChecked
+        tabOperation = true
+        remuxRunning = true; remuxStatus.text = "Preparing selected streams for demux…"; updateRemuxButton()
+        Thread {
+            val result = runCatching { tabMedia.demux(source, output, selection, chapters, vob) }
+            runOnUiThread {
+                remuxRunning = false
+                remuxStatus.text = result.fold({ "Demux complete: $it" }, { "Demux failed: ${it.message}" })
+                updateRemuxButton()
+            }
+        }.apply { name = "MattMux-demux" }.start()
+    }
+
     private fun showTrackMetadata() {
-        val source = sourceUri ?: run { toast("Choose a DVD source first"); return }
+        val source = sourceUri ?: run { toast("Choose a DVD or MKV source first"); return }
         if (!engine.isAvailable) { toast(engine.unavailableReason ?: "Remux engine unavailable"); return }
         if (metadataBusy || remuxRunning) return
         metadataBusy = true
         remuxStatus.text = "Reading title metadata…"
         updateRemuxButton()
         Thread {
-            val result = runCatching { engine.probeTracks(this, source) }
+            val result = runCatching { if (tabMedia.isMKV(source)) tabMedia.probeMKV(source) else engine.probeTracks(this, source) }
             runOnUiThread {
                 metadataBusy = false
                 result.onSuccess { probe ->
                     if (probe.tracks.isEmpty()) {
                         remuxStatus.text = "No selectable tracks were found"
-                        toast("This DVD title contains no selectable tracks")
+                        toast("This source contains no selectable tracks")
                     } else {
                         showTrackDialog(probe)
                         remuxStatus.text = "Metadata loaded for title ${probe.title}. Choose tracks to include."
@@ -328,22 +372,24 @@ class MainActivity : Activity(), BillingManager.Listener {
     private fun showTrackDialog(probe: TrackProbeResult) {
         val previous = selectedTrackIndexes
         val checked = BooleanArray(probe.tracks.size) { index -> previous?.contains(probe.tracks[index].index) ?: true }
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Title ${probe.title} — Tracks / Metadata")
+            .setNeutralButton("MediaInfo details", null)
             .setMultiChoiceItems(probe.tracks.map { it.displayLabel() }.toTypedArray(), checked) { _, which, value -> checked[which] = value }
             .setPositiveButton("Use selection") { _, _ ->
                 selectedTrackIndexes = probe.tracks.indices.filter { checked[it] }.map { probe.tracks[it].index }.toSet()
                 val count = selectedTrackIndexes?.size ?: 0
-                remuxStatus.text = if (count == 0) "No tracks selected. Select at least one track before remuxing." else "$count track(s) selected for the next remux."
-                updateRemuxButton()
-            }
-            .setNeutralButton("All tracks") { _, _ ->
-                selectedTrackIndexes = probe.tracks.map { it.index }.toSet()
-                remuxStatus.text = "All ${probe.tracks.size} track(s) selected for the next remux."
+                remuxStatus.text = if (count == 0) "No tracks selected. Select at least one track before remuxing or demuxing." else "$count track(s) selected for the next remux or demux."
                 updateRemuxButton()
             }
             .setNegativeButton("Close", null)
-            .show()
+            .create()
+        dialog.show()
+        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+            AlertDialog.Builder(this).setTitle("Source metadata")
+                .setMessage(probe.details.ifBlank { "DVD metadata is supplied by libdvdnav/libdvdread." })
+                .setPositiveButton("OK", null).show()
+        }
     }
 
     private fun clearTrackSelection() {
@@ -356,7 +402,7 @@ class MainActivity : Activity(), BillingManager.Listener {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
-            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/x-iso9660-image", "application/octet-stream"))
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/x-iso9660-image", "application/octet-stream", "video/x-matroska", "application/x-matroska"))
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
         startActivityForResult(intent, REQUEST_SOURCE_ISO)
@@ -378,14 +424,16 @@ class MainActivity : Activity(), BillingManager.Listener {
         val hasPaths = sourceUri != null && outputUri != null
         val hasSelectedTracks = selectedTrackIndexes?.isNotEmpty() ?: true
         remuxButton.isEnabled = hasPaths && hasSelectedTracks && !remuxRunning && !metadataBusy && engine.isAvailable
+        demuxButton.isEnabled = remuxButton.isEnabled
+        includeChapters.isEnabled = !remuxRunning && !metadataBusy
         tracksButton.isEnabled = sourceUri != null && !remuxRunning && !metadataBusy && engine.isAvailable
         cancelButton.isEnabled = remuxRunning
         remuxButton.text = when {
-            remuxRunning -> "Remuxing…"
+            remuxRunning -> "Working…"
             !engine.isAvailable -> "Remux engine unavailable"
             selectedTrackIndexes != null && selectedTrackIndexes!!.isEmpty() -> "Select at least one track"
             BuildConfig.ENABLE_BILLING_PURCHASES && !proOwned -> "Unlock Pro to remux"
-            else -> "Remux to MKV"
+            else -> "Start Remux"
         }
     }
 

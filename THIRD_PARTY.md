@@ -84,3 +84,15 @@ substitute a newer FFmpeg revision. The Linux standalone also includes private
 GUI library notices and records their binary/source package versions under
 `licenses/library-packages.json`. Exact source packages accompany each new
 release in `MattMux-VERSION-Linux-Library-Sources.tar.gz`.
+
+## Android MediaInfo metadata
+
+The DVD Remux tab bundles MediaInfoLib and ZenLib in `libmediainfo_jni.so` on both
+Android ABIs. Pinned sources: MediaInfoLib
+`8bfa658657da9e16470c9fb32035e0fa097c0112` and ZenLib
+`2ddc277fe7ecfcbfe45616bb9cd9e23079113ecd`. Their BSD-style notices are included
+as `MediaInfoLib-License.html` and `ZenLib-License.txt`; exact source archives are
+published with each release. Built statically into the JNI bridge with Android's
+system zlib. The NDK static C++ runtime notices accompany it as `NDK-NOTICE.txt`;
+the exact NDK revision is recorded in `ffmpeg-build-info.txt`. No runtime
+downloads are required for MKV metadata.

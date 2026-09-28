@@ -47,6 +47,12 @@ try:
         adb("shell", "pidof", package)
     screen("final")
     print("APK installed, activity stayed alive, and all four tabs opened.")
+    if "DemuxSmokeInstrumentation" in adb("shell", "pm", "list", "instrumentation"):
+        result = adb("shell", "am", "instrument", "-w", package + "/.DemuxSmokeInstrumentation")
+        (logs / "demux-smoke.txt").write_text(result)
+        if "MATTMUX_DEMUX_SMOKE_PASS" not in result:
+            raise RuntimeError("Packaged MediaInfo/demux validation failed: " + result)
+        print("Bundled MediaInfo and native demux passed on Android.")
 finally:
     logcat = adb("logcat", "-b", "main", "-b", "system", "-b", "crash", "-d", "-v", "threadtime")
     (logs / "logcat.txt").write_text(logcat)

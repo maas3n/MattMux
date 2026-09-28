@@ -781,6 +781,7 @@ cleanup:
 }
 
 #include "advanced_merger_jni.c"
+#include "demux_jni.c"
 
 
 #ifdef MATTMUX_DVDNAV

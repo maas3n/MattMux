@@ -28,22 +28,22 @@ type linuxSettings struct {
 	PreserveChapters bool   `json:"preserve_chapters"`
 }
 type linuxGUI struct {
-	window                                                           fyne.Window
-	sourceEntry, outputEntry                                         *widget.Entry
-	titleSelect                                                      *widget.Select
-	preserve                                                         *widget.Check
-	progress                                                         *widget.ProgressBar
-	status, trackSummary                                             *widget.Label
-	scanBtn, metaBtn, remuxBtn, cancelBtn, dvdBtn, isoBtn, outputBtn *widget.Button
-	mu                                                               sync.Mutex
-	busy                                                             bool
-	cancel                                                           context.CancelFunc
-	titles                                                           []titleInfo
-	titlesSource                                                     string
-	trackSource                                                      string
-	trackTitle                                                       int
-	tracks                                                           []trackOption
-	selectedTracks                                                   map[int]bool
+	window                                                                     fyne.Window
+	sourceEntry, outputEntry                                                   *widget.Entry
+	titleSelect                                                                *widget.Select
+	preserve                                                                   *widget.Check
+	progress                                                                   *widget.ProgressBar
+	status, trackSummary                                                       *widget.Label
+	scanBtn, metaBtn, remuxBtn, demuxBtn, cancelBtn, dvdBtn, isoBtn, outputBtn *widget.Button
+	mu                                                                         sync.Mutex
+	busy                                                                       bool
+	cancel                                                                     context.CancelFunc
+	titles                                                                     []titleInfo
+	titlesSource                                                               string
+	trackSource                                                                string
+	trackTitle                                                                 int
+	tracks                                                                     []trackOption
+	selectedTracks                                                             map[int]bool
 }
 
 func main() {
@@ -87,17 +87,18 @@ func (g *linuxGUI) build() {
 	g.titleSelect.PlaceHolder = "Scan titles first"
 	g.trackSummary = widget.NewLabel("Tracks: all streams (default)")
 	g.trackSummary.Wrapping = fyne.TextWrapWord
-	g.preserve = widget.NewCheck("Preserve chapters in the output MKV", func(bool) { g.saveSettings() })
+	g.preserve = widget.NewCheck("Include chapters in remux / demux", func(bool) { g.saveSettings() })
 	g.preserve.SetChecked(s.PreserveChapters)
 	g.progress = widget.NewProgressBar()
 	g.status = widget.NewLabel("Checking installed FFmpeg / FFprobe / MediaInfo…")
 	g.status.Wrapping = fyne.TextWrapWord
 	g.dvdBtn = widget.NewButton("DVD Folder…", g.chooseDVDFolder)
-	g.isoBtn = widget.NewButton("ISO File…", g.chooseISO)
+	g.isoBtn = widget.NewButton("ISO / MKV File…", g.chooseISO)
 	g.outputBtn = widget.NewButton("Browse…", g.chooseOutput)
 	g.scanBtn = widget.NewButton("Scan Titles", func() { g.startAsync("Scanning DVD titles…", g.scan) })
 	g.metaBtn = widget.NewButton("Show Metadata", func() { g.startAsync("Reading title metadata…", g.showMetadata) })
 	g.remuxBtn = widget.NewButton("Start Remux", func() { g.startAsync("Preparing remux…", g.remux) })
+	g.demuxBtn = widget.NewButton("Demux", g.chooseDemux)
 	g.remuxBtn.Importance = widget.HighImportance
 	g.cancelBtn = widget.NewButton("Cancel", g.cancelCurrent)
 	g.cancelBtn.Disable()
@@ -110,8 +111,8 @@ func (g *linuxGUI) build() {
 	titleRow := container.NewBorder(nil, nil, nil, container.NewHBox(g.scanBtn, g.metaBtn, aboutBtn), g.titleSelect)
 	timestampNotice := widget.NewLabel("Remux uses fixed timestamps (-fflags +genpts).")
 	timestampNotice.Wrapping = fyne.TextWrapWord
-	actions := container.NewHBox(layout.NewSpacer(), g.remuxBtn, g.cancelBtn)
-	dvdTab := container.NewPadded(container.NewVBox(header, widget.NewSeparator(), widget.NewLabelWithStyle("Source", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), sourceRow, widget.NewLabel("Choose a DVD folder / VIDEO_TS structure or an ISO image."), widget.NewSeparator(), widget.NewLabelWithStyle("Destination", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), outputRow, widget.NewSeparator(), widget.NewLabelWithStyle("DVD Title", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), titleRow, g.trackSummary, g.preserve, widget.NewSeparator(), g.progress, g.status, layout.NewSpacer(), timestampNotice, actions))
+	actions := container.NewHBox(layout.NewSpacer(), g.remuxBtn, g.demuxBtn, g.cancelBtn)
+	dvdTab := container.NewPadded(container.NewVBox(header, widget.NewSeparator(), widget.NewLabelWithStyle("Source", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), sourceRow, widget.NewLabel("Choose a DVD folder / VIDEO_TS structure, ISO image, or MKV file."), widget.NewSeparator(), widget.NewLabelWithStyle("Destination", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), outputRow, widget.NewSeparator(), widget.NewLabelWithStyle("DVD Title", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), titleRow, g.trackSummary, g.preserve, widget.NewSeparator(), g.progress, g.status, layout.NewSpacer(), timestampNotice, actions))
 	g.window.SetContent(container.NewAppTabs(container.NewTabItem("DVD Remux", dvdTab), container.NewTabItem("Advanced Merger", g.buildAdvancedMerger()), container.NewTabItem("BATCH", g.buildBatch()), container.NewTabItem("CLI", g.buildCLI())))
 }
 
@@ -139,7 +140,7 @@ func (g *linuxGUI) chooseISO() {
 		defer r.Close()
 		g.sourceEntry.SetText(r.URI().Path())
 	}, g.window)
-	d.SetFilter(storage.NewExtensionFileFilter([]string{".iso", ".ISO"}))
+	d.SetFilter(storage.NewExtensionFileFilter([]string{".iso", ".ISO", ".mkv", ".MKV"}))
 	d.Show()
 }
 func (g *linuxGUI) chooseOutput() {
@@ -197,7 +198,7 @@ func (g *linuxGUI) setBusy(b bool) {
 	controls := []interface {
 		Disable()
 		Enable()
-	}{g.sourceEntry, g.outputEntry, g.titleSelect, g.preserve, g.scanBtn, g.metaBtn, g.remuxBtn, g.dvdBtn, g.isoBtn, g.outputBtn}
+	}{g.sourceEntry, g.outputEntry, g.titleSelect, g.preserve, g.scanBtn, g.metaBtn, g.remuxBtn, g.demuxBtn, g.dvdBtn, g.isoBtn, g.outputBtn}
 	for _, c := range controls {
 		if b {
 			c.Disable()
@@ -222,15 +223,20 @@ func (g *linuxGUI) cancelCurrent() {
 }
 
 func (g *linuxGUI) scan(ctx context.Context) error {
-	src, err := normalizeSource(g.sourceEntry.Text)
+	src, err := normalizeTabSource(g.sourceEntry.Text)
 	if err != nil {
 		return err
 	}
-	tools, err := ensureTools(ctx, false, g.progressCallback())
+	tools, err := ensureTools(ctx, isMKVSource(src), g.progressCallback())
 	if err != nil {
 		return err
 	}
-	titles, err := discoverDVDTitlesViaDVDVideo(ctx, src, tools, g.progressCallback())
+	var titles []titleInfo
+	if isMKVSource(src) {
+		titles, err = scanMKV(ctx, tools, src)
+	} else {
+		titles, err = discoverDVDTitlesViaDVDVideo(ctx, src, tools, g.progressCallback())
+	}
 	if err != nil {
 		return err
 	}
@@ -269,7 +275,7 @@ func parseTitleLabel(label string) int {
 	return n
 }
 func (g *linuxGUI) selectedTitle() (string, titleInfo, error) {
-	src, err := normalizeSource(g.sourceEntry.Text)
+	src, err := normalizeTabSource(g.sourceEntry.Text)
 	if err != nil {
 		return "", titleInfo{}, err
 	}
@@ -298,7 +304,13 @@ func (g *linuxGUI) showMetadata(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	probe, err := probeStreams(ctx, tools.ffprobe, src, title.Number)
+	var probe ffprobeResult
+	var mkvDetails string
+	if isMKVSource(src) {
+		probe, mkvDetails, err = probeTabMKV(ctx, tools, src)
+	} else {
+		probe, err = probeStreams(ctx, tools.ffprobe, src, title.Number)
+	}
 	if err != nil {
 		return err
 	}
@@ -306,7 +318,10 @@ func (g *linuxGUI) showMetadata(ctx context.Context) error {
 	if len(options) == 0 {
 		return errors.New("this DVD title contains no selectable video, audio, or subtitle tracks")
 	}
-	text, err := metadataText(ctx, src, title, tools, g.preserve.Checked)
+	text := mkvDetails
+	if !isMKVSource(src) {
+		text, err = metadataText(ctx, src, title, tools, g.preserve.Checked)
+	}
 	if err != nil {
 		return err
 	}
@@ -483,7 +498,12 @@ func (g *linuxGUI) remux(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	final, err := remuxTitle(ctx, src, title, out, g.preserve.Checked, indexes, tools, g.progressCallback())
+	var final string
+	if isMKVSource(src) {
+		final, err = remuxMKV(ctx, tools, src, out, indexes, g.preserve.Checked)
+	} else {
+		final, err = remuxTitle(ctx, src, title, out, g.preserve.Checked, indexes, tools, g.progressCallback())
+	}
 	if err != nil {
 		return err
 	}
@@ -583,4 +603,47 @@ func (g *linuxGUI) saveSettings() {
 	if os.WriteFile(tmp, b, 0600) == nil {
 		_ = os.Rename(tmp, path)
 	}
+}
+
+func (g *linuxGUI) chooseDemux() {
+	format := widget.NewSelect([]string{"MPEG2 elementary video (.mpeg2)", "VOB video (.VOB)"}, nil)
+	format.SetSelectedIndex(0)
+	confirm := func(ok bool) {
+		if !ok {
+			return
+		}
+		video := "mpeg2"
+		if format.SelectedIndex() == 1 {
+			video = "vob"
+		}
+		g.startAsync("Demuxing selected tracks…", func(ctx context.Context) error {
+			src, title, err := g.selectedTitle()
+			if err != nil {
+				return err
+			}
+			indexes, selected := g.selectedTrackIndexes(src, title.Number)
+			if !selected {
+				indexes = nil
+			}
+			tools, err := ensureTools(ctx, false, g.progressCallback())
+			if err != nil {
+				return err
+			}
+			final, err := demuxTab(ctx, tools, src, title.Number, strings.TrimSpace(g.outputEntry.Text), indexes, g.preserve.Checked, video)
+			if err != nil {
+				return err
+			}
+			fyne.Do(func() {
+				g.progress.SetValue(1)
+				g.status.SetText("Demux complete: " + final)
+				dialog.ShowInformation("Demux complete", final, g.window)
+			})
+			return nil
+		})
+	}
+	if src, _, err := g.selectedTitle(); err == nil && isMKVSource(src) {
+		confirm(true)
+		return
+	}
+	dialog.NewCustomConfirm("Demux selected tracks", "Demux", "Cancel", container.NewVBox(widget.NewLabel("DVD MPEG-2 video export format"), format), confirm, g.window).Show()
 }

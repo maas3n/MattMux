@@ -276,5 +276,6 @@ build_abi arm64-v8a aarch64 aarch64-linux-android
 build_abi x86_64 x86_64 x86_64-linux-android
 
 bash "${SCRIPT_DIR}/build-dvdnav-android.sh"
+bash "${SCRIPT_DIR}/build-mediainfo-android.sh"
 
 echo "Bundled FFmpeg + libdvdnav/libdvdread runtime built successfully."

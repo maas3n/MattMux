@@ -135,6 +135,25 @@ func TestRealDVDISOParity(t *testing.T) {
 	if videos != 1 || chapters != 1 {
 		t.Fatalf("merger streams: %+v", got)
 	}
+	sources := []string{iso}
+	if folder := os.Getenv("MATTMUX_TEST_DVD_FOLDER"); folder != "" {
+		sources = append(sources, folder)
+	}
+	for _, source := range sources {
+		for _, format := range []string{"mpeg2", "vob"} {
+			directory, e := demuxTab(ctx, tools, source, 2, t.TempDir(), nil, true, format)
+			if e != nil {
+				t.Fatalf("DVD demux %s %s: %v", source, format, e)
+			}
+			files, e := os.ReadDir(directory)
+			if e != nil || len(files) < 3 {
+				t.Fatalf("DVD demux incomplete: %v %v", files, e)
+			}
+			if _, e := os.Stat(filepath.Join(directory, "Chapters.txt")); e != nil {
+				t.Fatal(e)
+			}
+		}
+	}
 	if err = muxMerger(ctx, tools, selected, "", output); err == nil {
 		t.Fatal("merger overwrote output")
 	}

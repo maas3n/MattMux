@@ -15,6 +15,9 @@ for ext in h264 m2v vob; do
   codec=mpeg2video; if [[ "$ext" == h264 ]]; then codec=libx264; fi
   ffmpeg -v error -f lavfi -i color=size=32x32:rate=25:duration=1 -c:v "$codec" -bf 0 -y "$WORK/raw.$ext"
 done
+python3 "$ROOT/android/native/tests/make-demux-subtitles.py" "$WORK"
+ffmpeg -v error -f lavfi -i color=size=32x32:rate=25:duration=1 -i "$WORK/input.idx" \
+  -map 0:v -map 1:s -c:v mpeg2video -bf 0 -c:s copy -y "$WORK/subtitles.mkv"
 javac -d "$HOST_WORK/classes" "$ROOT/android/native/tests/java/io/github/maas3n/mattmux/AdvancedMergerNative.java"
 java -cp "$HOST_WORK/classes" io.github.maas3n.mattmux.AdvancedMergerNative "$HOST_WORK/libmattmux_host_test.so" "$WORK"
 python3 - "$WORK" <<'PY'
@@ -34,4 +37,18 @@ def hashes(file,stream):
     return [packet['data_hash'] for packet in r['packets']]
 assert hashes(p/'mixed.mkv',1)==hashes(p/'merged.mkv',0),'video packets changed'
 assert hashes(p/'raw.ac3',0)==hashes(p/'merged.mkv',3),'audio packets changed'
+out=p/'demux-subtitles'
+assert hashes(p/'input.idx',0)==hashes(out/'track-01.idx',0),'DVD subtitle payload changed'
+index=(out/'track-01.idx').read_text()
+assert '00:00:00:200' in index and '00:00:00:600' in index,index
+assert 'palette: 000000, ffffff, ff0000' in index,index
+for folder in ['demux-elementary','demux-vob']:
+    out=p/folder
+    assert hashes(p/'mixed.mkv',1)==hashes(out/'track-01.m4v',0), 'demux video changed'
+    assert probe(out/'track-03.wav')['streams'][0]['codec_name']=='pcm_s16le'
+    assert 'Hello' in (out/'track-04.srt').read_text()
+    assert 'CHAPTER01NAME=Opening' in (out/'Chapters.txt').read_text()
+for suffix,extension,codec in [('h264','h264','h264'),('m2v','mpeg2','mpeg2video'),('vob','VOB','mpeg2video')]:
+    assert probe(p/('demux-'+suffix)/('track-00.'+extension))['streams'][0]['codec_name']==codec
+
 PY
