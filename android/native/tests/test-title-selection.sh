@@ -47,11 +47,15 @@ XML
     dvdauthor -x "$WORK/$name.xml"
     genisoimage -quiet -dvd-video -udf -o "$WORK/$name.iso" "$WORK/$name"
 done
+python3 "$ROOT/android/native/tests/make-dvd-demux-fixture.py" "$WORK/demux-dvd"
+genisoimage -quiet -dvd-video -udf -o "$WORK/demux-dvd.iso" "$WORK/demux-dvd/dvd"
 javac -d "$WORK/classes" \
   "$ROOT/android/native/tests/java/io/github/maas3n/mattmux/AndroidNativeRemuxEngine.java" \
+  "$ROOT/android/native/tests/java/io/github/maas3n/mattmux/AdvancedMergerNative.java" \
   "$ROOT/android/native/tests/java/io/github/maas3n/mattmux/DvdTitleRegression.java"
 java -cp "$WORK/classes" io.github.maas3n.mattmux.DvdTitleRegression "$WORK/libmattmux_titles.so" "$WORK"
 for name in long-first long-last single; do
     python3 "$ROOT/android/native/tests/remux_fingerprint.py" "$WORK/$name-folder.mkv" "$WORK/$name-iso.mkv"
 done
 python3 "$ROOT/android/native/tests/verify-main-movie.py" "$WORK"
+python3 "$ROOT/android/native/tests/verify-dvd-demux.py" "$WORK"

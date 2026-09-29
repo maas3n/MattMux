@@ -470,11 +470,24 @@ static int apply_dvd_ifo_metadata(JNIEnv *env, AVFormatContext *input,
     }
 
     if (palette_array && (*env)->GetArrayLength(env, palette_array) == 16) {
+        int width = 0, height = 0;
+        for (unsigned s = 0; s < input->nb_streams; ++s) {
+            AVCodecParameters *par = input->streams[s]->codecpar;
+            if (par->codec_type == AVMEDIA_TYPE_VIDEO && par->width > 0 && par->height > 0) {
+                width = par->width;
+                height = par->height;
+                break;
+            }
+        }
         jint *colors = (*env)->GetIntArrayElements(env, palette_array, NULL);
         if (!colors) return AVERROR(ENOMEM);
         char palette[192];
         size_t used = 0;
-        int n = snprintf(palette, sizeof(palette), "palette: ");
+        // MPEG-PS does not carry VobSub canvas extradata. Preserve the DVD
+        // picture dimensions with its IFO palette when staging into Matroska.
+        int n = width > 0 && height > 0
+            ? snprintf(palette, sizeof(palette), "size: %dx%d\npalette: ", width, height)
+            : snprintf(palette, sizeof(palette), "palette: ");
         if (n < 0 || (size_t)n >= sizeof(palette)) { (*env)->ReleaseIntArrayElements(env, palette_array, colors, JNI_ABORT); return AVERROR(EINVAL); }
         used = (size_t)n;
         for (int i = 0; i < 16; ++i) {

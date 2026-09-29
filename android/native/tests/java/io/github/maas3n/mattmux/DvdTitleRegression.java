@@ -54,7 +54,45 @@ public final class DvdTitleRegression {
                 }
             } finally { engine.nativeCloseIso(iso); }
         }
+        demuxAuthoredDvd(engine, work);
         System.out.println("Production JNI longest/explicit title selection, staged folder/ISO planning and remux PASS");
+    }
+
+    private static void demuxAuthoredDvd(AndroidNativeRemuxEngine engine, Path work) throws Exception {
+        Path disc = work.resolve("demux-dvd/dvd");
+        String[] plan = engine.nativePlanDvdNav(disc.toString(), 1);
+        require(plan != null, "Could not plan subtitled DVD");
+        int isoFd = AndroidNativeRemuxEngine.openPath(work.resolve("demux-dvd.iso").toString(), false);
+        long iso = engine.nativeOpenIso(isoFd);
+        AndroidNativeRemuxEngine.closePath(isoFd);
+        require(iso != 0, "Could not open subtitled DVD ISO");
+        try {
+            for (boolean fromIso : new boolean[]{false, true}) {
+                String name = fromIso ? "demux-iso" : "demux-folder";
+                Path source = work.resolve(name + ".mkv");
+                remux(engine, disc, source, plan, fromIso ? iso : 0);
+                AdvancedMergerNative media = new AdvancedMergerNative();
+                String[][] tracks = Arrays.stream(media.probe(source.toString()))
+                    .map(row -> row.split("\t")).filter(f -> !f[1].equals("chapters")).toArray(String[][]::new);
+                require(tracks.length == 3, "Expected MPEG2, AC3 and DVD subtitles");
+                int[] indexes = Arrays.stream(tracks).mapToInt(f -> Integer.parseInt(f[0])).toArray();
+                for (boolean vob : new boolean[]{false, true}) {
+                    Path output = work.resolve(name + (vob ? "-vob" : "-elementary"));
+                    Files.createDirectories(output);
+                    String error = media.demux(source.toString(), output.toString(), indexes, true, vob);
+                    require(error == null, "Authored DVD demux failed: " + error);
+                    for (String filename : new String[]{"track-00." + (vob ? "VOB" : "mpeg2"),
+                            "track-01.ac3", "track-02.sub", "track-02.idx", "Chapters.txt"}) {
+                        require(Files.size(output.resolve(filename)) > 0, "Empty DVD export: " + filename);
+                    }
+                    String idx = Files.readString(output.resolve("track-02.idx"));
+                    require(idx.contains("size: 720x576") && idx.contains("palette:") && idx.contains("timestamp:"),
+                        "Missing subtitle canvas, palette or timing: " + idx);
+                    require(Files.readString(output.resolve("Chapters.txt")).contains("CHAPTER02="), "Lost DVD chapters");
+                }
+            }
+        } finally { engine.nativeCloseIso(iso); }
+        System.out.println("Production JNI authored DVD folder/ISO demux, MPEG2/VOB, AC3, IDX/SUB and chapters PASS");
     }
 
     private static void remux(AndroidNativeRemuxEngine engine, Path disc, Path output, String[] plan, long iso) throws Exception {
@@ -62,11 +100,13 @@ public final class DvdTitleRegression {
         List<Long> starts = new ArrayList<>(), ends = new ArrayList<>(), chapters = new ArrayList<>(), chapterEnds = new ArrayList<>();
         List<Integer> fds = new ArrayList<>();
         List<String> languages = new ArrayList<>();
+        int[] palette = new int[16];
         for (String row : plan) {
             String[] fields = row.split("\t");
             if (fields[0].equals("C")) { starts.add(Long.parseLong(fields[1])); ends.add(Long.parseLong(fields[2])); }
             if (fields[0].equals("H")) { chapters.add(Long.parseLong(fields[1])); chapterEnds.add(Long.parseLong(fields[2])); }
             if (fields[0].equals("L")) languages.add(fields[1] + "\t" + fields[2]);
+            if (fields[0].equals("P")) palette[Integer.parseInt(fields[1])] = Integer.parseInt(fields[2]);
         }
         require(!starts.isEmpty() && chapters.size() == 2, "Missing cells or main-movie chapters");
         int out = -1;
@@ -80,7 +120,7 @@ public final class DvdTitleRegression {
             String error = engine.nativeRemux(fds.stream().mapToInt(Integer::intValue).toArray(),
                 starts.stream().mapToLong(Long::longValue).toArray(), ends.stream().mapToLong(Long::longValue).toArray(), out,
                 chapters.stream().mapToLong(Long::longValue).toArray(), chapterEnds.stream().mapToLong(Long::longValue).toArray(),
-                null, iso, titleSet, languages.toArray(new String[0]), new int[16]);
+                null, iso, titleSet, languages.toArray(new String[0]), palette);
             require(error == null, "Title remux failed: " + error);
         } finally {
             if (out >= 0) AndroidNativeRemuxEngine.closePath(out);

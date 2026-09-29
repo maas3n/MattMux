@@ -62,7 +62,7 @@ class DemuxSmokeInstrumentation : Instrumentation() {
                     check(File(folder, "Chapters.txt").readText().contains("CHAPTER02="))
                     check(files.any { it.extension == "sub" }) { "Missing DVD subtitle data: $files" }
                     val idx = files.single { it.extension == "idx" }.readText()
-                    check(idx.contains("palette:") && idx.contains("timestamp:")) { "Invalid DVD subtitle index: $idx" }
+                    check(idx.contains("size: 720x576") && idx.contains("palette:") && idx.contains("timestamp:")) { "Invalid DVD subtitle index: $idx" }
                     check(files.all { it.length() > 0 })
                     android.util.Log.i("MattMuxDemuxTest", "DVD SAF export completed: vob=$vob files=${files.map { it.name }}")
                 } finally { engine.destroy() }

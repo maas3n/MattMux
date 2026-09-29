@@ -31,13 +31,24 @@ func probeExtraBytes(dump string) ([]byte, error) {
 
 // FFmpeg's VOB muxer creates MPEG-2 pack/PES records. Index their PTS and pack
 // positions; preserve the original DVD subtitle palette from codec extradata.
-func writeVobSubIndex(path, extra, language string) error {
+func vobSubHeader(extra string, dvdWidth, dvdHeight int) ([]byte, error) {
 	palette, err := probeExtraBytes(extra)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	if !strings.Contains(string(palette), "size:") && dvdWidth > 0 && dvdHeight > 0 {
+		palette = append([]byte(fmt.Sprintf("size: %dx%d\n", dvdWidth, dvdHeight)), palette...)
 	}
 	if !strings.Contains(string(palette), "palette:") || !strings.Contains(string(palette), "size:") {
-		return errors.New("DVD subtitle palette/size is missing; cannot create a correct IDX/SUB pair")
+		return nil, errors.New("DVD subtitle palette/size is missing; cannot create a correct IDX/SUB pair")
+	}
+	return palette, nil
+}
+
+func writeVobSubIndex(path, extra, language string, dvdWidth, dvdHeight int) error {
+	palette, err := vobSubHeader(extra, dvdWidth, dvdHeight)
+	if err != nil {
+		return err
 	}
 	input, err := os.Open(path)
 	if err != nil {

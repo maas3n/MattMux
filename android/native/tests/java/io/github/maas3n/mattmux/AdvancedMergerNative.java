@@ -3,10 +3,10 @@ package io.github.maas3n.mattmux;
 public final class AdvancedMergerNative {
     private boolean cancelled;
     private boolean isNativeCancelled() { return cancelled; }
-    private native String[] probe(String path);
+    native String[] probe(String path);
     private native String validateChapters(String path);
     private native String mux(String[] paths, int[] sources, int[] streams, String chapters, String output);
-    private native String demux(String source, String directory, int[] streams, boolean chapters, boolean vob);
+    native String demux(String source, String directory, int[] streams, boolean chapters, boolean vob);
     public static void main(String[] args) {
         System.load(args[0]);
         AdvancedMergerNative engine = new AdvancedMergerNative();
