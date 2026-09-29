@@ -10,19 +10,16 @@ import java.io.File
 
 /** Debug-only real file descriptors behind SAF, for end-to-end DVD export tests. */
 class DemuxDocumentsProvider : DocumentsProvider() {
-    private val root get() = File(context!!.cacheDir, "dvd-saf-test")
-    private fun file(id: String): File = File(root, id).canonicalFile.also {
-        val base = root.canonicalFile
-        require(it == base || it.path.startsWith(base.path + File.separator))
-    }
+    private val paths by lazy { DemuxDocumentPaths(File(context!!.cacheDir, "dvd-saf-test")) }
+    private fun file(id: String): File = paths.file(id)
     override fun onCreate() = true
-    override fun isChildDocument(parentDocumentId: String, documentId: String) = file(documentId).path.startsWith(file(parentDocumentId).path + File.separator)
+    override fun isChildDocument(parentDocumentId: String, documentId: String) = paths.isChild(parentDocumentId, documentId)
     override fun queryRoots(projection: Array<out String>?): Cursor = MatrixCursor(projection ?: emptyArray())
     private fun rows(projection: Array<out String>?, files: List<File>): Cursor {
         val columns = projection ?: arrayOf(Document.COLUMN_DOCUMENT_ID, Document.COLUMN_DISPLAY_NAME, Document.COLUMN_MIME_TYPE, Document.COLUMN_SIZE, Document.COLUMN_FLAGS)
         return MatrixCursor(columns).apply {
             for (f in files) addRow(columns.map { column -> when(column) {
-                Document.COLUMN_DOCUMENT_ID -> f.relativeTo(root).path
+                Document.COLUMN_DOCUMENT_ID -> paths.documentId(f)
                 Document.COLUMN_DISPLAY_NAME -> f.name
                 Document.COLUMN_MIME_TYPE -> if (f.isDirectory) Document.MIME_TYPE_DIR else "application/octet-stream"
                 Document.COLUMN_SIZE -> f.length()
@@ -37,7 +34,7 @@ class DemuxDocumentsProvider : DocumentsProvider() {
     override fun createDocument(parentDocumentId: String, mimeType: String, displayName: String): String {
         val output = File(file(parentDocumentId), displayName)
         check(if (mimeType == Document.MIME_TYPE_DIR) output.mkdir() else output.createNewFile())
-        return output.relativeTo(root).path
+        return paths.documentId(output)
     }
     override fun deleteDocument(documentId: String) { check(file(documentId).deleteRecursively()) }
 }
