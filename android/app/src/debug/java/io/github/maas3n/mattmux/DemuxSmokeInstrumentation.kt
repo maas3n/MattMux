@@ -40,6 +40,55 @@ class DemuxSmokeInstrumentation : Instrumentation() {
                     "raw-h264.mkv" -> check(File(output, "track-00.h264").length() > 0)
                 }
             }
+            // Exercise the actual DVD-tab engine, including DVD staging and SAF export.
+            val safRoot = File(targetContext.cacheDir, "dvd-saf-test").apply { deleteRecursively(); mkdirs() }
+            val movie = File(safRoot, "movie/VIDEO_TS").apply { mkdirs() }
+            for (name in targetContext.assets.list("demux-smoke/VIDEO_TS")!!) {
+                targetContext.assets.open("demux-smoke/VIDEO_TS/$name").use { input -> File(movie, name).outputStream().use { input.copyTo(it) } }
+            }
+            check(movie.listFiles()!!.isNotEmpty())
+            File(safRoot, "output").mkdirs()
+            val authority = "io.github.maas3n.mattmux.demux-test"
+            val source = android.provider.DocumentsContract.buildTreeDocumentUri(authority, "movie")
+            val output = android.provider.DocumentsContract.buildTreeDocumentUri(authority, "output")
+            for (vob in listOf(false, true)) {
+                val engine = TabMediaEngine(targetContext, runtime)
+                try {
+                    val exported = engine.demux(source, output, null, true, vob)
+                    val folder = File(safRoot, android.provider.DocumentsContract.getDocumentId(exported))
+                    val files = folder.listFiles()!!.toList()
+                    check(files.any { it.extension == if (vob) "VOB" else "mpeg2" }) { "Missing DVD video: $files" }
+                    check(files.any { it.extension == "ac3" }) { "Missing DVD audio: $files" }
+                    check(File(folder, "Chapters.txt").readText().contains("CHAPTER02="))
+                    check(files.any { it.extension == "sub" }) { "Missing DVD subtitle data: $files" }
+                    val idx = files.single { it.extension == "idx" }.readText()
+                    check(idx.contains("size: 720x576") && idx.contains("palette:") && idx.contains("timestamp:")) { "Invalid DVD subtitle index: $idx" }
+                    check(files.all { it.length() > 0 })
+                    android.util.Log.i("MattMuxDemuxTest", "DVD SAF export completed: vob=$vob files=${files.map { it.name }}")
+                } finally { engine.destroy() }
+            }
+            val activity = startActivitySync(android.content.Intent(targetContext, MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+            try {
+                fun field(name: String) = MainActivity::class.java.getDeclaredField(name).apply { isAccessible = true }
+                runOnMainSync {
+                    field("sourceUri").set(activity, source)
+                    field("outputUri").set(activity, output)
+                    MainActivity::class.java.getDeclaredMethod("startDemux", Boolean::class.javaPrimitiveType).apply { isAccessible = true }.invoke(activity, false)
+                }
+                val deadline = android.os.SystemClock.elapsedRealtime() + 60000
+                var finished = false
+                var message = ""
+                while (!finished && android.os.SystemClock.elapsedRealtime() < deadline) {
+                    runOnMainSync {
+                        finished = !field("remuxRunning").getBoolean(activity)
+                        message = (field("remuxStatus").get(activity) as android.widget.TextView).text.toString()
+                    }
+                    if (!finished) android.os.SystemClock.sleep(50)
+                }
+                check(finished && message.startsWith("Demux complete:")) { "DVD tab did not complete: $message" }
+                android.util.Log.i("MattMuxDemuxTest", "DVD tab completion verified: $message")
+            } finally { runOnMainSync { activity.finish() } }
+            safRoot.deleteRecursively()
             result.putString("stream", "MATTMUX_DEMUX_SMOKE_PASS")
             finish(Activity.RESULT_OK, result)
         } catch (error: Throwable) {

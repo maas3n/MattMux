@@ -145,11 +145,13 @@ func demuxTab(ctx context.Context, tools toolPaths, source string, title int, ou
 	}
 	var probe struct {
 		Streams []struct {
-			Index int               `json:"index"`
-			Codec string            `json:"codec_name"`
-			Kind  string            `json:"codec_type"`
-			Extra string            `json:"extradata"`
-			Tags  map[string]string `json:"tags"`
+			Index  int               `json:"index"`
+			Codec  string            `json:"codec_name"`
+			Kind   string            `json:"codec_type"`
+			Extra  string            `json:"extradata"`
+			Width  int               `json:"width"`
+			Height int               `json:"height"`
+			Tags   map[string]string `json:"tags"`
 		} `json:"streams"`
 		Chapters []struct {
 			Start string            `json:"start_time"`
@@ -158,6 +160,18 @@ func demuxTab(ctx context.Context, tools toolPaths, source string, title int, ou
 	}
 	if err = json.Unmarshal(data, &probe); err != nil {
 		return "", err
+	}
+	// dvdvideo supplies the IFO palette but may omit VobSub canvas extradata.
+	// Only use the DVD picture dimensions here; an arbitrary MKV video may
+	// have been resized independently of its subtitle canvas.
+	var dvdWidth, dvdHeight int
+	if !isMKVSource(source) {
+		for _, stream := range probe.Streams {
+			if stream.Kind == "video" && stream.Width > 0 && stream.Height > 0 {
+				dvdWidth, dvdHeight = stream.Width, stream.Height
+				break
+			}
+		}
 	}
 	selected := map[int]bool{}
 	for _, i := range indexes {
@@ -228,7 +242,7 @@ func demuxTab(ctx context.Context, tools toolPaths, source string, title int, ou
 			return final, err
 		}
 		if e.format.Extension == "sub" {
-			if err = writeVobSubIndex(name, e.extra, e.language); err != nil {
+			if err = writeVobSubIndex(name, e.extra, e.language, dvdWidth, dvdHeight); err != nil {
 				return final, err
 			}
 		}
