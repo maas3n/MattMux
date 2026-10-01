@@ -12,8 +12,7 @@ static int merger_open(const char *path, AVFormatContext **input, CancelContext 
     *input = avformat_alloc_context();
     if (!*input) return AVERROR(ENOMEM);
     (*input)->interrupt_callback = (AVIOInterruptCB){is_cancelled, cancel};
-    /* DVD input is prepared by nativeRemux with the DVD-only input policy.
-       These inputs are ordinary media or the resulting staged MKV. */
+    (*input)->flags |= AVFMT_FLAG_GENPTS;
     int ret = avformat_open_input(input, path, NULL, NULL);
     if (ret >= 0) ret = avformat_find_stream_info(*input, NULL);
     return ret;

@@ -5,8 +5,8 @@ package main
 import "strconv"
 
 func appendDesktopMediaInput(args []string, input string) []string {
-	// Ordinary files (including staged MKVs) keep their normal input policy.
-	return append(args, "-i", input)
+	// Keep existing missing-PTS generation; reserve the large probe limits for DVD.
+	return append(args, "-fflags", "+genpts", "-i", input)
 }
 
 func appendDesktopDVDInput(args []string, title int, input string) []string {

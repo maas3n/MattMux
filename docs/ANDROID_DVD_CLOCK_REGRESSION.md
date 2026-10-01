@@ -49,48 +49,36 @@ The PR's Windows and Linux workflows run the shared desktop behavior suites.
 No public release is part of this change. Validation on the user's failing DVD
 is still required before claiming that exact case is resolved.
 
-## DVD-only input options (October 1 clarification)
+## Input-policy audit and correction (October 1)
 
-Use analyzeduration=100000000 microseconds (100 seconds), probesize=100000000
-bytes, and GENPTS on each original DVD input, including DVD audio selected in a
-mixed Advanced Merger job. Do not apply them to its accompanying MKV, MP4, raw
-streams, subtitle/chapter files, or to the staged MKV after DVD preparation.
-Desktop ordinary-media input helpers previously applied all three options,
-and Android merger_open enabled GENPTS for every ordinary input. These violated
-the clarified policy and are corrected. DVD probing now also enables GENPTS.
+Mathias requires the full analyzeduration=100000000 microseconds (100 seconds),
+probesize=100000000 bytes, and GENPTS combination for original DVD inputs,
+including DVD audio selected alongside MKV video/subtitles in Advanced Merger.
+The 100M probe overrides must stay with the DVD input.
+
+I incorrectly interpreted the original instruction as requiring removal of
+existing GENPTS handling from all ordinary inputs. Mathias explicitly corrected
+that interpretation: "I DID NOT TELL YOU TO REMOVE GENPTS". That removal is
+reverted. Existing GENPTS remains in the desktop ordinary-media helper and the
+Android ordinary-media reader. Only the large probe overrides are DVD-specific.
+The regression tests continue to cover both orders of mixed DVD/MKV inputs.
+
+The mistaken removal caused the existing desktop TestMergerRawVideo/m2v and
+/vob tests to fail with "Can't write packet with unknown timestamp". This was
+also reproduced directly with FFmpeg 9.0.1; GENPTS alone restores those cases.
+The tests were not weakened or removed.
 
 In v1.4.17 Android demux stages the chosen DVD title into MKV using nativeRemux,
 then extracts the chosen tracks from that MKV and copies the exports to SAF.
-It is not a direct one-pass DVD-to-elementary-stream FFmpeg CLI command. The DVD
-staging path already had both 100M limits and GENPTS in v1.4.17 and v1.4.18.
+The DVD stage already had both 100M limits and GENPTS in v1.4.17 and v1.4.18.
 Those options were not removed between these releases. The production native
-code difference was the DVD subtitle canvas metadata addition; the demux
-export reader itself did not change between those two tags. This comparison
-does not yet identify the original-device failure.
+code difference was the DVD subtitle canvas metadata addition; the demux export
+reader itself did not change between those two tags. This comparison does not
+yet identify the original-device failure.
 
 FFmpeg's concat-demuxer safe=0 accepts filenames rejected by safe=1. It does not
 repair timestamps or suppress corruption errors; neither dvdvideo nor the
-concat: byte-concatenation protocol uses this private demuxer option. GENPTS
-fills missing presentation timestamps where decoding timestamps are available;
-it does not promise to repair all existing timestamp discontinuities.
+concat: protocol uses that private option. GENPTS fills missing presentation
+timestamps where decoding timestamps are available; it does not promise to
+repair all existing timestamp discontinuities.
 Source: https://ffmpeg.org/ffmpeg-formats.html (Format Options, concat, dvdvideo).
-
-### Strict policy validation is blocked by raw MPEG-2
-
-The strict no-GENPTS non-DVD candidate passes the new mixed-input option tests
-and the native remux/demux suites. However, the unchanged desktop
-TestMergerRawVideo/m2v and /vob cases fail with "Can't write packet with unknown
-timestamp" after GENPTS is removed. This was independently reproduced using
-FFmpeg 9.0.1 and the existing host fixtures (not just system FFmpeg 6.1.1):
-
-```
-ffmpeg -v error -i raw.m2v -map 0:v:0 -c copy output.mkv
-# fails: Can't write packet with unknown timestamp
-ffmpeg -v error -fflags +genpts -i raw.m2v -map 0:v:0 -c copy output.mkv
-# succeeds
-```
-
-The same result occurs with raw.vob. No 100M probe overrides are needed for
-these fixtures. The user's no-flags-for-raw-inputs rule has not been silently
-relaxed. This candidate must remain draft/unmerged until that conflict is
-resolved; the failing raw-video regression tests remain intact.

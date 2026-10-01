@@ -10,7 +10,7 @@ import (
 
 func TestDesktopMediaInputArgs(t *testing.T) {
 	got := appendDesktopMediaInput([]string{"-y"}, "input.mkv")
-	want := []string{"-y", "-i", "input.mkv"}
+	want := []string{"-y", "-fflags", "+genpts", "-i", "input.mkv"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args = %q; want %q", got, want)
 	}
@@ -70,7 +70,7 @@ func assertDVDInputOptions(t *testing.T, args []string, dvd string) {
 				}
 			}
 		} else {
-			for _, flag := range []string{"-analyzeduration", "-probesize", "-fflags", "-safe"} {
+			for _, flag := range []string{"-analyzeduration", "-probesize", "-safe"} {
 				if strings.Contains(joined, flag) {
 					t.Fatalf("ordinary input %s inherited %s: %q", args[i], flag, args)
 				}
@@ -83,7 +83,7 @@ func assertDVDInputOptions(t *testing.T, args []string, dvd string) {
 	}
 }
 
-func TestOrdinaryMergerAndTabInputsHaveNoDVDOptions(t *testing.T) {
+func TestOrdinaryMergerAndTabInputsHaveNoDVDProbeOverrides(t *testing.T) {
 	var streams []mergerStream
 	for _, path := range []string{"movie.mkv", "movie.mp4", "video.h264", "video.mpeg2", "audio.ac3", "captions.srt"} {
 		kind := "video"
