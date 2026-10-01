@@ -54,21 +54,22 @@ public final class DvdTitleRegression {
                 }
             } finally { engine.nativeCloseIso(iso); }
         }
-        demuxAuthoredDvd(engine, work);
+        demuxAuthoredDvd(engine, work, false);
+        demuxAuthoredDvd(engine, work, true);
         System.out.println("Production JNI longest/explicit title selection, staged folder/ISO planning and remux PASS");
     }
 
-    private static void demuxAuthoredDvd(AndroidNativeRemuxEngine engine, Path work) throws Exception {
-        Path disc = work.resolve("demux-dvd/dvd");
+    private static void demuxAuthoredDvd(AndroidNativeRemuxEngine engine, Path work, boolean reset) throws Exception {
+        Path disc = work.resolve(reset ? "demux-dvd/clock-reset" : "demux-dvd/dvd");
         String[] plan = engine.nativePlanDvdNav(disc.toString(), 1);
         require(plan != null, "Could not plan subtitled DVD");
-        int isoFd = AndroidNativeRemuxEngine.openPath(work.resolve("demux-dvd.iso").toString(), false);
+        int isoFd = AndroidNativeRemuxEngine.openPath(work.resolve(reset ? "clock-reset.iso" : "demux-dvd.iso").toString(), false);
         long iso = engine.nativeOpenIso(isoFd);
         AndroidNativeRemuxEngine.closePath(isoFd);
         require(iso != 0, "Could not open subtitled DVD ISO");
         try {
             for (boolean fromIso : new boolean[]{false, true}) {
-                String name = fromIso ? "demux-iso" : "demux-folder";
+                String name = (reset ? "clock-reset-" : "demux-") + (fromIso ? "iso" : "folder");
                 Path source = work.resolve(name + ".mkv");
                 remux(engine, disc, source, plan, fromIso ? iso : 0);
                 AdvancedMergerNative media = new AdvancedMergerNative();
@@ -79,8 +80,10 @@ public final class DvdTitleRegression {
                 for (boolean vob : new boolean[]{false, true}) {
                     Path output = work.resolve(name + (vob ? "-vob" : "-elementary"));
                     Files.createDirectories(output);
+                    media.progress.clear();
                     String error = media.demux(source.toString(), output.toString(), indexes, true, vob);
                     require(error == null, "Authored DVD demux failed: " + error);
+                    require(media.progress.contains(100) && media.progress.stream().distinct().count() > 3, "No extraction progress: " + media.progress);
                     for (String filename : new String[]{"track-00." + (vob ? "VOB" : "mpeg2"),
                             "track-01.ac3", "track-02.sub", "track-02.idx", "Chapters.txt"}) {
                         require(Files.size(output.resolve(filename)) > 0, "Empty DVD export: " + filename);

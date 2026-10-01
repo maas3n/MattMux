@@ -42,30 +42,39 @@ class DemuxSmokeInstrumentation : Instrumentation() {
             }
             // Exercise the actual DVD-tab engine, including DVD staging and SAF export.
             val safRoot = File(targetContext.cacheDir, "dvd-saf-test").apply { deleteRecursively(); mkdirs() }
-            val movie = File(safRoot, "movie/VIDEO_TS").apply { mkdirs() }
-            for (name in targetContext.assets.list("demux-smoke/VIDEO_TS")!!) {
-                targetContext.assets.open("demux-smoke/VIDEO_TS/$name").use { input -> File(movie, name).outputStream().use { input.copyTo(it) } }
+            for ((asset, folder) in listOf("VIDEO_TS" to "movie", "CLOCK_RESET" to "clock-reset")) {
+                val movie = File(safRoot, "$folder/VIDEO_TS").apply { mkdirs() }
+                for (name in targetContext.assets.list("demux-smoke/$asset")!!) {
+                    targetContext.assets.open("demux-smoke/$asset/$name").use { input -> File(movie, name).outputStream().use { input.copyTo(it) } }
+                }
+                check(movie.listFiles()!!.isNotEmpty())
             }
-            check(movie.listFiles()!!.isNotEmpty())
             File(safRoot, "output").mkdirs()
             val authority = "io.github.maas3n.mattmux.demux-test"
             val source = android.provider.DocumentsContract.buildTreeDocumentUri(authority, "movie")
             val output = android.provider.DocumentsContract.buildTreeDocumentUri(authority, "output")
-            for (vob in listOf(false, true)) {
-                val engine = TabMediaEngine(targetContext, runtime)
-                try {
-                    val exported = engine.demux(source, output, null, true, vob)
-                    val folder = File(safRoot, android.provider.DocumentsContract.getDocumentId(exported))
-                    val files = folder.listFiles()!!.toList()
-                    check(files.any { it.extension == if (vob) "VOB" else "mpeg2" }) { "Missing DVD video: $files" }
-                    check(files.any { it.extension == "ac3" }) { "Missing DVD audio: $files" }
-                    check(File(folder, "Chapters.txt").readText().contains("CHAPTER02="))
-                    check(files.any { it.extension == "sub" }) { "Missing DVD subtitle data: $files" }
-                    val idx = files.single { it.extension == "idx" }.readText()
-                    check(idx.contains("size: 720x576") && idx.contains("palette:") && idx.contains("timestamp:")) { "Invalid DVD subtitle index: $idx" }
-                    check(files.all { it.length() > 0 })
-                    android.util.Log.i("MattMuxDemuxTest", "DVD SAF export completed: vob=$vob files=${files.map { it.name }}")
-                } finally { engine.destroy() }
+            for (input in listOf(source, android.provider.DocumentsContract.buildTreeDocumentUri(authority, "clock-reset"))) {
+                for (vob in listOf(false, true)) {
+                    val engine = TabMediaEngine(targetContext, runtime)
+                    try {
+                        val statuses = mutableListOf<String>()
+                        val exported = engine.demux(input, output, null, true, vob) { statuses.add(it) }
+                        for (phase in listOf("Preparing DVD title…", "Extracting selected streams…")) {
+                            val progress = statuses.filter { it.startsWith(phase) && it.endsWith("%") }
+                            check(progress.distinct().size > 3) { "Missing $phase progress: $statuses" }
+                        }
+                        val folder = File(safRoot, android.provider.DocumentsContract.getDocumentId(exported))
+                        val files = folder.listFiles()!!.toList()
+                        check(files.any { it.extension == if (vob) "VOB" else "mpeg2" }) { "Missing DVD video: $files" }
+                        check(files.any { it.extension == "ac3" }) { "Missing DVD audio: $files" }
+                        check(File(folder, "Chapters.txt").readText().contains("CHAPTER02="))
+                        check(files.any { it.extension == "sub" }) { "Missing DVD subtitle data: $files" }
+                        val idx = files.single { it.extension == "idx" }.readText()
+                        check(idx.contains("size: 720x576") && idx.contains("palette:") && idx.contains("timestamp:")) { "Invalid DVD subtitle index: $idx" }
+                        check(files.all { it.length() > 0 })
+                        android.util.Log.i("MattMuxDemuxTest", "DVD SAF export completed: vob=$vob files=${files.map { it.name }}")
+                    } finally { engine.destroy() }
+                }
             }
             val activity = startActivitySync(android.content.Intent(targetContext, MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
             try {

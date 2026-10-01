@@ -211,6 +211,8 @@ class AdvancedMergerPanel(private val activity: Activity) {
 }
 
 class AdvancedMergerNative {
+    @Volatile var progressListener: ((Int) -> Unit)? = null
+    @Suppress("unused") private fun onNativeProgress(percent: Int) { progressListener?.invoke(percent.coerceIn(0, 100)) }
     val cancelled = AtomicBoolean(false)
     @Suppress("unused") private fun isNativeCancelled(): Boolean = cancelled.get()
     external fun demux(path: String, directory: String, streams: IntArray, chapters: Boolean, vob: Boolean): String?

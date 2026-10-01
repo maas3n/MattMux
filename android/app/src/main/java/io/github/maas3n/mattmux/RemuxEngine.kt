@@ -68,6 +68,7 @@ class AndroidNativeRemuxEngine : RemuxEngine {
 
     @Volatile
     private var progressListener: ((Int) -> Unit)? = null
+    @Volatile private var stagingProgressListener: ((Int) -> Unit)? = null
 
     override val runtimeInfo: String? by lazy {
         if (loadFailure != null) null else runCatching { nativeVersionSummary() }
@@ -177,11 +178,13 @@ class AndroidNativeRemuxEngine : RemuxEngine {
         outputFile: File,
         requestedTitle: Int? = null,
         preserveChapters: Boolean = true,
+        progress: ((Int) -> Unit)? = null,
     ): Int {
         check(isAvailable) { unavailableReason ?: "Remux engine unavailable" }
         require(requestedTitle == null || requestedTitle > 0) { "DVD title must be greater than zero" }
         check(remuxLock.tryLock()) { "Another native operation is still stopping. Try again shortly." }
         try {
+            stagingProgressListener = progress
             check(!cancelled.get()) { "Remux cancelled" }
             outputFile.parentFile?.mkdirs()
             if (outputFile.exists()) check(outputFile.delete()) { "Could not replace temporary merger input" }
@@ -211,6 +214,7 @@ class AndroidNativeRemuxEngine : RemuxEngine {
             outputFile.delete()
             throw t
         } finally {
+            stagingProgressListener = null
             cancelled.set(false)
             remuxLock.unlock()
         }
@@ -378,7 +382,7 @@ class AndroidNativeRemuxEngine : RemuxEngine {
 
     @Suppress("unused")
     private fun onNativeProgress(percent: Int) {
-        progressListener?.invoke(percent.coerceIn(0, 100))
+        (stagingProgressListener ?: progressListener)?.invoke(percent.coerceIn(0, 100))
     }
 
     private external fun nativeVersionSummary(): String

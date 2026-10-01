@@ -63,10 +63,14 @@ static int demux_write(DemuxOutput *out, AVPacket *packet, AVRational timebase)
     return ret;
 }
 
-static int demux_media(const char *path, const char *directory, const int *selected, int selected_count, int chapters, int vob, CancelContext *cancel)
+static int demux_media(const char *path, const char *directory, const int *selected, int selected_count, int chapters, int vob, CancelContext *cancel, jmethodID progress)
 {
+    int last_percent = -1;
+    int64_t processed = 0, input_size = 0;
     AVFormatContext *input=NULL; DemuxOutput *outputs=NULL; AVPacket *packet=NULL, *filtered=NULL; int ret=merger_open(path,&input,cancel);
     if (ret<0) goto done;
+    input_size = avio_size(input->pb);
+    report_progress(cancel->env, cancel->engine, progress, 0);
     outputs=av_calloc(input->nb_streams,sizeof(*outputs)); packet=av_packet_alloc(); filtered=av_packet_alloc();
     if (!outputs || !packet || !filtered) { ret=AVERROR(ENOMEM); goto done; }
     if (!selected_count) { ret=AVERROR(EINVAL); goto done; }
@@ -97,6 +101,13 @@ static int demux_media(const char *path, const char *directory, const int *selec
     }
     while ((ret=av_read_frame(input,packet))>=0) {
         if (is_cancelled(cancel)) { ret=AVERROR_EXIT; goto done; }
+        if (packet->pos >= 0 && packet->pos > processed) processed = packet->pos;
+        int percent = input_size > 0 ? (int)(100.0 * processed / input_size) : 0;
+        if (percent > 99) percent = 99;
+        if (percent > last_percent) {
+            report_progress(cancel->env, cancel->engine, progress, percent);
+            last_percent = percent;
+        }
         int i=packet->stream_index; DemuxOutput *out=&outputs[i];
         if (!out->format) { av_packet_unref(packet); continue; }
         AVRational tb=input->streams[i]->time_base;
@@ -137,6 +148,7 @@ static int demux_media(const char *path, const char *directory, const int *selec
         ret=ferror(file) ? AVERROR(EIO) : 0; if (fclose(file)) ret=AVERROR(EIO); if (ret<0) goto done;
     }
     ret=0;
+    report_progress(cancel->env, cancel->engine, progress, 100);
  done:
     if (outputs) { for (unsigned i=0;input && i<input->nb_streams;++i) { av_bsf_free(&outputs[i].bsf); if (outputs[i].format) { avio_closep(&outputs[i].format->pb); avformat_free_context(outputs[i].format); } } }
     av_free(outputs); av_packet_free(&packet); av_packet_free(&filtered); avformat_close_input(&input); return ret;
@@ -149,7 +161,9 @@ JNIEXPORT jstring JNICALL Java_io_github_maas3n_mattmux_AdvancedMergerNative_dem
     jint *indexes=(*env)->GetIntArrayElements(env,selection,NULL);
     if (!path || !directory || !indexes) { if (path) (*env)->ReleaseStringUTFChars(env,source,path); if (directory) (*env)->ReleaseStringUTFChars(env,destination,directory); if (indexes) (*env)->ReleaseIntArrayElements(env,selection,indexes,JNI_ABORT); return NULL; }
     CancelContext cancel={env,self,(*env)->GetMethodID(env,(*env)->GetObjectClass(env,self),"isNativeCancelled","()Z")};
-    int ret=demux_media(path,directory,indexes,(*env)->GetArrayLength(env,selection),chapters,vob,&cancel);
+    jmethodID progress=(*env)->GetMethodID(env,(*env)->GetObjectClass(env,self),"onNativeProgress","(I)V");
+    if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); progress=NULL; }
+    int ret=demux_media(path,directory,indexes,(*env)->GetArrayLength(env,selection),chapters,vob,&cancel,progress);
     (*env)->ReleaseStringUTFChars(env,source,path); (*env)->ReleaseStringUTFChars(env,destination,directory); (*env)->ReleaseIntArrayElements(env,selection,indexes,JNI_ABORT);
     if (ret<0) { char error[256]; av_strerror(ret,error,sizeof(error)); return (*env)->NewStringUTF(env,error); }
     return NULL;
