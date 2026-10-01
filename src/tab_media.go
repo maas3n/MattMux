@@ -65,7 +65,7 @@ func probeTabMKV(ctx context.Context, tools toolPaths, source string) (ffprobeRe
 
 func tabInput(args []string, source string, title int) []string {
 	if isMKVSource(source) {
-		return appendDesktopRobustInput(args, source)
+		return appendDesktopMediaInput(args, source)
 	}
 	// Pre-index DVD chapters and normalize the selected title timeline.
 	args = append(args, "-preindex", "1")
@@ -89,7 +89,7 @@ func remuxMKV(ctx context.Context, tools toolPaths, source, output string, index
 		return "", err
 	}
 	defer os.Remove(partial)
-	args := appendDesktopRobustInput([]string{"-hide_banner", "-v", "error", "-nostdin", "-y"}, source)
+	args := appendDesktopMediaInput([]string{"-hide_banner", "-v", "error", "-nostdin", "-y"}, source)
 	args = append(args, maps...)
 	chapterMap := "-1"
 	if chapters {

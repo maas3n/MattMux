@@ -545,7 +545,7 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeProbeTracks(
     input->probesize = 100000000;
     input->max_analyze_duration = 100000000;
     input->interrupt_callback = (AVIOInterruptCB){is_cancelled, &cancel};
-    input->flags |= AVFMT_FLAG_CUSTOM_IO;
+    input->flags |= AVFMT_FLAG_CUSTOM_IO | AVFMT_FLAG_GENPTS;
     ret = avformat_open_input(&input, NULL, NULL, NULL);
     if (ret < 0) { ff_error(error, sizeof(error), "Could not open selected DVD program stream", ret); goto cleanup_probe; }
     ret = avformat_find_stream_info(input, NULL);
