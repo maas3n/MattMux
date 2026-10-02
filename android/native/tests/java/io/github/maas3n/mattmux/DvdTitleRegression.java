@@ -54,21 +54,22 @@ public final class DvdTitleRegression {
                 }
             } finally { engine.nativeCloseIso(iso); }
         }
-        demuxAuthoredDvd(engine, work);
+        demuxAuthoredDvd(engine, work, false);
+        demuxAuthoredDvd(engine, work, true);
         System.out.println("Production JNI longest/explicit title selection, staged folder/ISO planning and remux PASS");
     }
 
-    private static void demuxAuthoredDvd(AndroidNativeRemuxEngine engine, Path work) throws Exception {
-        Path disc = work.resolve("demux-dvd/dvd");
+    private static void demuxAuthoredDvd(AndroidNativeRemuxEngine engine, Path work, boolean reset) throws Exception {
+        Path disc = work.resolve(reset ? "demux-dvd/clock-reset" : "demux-dvd/dvd");
         String[] plan = engine.nativePlanDvdNav(disc.toString(), 1);
         require(plan != null, "Could not plan subtitled DVD");
-        int isoFd = AndroidNativeRemuxEngine.openPath(work.resolve("demux-dvd.iso").toString(), false);
+        int isoFd = AndroidNativeRemuxEngine.openPath(work.resolve(reset ? "clock-reset.iso" : "demux-dvd.iso").toString(), false);
         long iso = engine.nativeOpenIso(isoFd);
         AndroidNativeRemuxEngine.closePath(isoFd);
         require(iso != 0, "Could not open subtitled DVD ISO");
         try {
             for (boolean fromIso : new boolean[]{false, true}) {
-                String name = fromIso ? "demux-iso" : "demux-folder";
+                String name = (reset ? "clock-reset-" : "demux-") + (fromIso ? "iso" : "folder");
                 Path source = work.resolve(name + ".mkv");
                 remux(engine, disc, source, plan, fromIso ? iso : 0);
                 AdvancedMergerNative media = new AdvancedMergerNative();
@@ -79,16 +80,37 @@ public final class DvdTitleRegression {
                 for (boolean vob : new boolean[]{false, true}) {
                     Path output = work.resolve(name + (vob ? "-vob" : "-elementary"));
                     Files.createDirectories(output);
-                    String error = media.demux(source.toString(), output.toString(), indexes, true, vob);
-                    require(error == null, "Authored DVD demux failed: " + error);
-                    for (String filename : new String[]{"track-00." + (vob ? "VOB" : "mpeg2"),
-                            "track-01.ac3", "track-02.sub", "track-02.idx", "Chapters.txt"}) {
-                        require(Files.size(output.resolve(filename)) > 0, "Empty DVD export: " + filename);
+                    engine.demuxProgress.clear();
+                    directDemux(engine, disc, output, plan, fromIso ? iso : 0, vob, null, true);
+                    require(engine.demuxProgress.contains(100) && engine.demuxProgress.stream().distinct().count() > 3, "No extraction progress: " + engine.demuxProgress);
+                    for (String extension : new String[]{vob ? "VOB" : "mpeg2", "ac3", "sub", "idx"}) {
+                        try (var files = Files.list(output)) {
+                            Path file = files.filter(f -> f.toString().endsWith("." + extension)).findFirst().orElseThrow();
+                            require(Files.size(file) > 0, "Empty DVD export: " + file);
+                        }
                     }
-                    String idx = Files.readString(output.resolve("track-02.idx"));
+                    String idx;
+                    try (var files = Files.list(output)) { idx = Files.readString(files.filter(f -> f.toString().endsWith(".idx")).findFirst().orElseThrow()); }
                     require(idx.contains("size: 720x576") && idx.contains("palette:") && idx.contains("timestamp:"),
                         "Missing subtitle canvas, palette or timing: " + idx);
                     require(Files.readString(output.resolve("Chapters.txt")).contains("CHAPTER02="), "Lost DVD chapters");
+                    if (!vob) {
+                        int audioIndex;
+                        try (var files = Files.list(output)) {
+                            String filename = files.filter(f -> f.toString().endsWith(".ac3")).findFirst().orElseThrow().getFileName().toString();
+                            audioIndex = Integer.parseInt(filename.substring(6, filename.indexOf('.')));
+                        }
+                        Path audioOnly = work.resolve(name + "-audio-only");
+                        Files.createDirectories(audioOnly);
+                        directDemux(engine, disc, audioOnly, plan, fromIso ? iso : 0, false, new int[]{audioIndex}, false);
+                        try (var files = Files.list(audioOnly)) { require(files.count() == 1, "Unselected streams or chapters exported"); }
+                        Path cancelled = work.resolve(name + "-cancelled");
+                        Files.createDirectories(cancelled);
+                        engine.cancelled = true;
+                        try { directDemux(engine, disc, cancelled, plan, fromIso ? iso : 0, false, null, true); }
+                        finally { engine.cancelled = false; }
+                        try (var files = Files.list(cancelled)) { require(files.count() == 0, "Cancelled demux created output"); }
+                    }
                 }
             }
         } finally { engine.nativeCloseIso(iso); }
@@ -122,6 +144,38 @@ public final class DvdTitleRegression {
                 chapters.stream().mapToLong(Long::longValue).toArray(), chapterEnds.stream().mapToLong(Long::longValue).toArray(),
                 null, iso, titleSet, languages.toArray(new String[0]), palette);
             require(error == null, "Title remux failed: " + error);
+        } finally {
+            if (out >= 0) AndroidNativeRemuxEngine.closePath(out);
+            for (int fd : fds) AndroidNativeRemuxEngine.closePath(fd);
+        }
+    }
+    private static void directDemux(AndroidNativeRemuxEngine engine, Path disc, Path output, String[] plan, long iso, boolean vob, int[] selected, boolean includeChapters) throws Exception {
+        int titleSet = Integer.parseInt(plan[0].split("\t")[2]);
+        List<Long> starts = new ArrayList<>(), ends = new ArrayList<>(), chapters = new ArrayList<>(), chapterEnds = new ArrayList<>();
+        List<Integer> fds = new ArrayList<>();
+        List<String> languages = new ArrayList<>();
+        int[] palette = new int[16];
+        for (String row : plan) {
+            String[] fields = row.split("\t");
+            if (fields[0].equals("C")) { starts.add(Long.parseLong(fields[1])); ends.add(Long.parseLong(fields[2])); }
+            if (fields[0].equals("H")) { chapters.add(Long.parseLong(fields[1])); chapterEnds.add(Long.parseLong(fields[2])); }
+            if (fields[0].equals("L")) languages.add(fields[1] + "\t" + fields[2]);
+            if (fields[0].equals("P")) palette[Integer.parseInt(fields[1])] = Integer.parseInt(fields[2]);
+        }
+        require(!starts.isEmpty() && chapters.size() == 2, "Missing cells or main-movie chapters");
+        int out = -1;
+        try {
+            if (iso == 0) for (int part = 1; part <= 9; part++) {
+                Path file = disc.resolve(String.format(Locale.ROOT, "VIDEO_TS/VTS_%02d_%d.VOB", titleSet, part));
+                if (!Files.exists(file)) break;
+                fds.add(AndroidNativeRemuxEngine.openPath(file.toString(), false));
+            }
+            String error = engine.nativeDemux(fds.stream().mapToInt(Integer::intValue).toArray(),
+                starts.stream().mapToLong(Long::longValue).toArray(), ends.stream().mapToLong(Long::longValue).toArray(), output.toString(),
+                includeChapters ? chapters.stream().mapToLong(Long::longValue).toArray() : new long[0], includeChapters ? chapterEnds.stream().mapToLong(Long::longValue).toArray() : new long[0],
+                selected, iso, titleSet, languages.toArray(new String[0]), palette, vob);
+            if (engine.cancelled) require(error != null && error.contains("cancelled"), "Cancellation ignored: " + error);
+            else require(error == null, "Direct title demux failed: " + error);
         } finally {
             if (out >= 0) AndroidNativeRemuxEngine.closePath(out);
             for (int fd : fds) AndroidNativeRemuxEngine.closePath(fd);

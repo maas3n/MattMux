@@ -22,6 +22,7 @@
 #include <dvdread/dvd_reader.h>
 #include <dvdread/ifo_read.h>
 #include <dvdread/ifo_types.h>
+#include <dvdread/nav_read.h>
 #include <android/log.h>
 #endif
 #include <libavutil/timestamp.h>
@@ -56,6 +57,7 @@ typedef struct {
     SourceSpan *spans;
     int span_count;
     int64_t stream_size;
+    int64_t window_start, window_end; /* one continuous DVD clock domain */
     int64_t pos;
 } SourceContext;
 
@@ -104,7 +106,7 @@ static int source_read(void *opaque, uint8_t *buf, int buf_size)
 {
     SourceContext *ctx = (SourceContext *)opaque;
     if (is_cancelled(ctx->cancel)) return AVERROR_EXIT;
-    if (ctx->pos >= ctx->stream_size) return AVERROR_EOF;
+    if (ctx->pos >= ctx->window_end) return AVERROR_EOF;
 
     int span_index = find_span(ctx, ctx->pos);
     if (span_index < 0) return AVERROR(EIO);
@@ -119,6 +121,7 @@ static int source_read(void *opaque, uint8_t *buf, int buf_size)
     int64_t remaining_span = span->length - in_span;
     int64_t remaining_file = file_end - source_pos;
     int64_t wanted = buf_size;
+    if (wanted > ctx->window_end - ctx->pos) wanted = ctx->window_end - ctx->pos;
     if (wanted > remaining_span) wanted = remaining_span;
     if (wanted > remaining_file) wanted = remaining_file;
     if (wanted <= 0) return AVERROR(EIO);
@@ -141,18 +144,18 @@ static int source_read(void *opaque, uint8_t *buf, int buf_size)
 static int64_t source_seek(void *opaque, int64_t offset, int whence)
 {
     SourceContext *ctx = (SourceContext *)opaque;
-    if (whence == AVSEEK_SIZE) return ctx->stream_size;
+    if (whence == AVSEEK_SIZE) return ctx->window_end - ctx->window_start;
     int base_whence = whence & ~AVSEEK_FORCE;
     int64_t next;
     switch (base_whence) {
-        case SEEK_SET: next = offset; break;
+        case SEEK_SET: next = ctx->window_start + offset; break;
         case SEEK_CUR: next = ctx->pos + offset; break;
-        case SEEK_END: next = ctx->stream_size + offset; break;
+        case SEEK_END: next = ctx->window_end + offset; break;
         default: return AVERROR(EINVAL);
     }
-    if (next < 0 || next > ctx->stream_size) return AVERROR(EINVAL);
+    if (next < ctx->window_start || next > ctx->window_end) return AVERROR(EINVAL);
     ctx->pos = next;
-    return next;
+    return next - ctx->window_start;
 }
 
 #if LIBAVFORMAT_VERSION_MAJOR >= 61
@@ -285,6 +288,7 @@ static int init_source(JNIEnv *env, jintArray fd_array, jlongArray starts_array,
         stream_total += end - start;
     }
     ctx->stream_size = stream_total;
+    ctx->window_end = stream_total;
 
 done:
     if (fds) (*env)->ReleaseIntArrayElements(env, fd_array, fds, JNI_ABORT);
@@ -541,7 +545,7 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeProbeTracks(
     input->probesize = 100000000;
     input->max_analyze_duration = 100000000;
     input->interrupt_callback = (AVIOInterruptCB){is_cancelled, &cancel};
-    input->flags |= AVFMT_FLAG_CUSTOM_IO;
+    input->flags |= AVFMT_FLAG_CUSTOM_IO | AVFMT_FLAG_GENPTS;
     ret = avformat_open_input(&input, NULL, NULL, NULL);
     if (ret < 0) { ff_error(error, sizeof(error), "Could not open selected DVD program stream", ret); goto cleanup_probe; }
     ret = avformat_find_stream_info(input, NULL);
@@ -601,6 +605,86 @@ cleanup_probe:
     return result;
 }
 
+/* NAV timing is decoded by libdvdread, never by an IFO parser in MattMux.
+ * A fresh MPEG demuxer at each discontinuity prevents GENPTS / frame parsers
+ * from looking across clock resets. All streams receive the same clock offset.
+ */
+typedef struct { int64_t start, end, offset; } DvdClockSegment;
+
+static int dvd_clock_segments(SourceContext *source, DvdClockSegment **result, int *count)
+{
+    *result = av_malloc(sizeof(**result));
+    if (!*result) return AVERROR(ENOMEM);
+    (*result)[0] = (DvdClockSegment){0, source->stream_size, 0};
+    *count = 1;
+#ifdef MATTMUX_DVDNAV
+    int seen = 0;
+    int64_t previous_end = 0, offset = 0;
+    for (int span = 0; span < source->span_count; ++span) {
+        int64_t position = source->spans[span].stream_start;
+        int64_t end = position + source->spans[span].length;
+        while (position < end) {
+            uint8_t nav[2048];
+            source->pos = position;
+            int got = 0;
+            while (got < (int)sizeof(nav)) {
+                int n = source_read(source, nav + got, sizeof(nav) - got);
+                if (n < 0) return n;
+                got += n;
+            }
+            /* Raw program streams used by host tests have no authored NAV.
+             * Only an entirely non-NAV source retains the legacy single clock. */
+            if (memcmp(nav + 38, "\x00\x00\x01\xbf", 4) || nav[44] != 0 ||
+                memcmp(nav + 1024, "\x00\x00\x01\xbf", 4) || nav[1030] != 1) {
+                if (!seen && !span) { source->pos = 0; return 0; }
+                return AVERROR_INVALIDDATA;
+            }
+            pci_t pci; dsi_t dsi;
+            navRead_PCI(&pci, nav + 45);
+            navRead_DSI(&dsi, nav + 1031);
+            int64_t start_ptm = pci.pci_gi.vobu_s_ptm, end_ptm = pci.pci_gi.vobu_e_ptm;
+            if (end_ptm < start_ptm) return AVERROR_INVALIDDATA;
+            if (seen && previous_end != start_ptm) {
+                offset += previous_end - start_ptm;
+                DvdClockSegment *grown = av_realloc_array(*result, *count + 1, sizeof(**result));
+                if (!grown) return AVERROR(ENOMEM);
+                *result = grown;
+                grown[*count - 1].end = position;
+                grown[(*count)++] = (DvdClockSegment){position, source->stream_size, offset};
+            }
+            previous_end = end_ptm;
+            seen = 1;
+            int64_t next = position + ((int64_t)dsi.dsi_gi.vobu_ea + 1) * DVD_SECTOR_SIZE;
+            if (next <= position || next > end) return AVERROR_INVALIDDATA;
+            position = next;
+        }
+    }
+#endif
+    source->pos = 0;
+    return 0;
+}
+
+static int open_clock_segment(SourceContext *source, DvdClockSegment segment,
+                              AVFormatContext **input, AVIOContext **io)
+{
+    source->window_start = source->pos = segment.start;
+    source->window_end = segment.end;
+    uint8_t *buffer = av_malloc(IO_BUFFER_SIZE);
+    if (!buffer) return AVERROR(ENOMEM);
+    *io = avio_alloc_context(buffer, IO_BUFFER_SIZE, 0, source, source_read, NULL, source_seek);
+    if (!*io) { av_free(buffer); return AVERROR(ENOMEM); }
+    *input = avformat_alloc_context();
+    if (!*input) return AVERROR(ENOMEM);
+    (*input)->pb = *io;
+    (*input)->probesize = 100000000;
+    (*input)->max_analyze_duration = 100000000;
+    (*input)->interrupt_callback = (AVIOInterruptCB){is_cancelled, source->cancel};
+    (*input)->flags |= AVFMT_FLAG_CUSTOM_IO | AVFMT_FLAG_GENPTS;
+    int ret = avformat_open_input(input, NULL, NULL, NULL);
+    if (ret >= 0) ret = avformat_find_stream_info(*input, NULL);
+    return ret;
+}
+
 JNIEXPORT jstring JNICALL
 Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
     JNIEnv *env, jobject thiz, jintArray fd_array, jlongArray starts_array, jlongArray ends_array,
@@ -618,6 +702,9 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
     AVFormatContext *input = NULL, *out = NULL;
     AVPacket *packet = NULL;
     int *stream_map = NULL;
+    int *stream_ids = NULL;
+    DvdClockSegment *segments = NULL;
+    int segment_count = 0, segment_index = 0;
     jint *selected_indexes = NULL;
     jsize selected_count = -1;
     int64_t timestamp_origin_us = 0;
@@ -631,25 +718,9 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
         ret = AVERROR(errno); goto cleanup;
     }
 
-    uint8_t *input_buffer = av_malloc(IO_BUFFER_SIZE);
-    if (!input_buffer) { ret = AVERROR(ENOMEM); goto cleanup; }
-    input_io = avio_alloc_context(input_buffer, IO_BUFFER_SIZE, 0, &source, source_read, NULL, source_seek);
-    if (!input_io) { av_free(input_buffer); ret = AVERROR(ENOMEM); goto cleanup; }
-
-    input = avformat_alloc_context();
-    if (!input) { ret = AVERROR(ENOMEM); goto cleanup; }
-    input->pb = input_io;
-    input->probesize = 100000000;
-    input->max_analyze_duration = 100000000;
-    input->interrupt_callback = (AVIOInterruptCB){is_cancelled, &cancel};
-    input->flags |= AVFMT_FLAG_CUSTOM_IO;
-    ret = avformat_open_input(&input, NULL, NULL, NULL);
-    if (ret < 0) { ff_error(error, sizeof(error), "Could not open selected DVD program stream", ret); goto cleanup; }
-    /* MPEG-PS may omit PTS on reordered video packets. Let the demuxer look
-       ahead to derive presentation timing; copying DTS to PTS would break
-       B-frame presentation order. Keep the common A/V origin below. */
-    input->flags |= AVFMT_FLAG_GENPTS;
-    ret = avformat_find_stream_info(input, NULL);
+    ret = dvd_clock_segments(&source, &segments, &segment_count);
+    if (ret < 0) { ff_error(error, sizeof(error), "Could not read DVD navigation timing", ret); goto cleanup; }
+    ret = open_clock_segment(&source, (DvdClockSegment){0, source.stream_size, 0}, &input, &input_io);
     if (ret < 0) { ff_error(error, sizeof(error), "Could not probe DVD streams", ret); goto cleanup; }
 
     ret = apply_dvd_ifo_metadata(env, input, language_records, palette_array);
@@ -665,7 +736,8 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
     out->avoid_negative_ts = AVFMT_AVOID_NEG_TS_DISABLED;
 
     stream_map = av_malloc_array(input->nb_streams, sizeof(*stream_map));
-    if (!stream_map) { ret = AVERROR(ENOMEM); goto cleanup; }
+    stream_ids = av_malloc_array(input->nb_streams, sizeof(*stream_ids));
+    if (!stream_map || !stream_ids) { ret = AVERROR(ENOMEM); goto cleanup; }
     for (unsigned i = 0; i < input->nb_streams; ++i) stream_map[i] = -1;
 
     if (selected_streams) {
@@ -687,6 +759,7 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
         AVStream *out_stream = avformat_new_stream(out, NULL);
         if (!out_stream) { ret = AVERROR(ENOMEM); goto cleanup; }
         stream_map[i] = out_stream->index;
+        stream_ids[out_stream->index] = in_stream->id;
         ret = avcodec_parameters_copy(out_stream->codecpar, in_stream->codecpar);
         if (ret < 0) { ff_error(error, sizeof(error), "Could not copy stream parameters", ret); goto cleanup; }
         out_stream->codecpar->codec_tag = 0;
@@ -716,41 +789,71 @@ Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeRemux(
     jmethodID progress_method = cls ? (*env)->GetMethodID(env, cls, "onNativeProgress", "(I)V") : NULL;
     if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); progress_method = NULL; }
     int last_percent = -1;
+    int64_t processed = 0;
 
-    while ((ret = av_read_frame(input, packet)) >= 0) {
-        if (is_cancelled(&cancel)) { ret = AVERROR_EXIT; break; }
-        int in_index = packet->stream_index;
-        int out_index = (in_index >= 0 && (unsigned)in_index < input->nb_streams) ? stream_map[in_index] : -1;
-        if (out_index >= 0) {
-            AVStream *in_stream = input->streams[in_index];
-            AVStream *out_stream = out->streams[out_index];
-            int64_t origin = av_rescale_q(timestamp_origin_us, AV_TIME_BASE_Q, in_stream->time_base);
-            if (packet->pts != AV_NOPTS_VALUE) packet->pts -= origin;
-            if (packet->dts != AV_NOPTS_VALUE) packet->dts -= origin;
-            packet->stream_index = out_index;
-            av_packet_rescale_ts(packet, in_stream->time_base, out_stream->time_base);
-            packet->pos = -1;
-            /* The interleaver consumes packet even on failure. Capture context
-               first; it may also fail while flushing an earlier queued packet. */
-            char write_step[256];
-            snprintf(write_step, sizeof(write_step),
-                "Matroska write failed while submitting %s stream %d (%s; pts=%s, dts=%s, time_base=%d/%d)",
-                track_type_name(in_stream->codecpar->codec_type), in_index,
-                avcodec_get_name(in_stream->codecpar->codec_id),
-                av_ts2str(packet->pts), av_ts2str(packet->dts),
-                out_stream->time_base.num, out_stream->time_base.den);
-            ret = av_interleaved_write_frame(out, packet);
-            if (ret < 0) { ff_error(error, sizeof(error), write_step, ret); av_packet_unref(packet); break; }
+    /* Discover the complete title first, then isolate parser lookahead at
+       clock boundaries without losing streams absent from the first segment. */
+    for (segment_index = 0; segment_index < segment_count; ++segment_index) {
+        if (segment_count > 1) {
+            avformat_close_input(&input);
+            av_freep(&input_io->buffer); avio_context_free(&input_io);
+            ret = open_clock_segment(&source, segments[segment_index], &input, &input_io);
+            if (ret < 0) { ff_error(error, sizeof(error), "Could not open next DVD clock segment", ret); goto cleanup; }
+            av_freep(&stream_map);
+            stream_map = av_malloc_array(input->nb_streams, sizeof(*stream_map));
+            if (!stream_map) { ret = AVERROR(ENOMEM); goto cleanup; }
+            for (unsigned i = 0; i < input->nb_streams; ++i) {
+                stream_map[i] = -1;
+                for (unsigned j = 0; j < out->nb_streams; ++j) {
+                    if (input->streams[i]->id == stream_ids[j] &&
+                        input->streams[i]->codecpar->codec_id == out->streams[j]->codecpar->codec_id) {
+                        stream_map[i] = j;
+                        break;
+                    }
+                }
+            }
+            if (segment_index == 0 && input->start_time != AV_NOPTS_VALUE)
+                timestamp_origin_us = input->start_time;
         }
-        av_packet_unref(packet);
-        int percent = source.stream_size > 0 ? (int)((source.pos * 100) / source.stream_size) : 0;
-        if (percent > 99) percent = 99;
-        if (percent < last_percent) percent = last_percent;
-        if (percent != last_percent) { report_progress(env, thiz, progress_method, percent); last_percent = percent; }
-    }
-    if (ret == AVERROR_EOF) {
-        ret = (input_io->error < 0 && input_io->error != AVERROR_EOF) ? input_io->error : 0;
-    }
+        while ((ret = av_read_frame(input, packet)) >= 0) {
+            if (is_cancelled(&cancel)) { ret = AVERROR_EXIT; break; }
+            if (packet->pos >= 0 && segments[segment_index].start + packet->pos > processed)
+                processed = segments[segment_index].start + packet->pos;
+            int in_index = packet->stream_index;
+            int out_index = (in_index >= 0 && (unsigned)in_index < input->nb_streams) ? stream_map[in_index] : -1;
+            if (out_index >= 0) {
+                AVStream *in_stream = input->streams[in_index];
+                AVStream *out_stream = out->streams[out_index];
+                int64_t origin = av_rescale_q(timestamp_origin_us, AV_TIME_BASE_Q, in_stream->time_base);
+                int64_t shift = av_rescale_q(segments[segment_index].offset, (AVRational){1, 90000}, in_stream->time_base) - origin;
+                if (packet->pts != AV_NOPTS_VALUE) packet->pts += shift;
+                if (packet->dts != AV_NOPTS_VALUE) packet->dts += shift;
+                packet->stream_index = out_index;
+                av_packet_rescale_ts(packet, in_stream->time_base, out_stream->time_base);
+                packet->pos = -1;
+                /* The interleaver consumes packet even on failure. Capture context
+                   first; it may also fail while flushing an earlier queued packet. */
+                char write_step[256];
+                snprintf(write_step, sizeof(write_step),
+                    "Matroska write failed while submitting %s stream %d (%s; pts=%s, dts=%s, time_base=%d/%d)",
+                    track_type_name(in_stream->codecpar->codec_type), in_index,
+                    avcodec_get_name(in_stream->codecpar->codec_id),
+                    av_ts2str(packet->pts), av_ts2str(packet->dts),
+                    out_stream->time_base.num, out_stream->time_base.den);
+                ret = av_interleaved_write_frame(out, packet);
+                if (ret < 0) { ff_error(error, sizeof(error), write_step, ret); av_packet_unref(packet); break; }
+            }
+            av_packet_unref(packet);
+            int percent = source.stream_size > 0 ? (int)(100.0 * processed / source.stream_size) : 0;
+            if (percent > 99) percent = 99;
+            if (percent < last_percent) percent = last_percent;
+            if (percent != last_percent) { report_progress(env, thiz, progress_method, percent); last_percent = percent; }
+        }
+        if (ret == AVERROR_EOF) {
+            ret = (input_io->error < 0 && input_io->error != AVERROR_EOF) ? input_io->error : 0;
+        }
+        if (ret < 0) break;
+    } /* clock segments */
     if (ret == AVERROR_EXIT || is_cancelled(&cancel)) {
         snprintf(error, sizeof(error), "Remux cancelled");
         ret = AVERROR_EXIT;
@@ -775,6 +878,8 @@ cleanup:
     if (packet) av_packet_free(&packet);
     if (selected_indexes) (*env)->ReleaseIntArrayElements(env, selected_streams, selected_indexes, JNI_ABORT);
     av_freep(&stream_map);
+    av_freep(&stream_ids);
+    av_freep(&segments);
     if (out) {
         out->pb = NULL;
         avformat_free_context(out);

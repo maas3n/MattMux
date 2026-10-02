@@ -28,7 +28,7 @@ func detectChapters(ctx context.Context, ffprobe, src string, title int) ([]DVDC
 
 func probeChapters(ctx context.Context, ffprobe, src string, title int) ([]DVDChapter, error) {
 	var r ffprobeChapterResult
-	out, err := runHidden(ctx, ffprobe, "-v", "error", "-probesize", "100M", "-analyzeduration", "100M", "-f", "dvdvideo", "-title", strconv.Itoa(title), "-preindex", "1", "-i", src, "-show_chapters", "-of", "json")
+	out, err := runHidden(ctx, ffprobe, "-v", "error", "-probesize", "100M", "-analyzeduration", "100M", "-fflags", "+genpts", "-f", "dvdvideo", "-title", strconv.Itoa(title), "-preindex", "1", "-i", src, "-show_chapters", "-of", "json")
 	if err != nil {
 		return nil, fmt.Errorf("ffprobe chapter read failed: %w", err)
 	}
@@ -80,7 +80,7 @@ func readDVDVideoTitleDuration(ctx context.Context, ffprobe, src string, title i
 func readDVDVideoTitleDurationAttempt(ctx context.Context, ffprobe, src string, title int, preindex bool) (time.Duration, error) {
 	childCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
-	args := []string{"-v", "error", "-probesize", "100M", "-analyzeduration", "100M", "-f", "dvdvideo", "-title", strconv.Itoa(title)}
+	args := []string{"-v", "error", "-probesize", "100M", "-analyzeduration", "100M", "-fflags", "+genpts", "-f", "dvdvideo", "-title", strconv.Itoa(title)}
 	if preindex {
 		args = append(args, "-preindex", "1")
 	}
@@ -104,7 +104,7 @@ func readDVDVideoTitleDurationAttempt(ctx context.Context, ffprobe, src string, 
 
 func probeStreams(ctx context.Context, ffprobe, src string, title int) (ffprobeResult, error) {
 	var r ffprobeResult
-	out, err := runHidden(ctx, ffprobe, "-v", "error", "-probesize", "100M", "-analyzeduration", "100M", "-f", "dvdvideo", "-title", strconv.Itoa(title), "-i", src, "-show_streams", "-of", "json")
+	out, err := runHidden(ctx, ffprobe, "-v", "error", "-probesize", "100M", "-analyzeduration", "100M", "-fflags", "+genpts", "-f", "dvdvideo", "-title", strconv.Itoa(title), "-i", src, "-show_streams", "-of", "json")
 	if err != nil {
 		return r, fmt.Errorf("ffprobe metadata read failed: %w", err)
 	}

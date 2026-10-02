@@ -21,7 +21,7 @@ const (
 )
 
 var mergerWindow struct {
-	tab, list, chapter, output, name, status, progress uintptr
+	tab, list, chapter, output, name, status, progress, demuxBtn uintptr
 	dvd, controls                                      []uintptr
 	cancelBtn                                          uintptr
 	progressActive                                     bool
@@ -84,8 +84,9 @@ func createMergerWindowsControls(hwnd, hInstance uintptr) {
 	// Merger cannot know an exact percentage for arbitrary stream-copy inputs, so
 	// show the native marquee while an operation is active instead of a fake value.
 	mergerWindow.progress, _, _ = procCreateWindowExW.Call(0, uintptr(unsafe.Pointer(utf16Ptr("msctls_progress32"))), 0, uintptr(WS_CHILD|mergerPBSMarquee), uintptr(scale96(28, dpi)), uintptr(scale96(550, dpi)), uintptr(scale96(750, dpi)), uintptr(scale96(16, dpi)), hwnd, 0, hInstance, 0)
+	mergerWindow.demuxBtn = add("BUTTON", "DEMUX", BS_PUSHBUTTON, 296, 574, 180, 34, mergerFirstID+7)
 	add("BUTTON", "MUX TO MKV", BS_PUSHBUTTON, 488, 574, 180, 34, mergerFirstID+6)
-	mergerWindow.cancelBtn = add("BUTTON", "Cancel", BS_PUSHBUTTON, 680, 574, 98, 34, mergerFirstID+7)
+	mergerWindow.cancelBtn = add("BUTTON", "Cancel", BS_PUSHBUTTON, 680, 574, 98, 34, mergerFirstID+8)
 	procEnableWindow.Call(mergerWindow.cancelBtn, 0)
 	createBatchWindowsControls(hwnd, hInstance)
 	createCLIWindowsControls(hwnd, hInstance)
@@ -228,10 +229,10 @@ func handleWindowsMergerCommand(id int) bool {
 	if handleWindowsCLICommand(id) || handleWindowsBatchCommand(id) {
 		return true
 	}
-	if id < mergerFirstID || id > mergerFirstID+7 {
+	if id < mergerFirstID || id > mergerFirstID+8 {
 		return false
 	}
-	if id == mergerFirstID+7 {
+	if id == mergerFirstID+8 {
 		app.cancelCurrent()
 		return true
 	}
@@ -327,6 +328,37 @@ func handleWindowsMergerCommand(id int) bool {
 				return nil, err
 			}
 			return func() { setText(mergerWindow.status, "Completed: "+out) }, nil
+		})
+	case 7:
+		var selected []mergerStream
+		for i, s := range mergerWindow.streams {
+			state, _, _ := procSendMessageW.Call(mergerWindow.list, LVM_GETITEMSTATE, uintptr(i), LVIS_STATEIMAGEMASK)
+			if state>>12 == 2 {
+				selected = append(selected, s)
+			}
+		}
+		choice := messageBox(app.hwnd, "MPEG-2 video export format", "Save MPEG-2 video as VOB?\n\nYes: .VOB video\nNo: .mpeg2 elementary video\nCancel: return", 0x00000003|MB_ICONQUESTION)
+		if choice != 6 && choice != 7 {
+			return true
+		}
+		video := "mpeg2"
+		if choice == 6 {
+			video = "vob"
+		}
+		dir := getText(mergerWindow.output)
+		runWindowsMerger("Demuxing selected streams…", func(ctx context.Context) (func(), error) {
+			if err := validateOutputDir(dir); err != nil {
+				return nil, err
+			}
+			tools, err := mergerTools(ctx)
+			if err != nil {
+				return nil, err
+			}
+			final, err := demuxMerger(ctx, tools, selected, dir, video)
+			if err != nil {
+				return nil, err
+			}
+			return func() { setText(mergerWindow.status, "Demux complete: "+final) }, nil
 		})
 	}
 	return true

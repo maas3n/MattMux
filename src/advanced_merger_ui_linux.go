@@ -192,6 +192,43 @@ func (g *linuxGUI) buildAdvancedMerger() fyne.CanvasObject {
 			}
 		}, g.window)
 	})
+	demux := widget.NewButton("DEMUX", func() {
+		format := widget.NewSelect([]string{"MPEG2 elementary video (.mpeg2)", "VOB video (.VOB)"}, nil)
+		format.SetSelected("MPEG2 elementary video (.mpeg2)")
+		dialog.NewCustomConfirm("Demux selected streams", "Demux", "Cancel", container.NewVBox(
+			widget.NewLabel("MPEG-2 video export format"),
+			format,
+		), func(ok bool) {
+			if !ok {
+				return
+			}
+			var chosen []mergerStream
+			for i, s := range streams {
+				if checks[i].Checked {
+					chosen = append(chosen, s)
+				}
+			}
+			dir := output.Text
+			video := "mpeg2"
+			if format.Selected == "VOB video (.VOB)" {
+				video = "vob"
+			}
+			run("Demuxing selected streams…", func(ctx context.Context) (func(), error) {
+				if err := validateOutputDir(dir); err != nil {
+					return nil, err
+				}
+				tools, err := mergerTools(ctx)
+				if err != nil {
+					return nil, err
+				}
+				final, err := demuxMerger(ctx, tools, chosen, dir, video)
+				if err != nil {
+					return nil, err
+				}
+				return func() { status.SetText("Demux complete: " + final) }, nil
+			})
+		}, g.window).Show()
+	})
 	mux := widget.NewButton("MUX TO MKV", func() {
 		var chosen []mergerStream
 		for i, s := range streams {
@@ -229,8 +266,8 @@ func (g *linuxGUI) buildAdvancedMerger() fyne.CanvasObject {
 		list.Refresh()
 		status.SetText("Choose files to add streams.")
 	})
-	controls = []fyne.Disableable{movies, audio, subs, chapters, folder, mux, clear, chapter, output, name}
+	controls = []fyne.Disableable{movies, audio, subs, chapters, folder, demux, mux, clear, chapter, output, name}
 	baseControlCount = len(controls)
 	scroll := container.NewVScroll(list)
-	return container.NewBorder(container.NewVBox(container.NewVBox(movies, audio, subs), widget.NewLabel("Select Streams — choose one chapter set, or use the chapter override below")), container.NewVBox(clear, container.NewBorder(nil, nil, nil, chapters, chapter), container.NewBorder(nil, nil, nil, folder, output), container.NewBorder(nil, nil, widget.NewLabel("Output filename"), nil, name), status, activity, container.NewHBox(mux, cancelBtn)), nil, nil, scroll)
+	return container.NewBorder(container.NewVBox(container.NewVBox(movies, audio, subs), widget.NewLabel("Select Streams — choose one chapter set, or use the chapter override below")), container.NewVBox(clear, container.NewBorder(nil, nil, nil, chapters, chapter), container.NewBorder(nil, nil, nil, folder, output), container.NewBorder(nil, nil, widget.NewLabel("Output filename"), nil, name), status, activity, container.NewHBox(demux, mux, cancelBtn)), nil, nil, scroll)
 }

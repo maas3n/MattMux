@@ -20,3 +20,19 @@
   folder/ISO integration tests and Android native tests before release. Run
   scripts/check-release-assets.py before publishing. Do not move published tags
   or silently rebuild just one package variant.
+
+- DVD input policy: apply `-analyzeduration 100M -probesize 100M -fflags +genpts`
+  to each DVD VIDEO_TS/folder/ISO input in probing, remux, demux, batch, CLI and
+  Advanced Merger (native equivalent: 100000000 microseconds, 100000000 bytes,
+  AVFMT_FLAG_GENPTS). In mixed jobs the 100M probe overrides belong only to
+  the DVD input, not accompanying MKV/MP4/raw/subtitle/chapter inputs.
+  Preserve existing GENPTS handling: the user explicitly corrected its removal.
+  Do not remove GENPTS while scoping the DVD probe settings. Test mixed inputs.
+- `-safe 0` only relaxes concat-demuxer filename restrictions. It is not a
+  timestamp/corruption recovery option and must not be passed to `dvdvideo`,
+  `concat:` protocol inputs, or ordinary media readers.
+
+- DVD demux must read the selected title directly, never through a temporary MKV.
+  MKV demux remains supported and uses container timestamps without explicitly
+  adding the DVD option bundle (including GENPTS). This demux-specific rule does
+  not remove existing GENPTS from raw-media merging or any DVD path.

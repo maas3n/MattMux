@@ -40,24 +40,42 @@ class TabMediaEngine(private val context: Context, private val dvd: AndroidNativ
         try { return work() } finally { busy = false; if (destroyed.get()) root.deleteRecursively() }
     }
 
-    private fun prepare(uri: Uri): File {
+    private fun prepare(uri: Uri, status: (String) -> Unit = {}): File {
         checkCancelled()
         cachedFile?.takeIf { cachedUri == uri && it.isFile }?.let { return it }
         cachedFile?.delete(); cachedFile = null; cachedUri = null; dvdOriginalTracks = emptyList()
         val file = File(root, "source.mkv")
         try {
             if (isMKV(uri)) {
+                val size = context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
+                    if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else -1L
+                } ?: -1L
+                var copied = 0L
+                var reported = -1L
+                status("Copying MKV source…")
                 context.contentResolver.openInputStream(uri)?.use { input -> file.outputStream().use { output ->
                     val buffer = ByteArray(256 * 1024)
-                    while (true) { checkCancelled(); val n = input.read(buffer); if (n < 0) break; output.write(buffer, 0, n) }
+                    while (true) {
+                        checkCancelled(); val n = input.read(buffer); if (n < 0) break
+                        output.write(buffer, 0, n); copied += n
+                        val value = if (size > 0) (copied * 100 / size).coerceAtMost(99) else copied / (1024 * 1024)
+                        if (value != reported) {
+                            reported = value
+                            status(if (size > 0) "Copying MKV source… $value%" else "Copying MKV source… $value MiB")
+                        }
+                    }
                 } } ?: error("Cannot read MKV source")
             } else {
                 preparingDVD = true
                 try {
                     checkCancelled()
+                    status("Scanning DVD streams…")
                     dvdOriginalTracks = dvd.probeTracks(context, uri).tracks
                     checkCancelled()
-                    dvd.remuxTitleToFile(context, uri, file, preserveChapters = true)
+                    status("Preparing DVD title… 0%")
+                    dvd.remuxTitleToFile(context, uri, file, preserveChapters = true) { percent ->
+                        status("Preparing DVD title… $percent%")
+                    }
                 } finally { preparingDVD = false }
             }
             checkCancelled()
@@ -129,14 +147,25 @@ class TabMediaEngine(private val context: Context, private val dvd: AndroidNativ
             android.util.Log.i("MattMuxDemux", message)
             status(message)
         }
-        report("Preparing source for demux…")
-        val source = prepare(uri); val selection = selected(source, indexes)
-        require(selection.isNotEmpty()) { "Select at least one track" }
         val directory = File(root, "export-${System.nanoTime()}").apply { check(mkdir()) }
         var destination: Uri? = null
         try {
-            report("Extracting selected streams…")
-            native.demux(source.absolutePath, directory.absolutePath, selection, chapters, vob)?.let { error("Demux failed: $it") }
+            if (isMKV(uri)) {
+                val source = prepare(uri, ::report)
+                val selection = selected(source, indexes)
+                require(selection.isNotEmpty()) { "Select at least one track" }
+                native.progressListener = { percent -> status("Extracting selected streams… $percent%") }
+                native.demux(source.absolutePath, directory.absolutePath, selection, chapters, vob)?.let { error("Demux failed: $it") }
+            } else {
+                preparingDVD = true
+                try {
+                    checkCancelled()
+                    report("Reading DVD title and stream metadata…")
+                    dvd.demuxTitleToDirectory(context, uri, directory, indexes, chapters, vob) { percent ->
+                        status("Extracting selected streams… $percent%")
+                    }
+                } finally { preparingDVD = false }
+            }
             checkCancelled()
             val files = directory.listFiles()?.sortedBy { it.name } ?: error("No output files")
             check(files.isNotEmpty() && files.all { it.length() > 0 }) { "An exported stream is empty" }
@@ -155,6 +184,6 @@ class TabMediaEngine(private val context: Context, private val dvd: AndroidNativ
         } catch (error: Throwable) {
             destination?.let { runCatching { DocumentsContract.deleteDocument(context.contentResolver, it) } }
             throw error
-        } finally { directory.deleteRecursively() }
+        } finally { native.progressListener = null; directory.deleteRecursively() }
     }
 }

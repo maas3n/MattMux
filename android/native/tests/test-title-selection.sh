@@ -49,6 +49,7 @@ XML
 done
 python3 "$ROOT/android/native/tests/make-dvd-demux-fixture.py" "$WORK/demux-dvd"
 genisoimage -quiet -dvd-video -udf -o "$WORK/demux-dvd.iso" "$WORK/demux-dvd/dvd"
+genisoimage -quiet -dvd-video -udf -o "$WORK/clock-reset.iso" "$WORK/demux-dvd/clock-reset"
 javac -d "$WORK/classes" \
   "$ROOT/android/native/tests/java/io/github/maas3n/mattmux/AndroidNativeRemuxEngine.java" \
   "$ROOT/android/native/tests/java/io/github/maas3n/mattmux/AdvancedMergerNative.java" \

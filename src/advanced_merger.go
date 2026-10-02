@@ -162,7 +162,7 @@ func mergerArgs(streams []mergerStream, chapters, output string) ([]string, erro
 		if titles[path] > 0 {
 			return appendDesktopDVDInput(args, titles[path], path)
 		}
-		return appendDesktopRobustInput(args, path)
+		return appendDesktopMediaInput(args, path)
 	}
 	var err error
 	streams, chapters, err = resolveMergerSelection(streams, chapters)

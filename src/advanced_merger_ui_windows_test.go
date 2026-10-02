@@ -18,7 +18,7 @@ func TestWindowsAdvancedMergerAndBatchTabs(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer procDestroyWindow.Call(app.hwnd)
-	if mergerWindow.tab == 0 || mergerWindow.list == 0 || mergerWindow.progress == 0 {
+	if mergerWindow.tab == 0 || mergerWindow.list == 0 || mergerWindow.progress == 0 || mergerWindow.demuxBtn == 0 {
 		t.Fatal("missing merger controls")
 	}
 	visible := syscall.NewLazyDLL("user32.dll").NewProc("IsWindowVisible")

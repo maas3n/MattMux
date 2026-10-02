@@ -2,6 +2,8 @@ package io.github.maas3n.mattmux;
 
 public final class AdvancedMergerNative {
     private boolean cancelled;
+    final java.util.List<Integer> progress = new java.util.ArrayList<>();
+    private void onNativeProgress(int percent) { progress.add(percent); }
     private boolean isNativeCancelled() { return cancelled; }
     native String[] probe(String path);
     private native String validateChapters(String path);

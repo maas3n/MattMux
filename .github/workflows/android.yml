@@ -90,6 +90,7 @@ jobs:
           cp "$RUNNER_TEMP/remux-parity/merger/"{mixed,subtitles,raw-h264}.mkv android/app/src/debug/assets/demux-smoke/
           python3 android/native/tests/make-dvd-demux-fixture.py "$RUNNER_TEMP/dvd-demux"
           cp -r "$RUNNER_TEMP/dvd-demux/dvd/VIDEO_TS" android/app/src/debug/assets/demux-smoke/
+          cp -r "$RUNNER_TEMP/dvd-demux/clock-reset/VIDEO_TS" android/app/src/debug/assets/demux-smoke/CLOCK_RESET
 
       - name: Test, lint and build development artifacts
         run: |

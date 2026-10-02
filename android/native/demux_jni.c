@@ -63,10 +63,19 @@ static int demux_write(DemuxOutput *out, AVPacket *packet, AVRational timebase)
     return ret;
 }
 
-static int demux_media(const char *path, const char *directory, const int *selected, int selected_count, int chapters, int vob, CancelContext *cancel)
+/* The output writer accepts either a regular file or a planned DVD packet reader.
+ * The metadata context remains stable even when DVD clock segments reopen. */
+typedef int (*DemuxRead)(void *, AVPacket *);
+static int demux_file_read(void *opaque, AVPacket *packet) { return av_read_frame(opaque, packet); }
+
+static int demux_input(AVFormatContext *input, DemuxRead read_packet, void *reader,
+    int64_t input_size, const char *directory, const int *selected, int selected_count,
+    int chapters, int vob, CancelContext *cancel, jmethodID progress)
 {
-    AVFormatContext *input=NULL; DemuxOutput *outputs=NULL; AVPacket *packet=NULL, *filtered=NULL; int ret=merger_open(path,&input,cancel);
-    if (ret<0) goto done;
+    int last_percent = -1;
+    int64_t processed = 0;
+    DemuxOutput *outputs=NULL; AVPacket *packet=NULL, *filtered=NULL; int ret=0;
+    report_progress(cancel->env, cancel->engine, progress, 0);
     outputs=av_calloc(input->nb_streams,sizeof(*outputs)); packet=av_packet_alloc(); filtered=av_packet_alloc();
     if (!outputs || !packet || !filtered) { ret=AVERROR(ENOMEM); goto done; }
     if (!selected_count) { ret=AVERROR(EINVAL); goto done; }
@@ -95,8 +104,15 @@ static int demux_media(const char *path, const char *directory, const int *selec
         if (ret>=0) ret=avformat_write_header(out->format,&options);
         av_dict_free(&options); if (ret<0) goto done;
     }
-    while ((ret=av_read_frame(input,packet))>=0) {
+    while ((ret=read_packet(reader,packet))>=0) {
         if (is_cancelled(cancel)) { ret=AVERROR_EXIT; goto done; }
+        if (packet->pos >= 0 && packet->pos > processed) processed = packet->pos;
+        int percent = input_size > 0 ? (int)(100.0 * processed / input_size) : 0;
+        if (percent > 99) percent = 99;
+        if (percent > last_percent) {
+            report_progress(cancel->env, cancel->engine, progress, percent);
+            last_percent = percent;
+        }
         int i=packet->stream_index; DemuxOutput *out=&outputs[i];
         if (!out->format) { av_packet_unref(packet); continue; }
         AVRational tb=input->streams[i]->time_base;
@@ -137,9 +153,141 @@ static int demux_media(const char *path, const char *directory, const int *selec
         ret=ferror(file) ? AVERROR(EIO) : 0; if (fclose(file)) ret=AVERROR(EIO); if (ret<0) goto done;
     }
     ret=0;
+    report_progress(cancel->env, cancel->engine, progress, 100);
  done:
     if (outputs) { for (unsigned i=0;input && i<input->nb_streams;++i) { av_bsf_free(&outputs[i].bsf); if (outputs[i].format) { avio_closep(&outputs[i].format->pb); avformat_free_context(outputs[i].format); } } }
-    av_free(outputs); av_packet_free(&packet); av_packet_free(&filtered); avformat_close_input(&input); return ret;
+    av_free(outputs); av_packet_free(&packet); av_packet_free(&filtered); return ret;
+}
+
+static int demux_media(const char *path, const char *directory, const int *selected, int selected_count, int chapters, int vob, CancelContext *cancel, jmethodID progress)
+{
+    /* DVD inputs use nativeDemux. This reader receives the MKV itself and
+       preserves its timestamps without DVD probing limits or forced GENPTS. */
+    AVFormatContext *input = avformat_alloc_context();
+    if (!input) return AVERROR(ENOMEM);
+    input->interrupt_callback = (AVIOInterruptCB){is_cancelled, cancel};
+    int ret = avformat_open_input(&input, path, NULL, NULL);
+    if (ret >= 0) ret = avformat_find_stream_info(input, NULL);
+    if (ret >= 0) ret = demux_input(input, demux_file_read, input, avio_size(input->pb),
+        directory, selected, selected_count, chapters, vob, cancel, progress);
+    avformat_close_input(&input);
+    return ret;
+}
+
+/* Reads the selected DVD cells directly; no intermediate Matroska container. */
+typedef struct {
+    SourceContext *source;
+    AVFormatContext *metadata, *input;
+    AVIOContext *io;
+    DvdClockSegment *segments;
+    int count, current;
+    int64_t origin;
+} DvdDemuxReader;
+
+static void dvd_demux_close_segment(DvdDemuxReader *reader)
+{
+    avformat_close_input(&reader->input);
+    if (reader->io) { av_freep(&reader->io->buffer); avio_context_free(&reader->io); }
+}
+
+static int dvd_demux_read(void *opaque, AVPacket *packet)
+{
+    DvdDemuxReader *r = opaque;
+    while (r->current < r->count) {
+        if (is_cancelled(r->source->cancel)) return AVERROR_EXIT;
+        if (!r->input) {
+            int ret = open_clock_segment(r->source, r->segments[r->current], &r->input, &r->io);
+            if (ret < 0) return ret;
+            if (!r->current && r->input->start_time != AV_NOPTS_VALUE) r->origin = r->input->start_time;
+        }
+        int ret = av_read_frame(r->input, packet);
+        if (ret == AVERROR_EOF) {
+            if (r->io->error < 0 && r->io->error != AVERROR_EOF) return r->io->error;
+            dvd_demux_close_segment(r);
+            ++r->current;
+            continue;
+        }
+        if (ret < 0) return ret;
+        AVStream *src = r->input->streams[packet->stream_index];
+        int mapped = -1;
+        for (unsigned i = 0; i < r->metadata->nb_streams; ++i) {
+            AVStream *dst = r->metadata->streams[i];
+            if (src->id == dst->id && src->codecpar->codec_id == dst->codecpar->codec_id) { mapped = i; break; }
+        }
+        if (mapped < 0) { av_packet_unref(packet); continue; }
+        int64_t shift = av_rescale_q(r->segments[r->current].offset, (AVRational){1,90000}, src->time_base)
+            - av_rescale_q(r->origin, AV_TIME_BASE_Q, src->time_base);
+        if (packet->pts != AV_NOPTS_VALUE) packet->pts += shift;
+        if (packet->dts != AV_NOPTS_VALUE) packet->dts += shift;
+        av_packet_rescale_ts(packet, src->time_base, r->metadata->streams[mapped]->time_base);
+        packet->stream_index = mapped;
+        if (packet->pos >= 0) packet->pos += r->segments[r->current].start;
+        return 0;
+    }
+    return AVERROR_EOF;
+}
+
+JNIEXPORT jstring JNICALL Java_io_github_maas3n_mattmux_AndroidNativeRemuxEngine_nativeDemux(
+    JNIEnv *env, jobject self, jintArray fds, jlongArray starts, jlongArray ends,
+    jstring destination, jlongArray chapter_starts, jlongArray chapter_ends,
+    jintArray selection, jlong iso, jint title_set, jobjectArray languages, jintArray palette, jboolean vob)
+{
+    CancelContext cancel = {env, self, (*env)->GetMethodID(env, (*env)->GetObjectClass(env,self), "isNativeCancelled", "()Z")};
+    if (!cancel.method) return NULL;
+    jmethodID progress = (*env)->GetMethodID(env, (*env)->GetObjectClass(env,self), "onNativeProgress", "(I)V");
+    if (!progress) return NULL;
+    char error[512] = {0};
+    SourceContext source = {0};
+    DvdDemuxReader reader = {.source = &source};
+    AVIOContext *metadata_io = NULL;
+    int *selected = NULL, selected_count = 0;
+    const char *directory = NULL;
+    int ret = 0;
+    if (is_cancelled(&cancel)) { ret = AVERROR_EXIT; goto done; }
+    ret = init_source(env, fds, starts, ends, &source, (DvdUdfSource *)(intptr_t)iso, title_set, &cancel, error, sizeof(error));
+    if (ret < 0) goto done;
+    report_progress(env, self, progress, 0);
+    if (is_cancelled(&cancel)) { ret = AVERROR_EXIT; goto done; }
+    directory = (*env)->GetStringUTFChars(env, destination, NULL);
+    if (!directory) { ret = AVERROR(ENOMEM); goto done; }
+    ret = dvd_clock_segments(&source, &reader.segments, &reader.count);
+    if (ret < 0) goto done;
+    ret = open_clock_segment(&source, (DvdClockSegment){0, source.stream_size, 0}, &reader.metadata, &metadata_io);
+    if (ret < 0) goto done;
+    if ((ret = apply_dvd_ifo_metadata(env, reader.metadata, languages, palette)) < 0) goto done;
+    if ((ret = add_chapters(env, reader.metadata, chapter_starts, chapter_ends)) < 0) goto done;
+    if (reader.metadata->start_time != AV_NOPTS_VALUE) reader.origin = reader.metadata->start_time;
+    selected_count = selection ? (*env)->GetArrayLength(env, selection) : (int)reader.metadata->nb_streams;
+    selected = av_malloc_array(selected_count, sizeof(*selected));
+    if (!selected) { ret = AVERROR(ENOMEM); goto done; }
+    if (selection) {
+        (*env)->GetIntArrayRegion(env, selection, 0, selected_count, selected);
+        if ((*env)->ExceptionCheck(env)) { ret = AVERROR(EINVAL); goto done; }
+    } else {
+        selected_count = 0;
+        for (unsigned i = 0; i < reader.metadata->nb_streams; ++i) {
+            enum AVMediaType type = reader.metadata->streams[i]->codecpar->codec_type;
+            if (type == AVMEDIA_TYPE_VIDEO || type == AVMEDIA_TYPE_AUDIO || type == AVMEDIA_TYPE_SUBTITLE)
+                selected[selected_count++] = i;
+        }
+    }
+    /* The metadata context owns no packet reader after discovery. Close its
+       custom IO before opening segments against the same SourceContext. */
+    avformat_flush(reader.metadata);
+    reader.metadata->pb = NULL;
+    av_freep(&metadata_io->buffer); avio_context_free(&metadata_io);
+    ret = demux_input(reader.metadata, dvd_demux_read, &reader, source.stream_size,
+        directory, selected, selected_count, 1, vob, &cancel, progress);
+ done:
+    dvd_demux_close_segment(&reader);
+    avformat_close_input(&reader.metadata);
+    if (metadata_io) { av_freep(&metadata_io->buffer); avio_context_free(&metadata_io); }
+    av_free(reader.segments); av_free(selected); free_source(&source);
+    if (directory) (*env)->ReleaseStringUTFChars(env, destination, directory);
+    if (ret >= 0) return NULL;
+    if (ret == AVERROR_EXIT) snprintf(error, sizeof(error), "Demux cancelled");
+    if (!error[0]) ff_error(error, sizeof(error), "DVD demux failed", ret);
+    return (*env)->NewStringUTF(env, error);
 }
 
 JNIEXPORT jstring JNICALL Java_io_github_maas3n_mattmux_AdvancedMergerNative_demux(JNIEnv *env,jobject self,jstring source,jstring destination,jintArray selection,jboolean chapters,jboolean vob)
@@ -149,7 +297,9 @@ JNIEXPORT jstring JNICALL Java_io_github_maas3n_mattmux_AdvancedMergerNative_dem
     jint *indexes=(*env)->GetIntArrayElements(env,selection,NULL);
     if (!path || !directory || !indexes) { if (path) (*env)->ReleaseStringUTFChars(env,source,path); if (directory) (*env)->ReleaseStringUTFChars(env,destination,directory); if (indexes) (*env)->ReleaseIntArrayElements(env,selection,indexes,JNI_ABORT); return NULL; }
     CancelContext cancel={env,self,(*env)->GetMethodID(env,(*env)->GetObjectClass(env,self),"isNativeCancelled","()Z")};
-    int ret=demux_media(path,directory,indexes,(*env)->GetArrayLength(env,selection),chapters,vob,&cancel);
+    jmethodID progress=(*env)->GetMethodID(env,(*env)->GetObjectClass(env,self),"onNativeProgress","(I)V");
+    if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); progress=NULL; }
+    int ret=demux_media(path,directory,indexes,(*env)->GetArrayLength(env,selection),chapters,vob,&cancel,progress);
     (*env)->ReleaseStringUTFChars(env,source,path); (*env)->ReleaseStringUTFChars(env,destination,directory); (*env)->ReleaseIntArrayElements(env,selection,indexes,JNI_ABORT);
     if (ret<0) { char error[256]; av_strerror(ret,error,sizeof(error)); return (*env)->NewStringUTF(env,error); }
     return NULL;
