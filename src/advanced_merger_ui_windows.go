@@ -337,6 +337,14 @@ func handleWindowsMergerCommand(id int) bool {
 				selected = append(selected, s)
 			}
 		}
+		choice := messageBox(app.hwnd, "MPEG-2 video export format", "Save MPEG-2 video as VOB?\n\nYes: .VOB video\nNo: .mpeg2 elementary video\nCancel: return", 0x00000003|MB_ICONQUESTION)
+		if choice != 6 && choice != 7 {
+			return true
+		}
+		video := "mpeg2"
+		if choice == 6 {
+			video = "vob"
+		}
 		dir := getText(mergerWindow.output)
 		runWindowsMerger("Demuxing selected streams…", func(ctx context.Context) (func(), error) {
 			if err := validateOutputDir(dir); err != nil {
@@ -346,7 +354,7 @@ func handleWindowsMergerCommand(id int) bool {
 			if err != nil {
 				return nil, err
 			}
-			final, err := demuxMerger(ctx, tools, selected, dir)
+			final, err := demuxMerger(ctx, tools, selected, dir, video)
 			if err != nil {
 				return nil, err
 			}

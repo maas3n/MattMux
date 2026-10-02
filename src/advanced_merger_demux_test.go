@@ -76,7 +76,7 @@ func TestAdvancedMergerDemuxSelectedStreams(t *testing.T) {
 	if err = os.Mkdir(outRoot, 0755); err != nil {
 		t.Fatal(err)
 	}
-	final, err := demuxMerger(ctx, toolPaths{ffmpeg: ffmpeg, ffprobe: ffprobe}, selected, outRoot)
+	final, err := demuxMerger(ctx, toolPaths{ffmpeg: ffmpeg, ffprobe: ffprobe}, selected, outRoot, "mpeg2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,4 +111,38 @@ func TestAdvancedMergerDemuxSelectedStreams(t *testing.T) {
 	if !video || !audio || !chapters {
 		t.Fatalf("missing selected demux output: video=%t audio=%t chapters=%t files=%v", video, audio, chapters, entries)
 	}
+}
+
+func TestAdvancedMergerDemuxMPEG2OrVOB(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil { t.Skip("ffmpeg required") }
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil { t.Skip("ffprobe required") }
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	dir := t.TempDir()
+	source := filepath.Join(dir, "mpeg2.mkv")
+	if _, err = runMergerCommand(ctx, ffmpeg, "-v", "error", "-f", "lavfi", "-i", "color=size=64x48:rate=25:duration=1", "-c:v", "mpeg2video", "-bf", "0", source); err != nil {
+		t.Fatal(err)
+	}
+	streams, err := probeMergerFile(ctx, ffprobe, source, "video")
+	if err != nil || len(streams) != 1 { t.Fatalf("probe MPEG-2: %v %v", streams, err) }
+	for _, tc := range []struct{ mode, ext string }{{"mpeg2", ".mpeg2"}, {"vob", ".VOB"}} {
+		t.Run(tc.mode, func(t *testing.T) {
+			outRoot := filepath.Join(dir, tc.mode)
+			if err := os.Mkdir(outRoot, 0755); err != nil { t.Fatal(err) }
+			final, err := demuxMerger(ctx, toolPaths{ffmpeg: ffmpeg, ffprobe: ffprobe}, streams, outRoot, tc.mode)
+			if err != nil { t.Fatal(err) }
+			entries, err := os.ReadDir(final)
+			if err != nil || len(entries) != 1 { t.Fatalf("demux entries = %v, %v", entries, err) }
+			if !strings.HasSuffix(entries[0].Name(), tc.ext) { t.Fatalf("mode %s produced %s; want %s", tc.mode, entries[0].Name(), tc.ext) }
+			info, err := entries[0].Info()
+			if err != nil || info.Size() == 0 { t.Fatalf("empty %s output: %v", tc.mode, err) }
+		})
+	}
+}
+
+func TestAdvancedMergerDemuxRejectsUnknownVideoMode(t *testing.T) {
+	_, err := demuxMerger(context.Background(), toolPaths{}, []mergerStream{{Path: "movie.mkv", Track: trackOption{Index: 0, Kind: "video"}}}, t.TempDir(), "invalid")
+	if err == nil { t.Fatal("invalid MPEG-2/VOB choice was accepted") }
 }

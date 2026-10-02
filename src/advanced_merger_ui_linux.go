@@ -193,27 +193,41 @@ func (g *linuxGUI) buildAdvancedMerger() fyne.CanvasObject {
 		}, g.window)
 	})
 	demux := widget.NewButton("DEMUX", func() {
-		var chosen []mergerStream
-		for i, s := range streams {
-			if checks[i].Checked {
-				chosen = append(chosen, s)
+		format := widget.NewSelect([]string{"MPEG2 elementary video (.mpeg2)", "VOB video (.VOB)"}, nil)
+		format.SetSelected("MPEG2 elementary video (.mpeg2)")
+		dialog.NewCustomConfirm("Demux selected streams", "Demux", "Cancel", container.NewVBox(
+			widget.NewLabel("MPEG-2 video export format"),
+			format,
+		), func(ok bool) {
+			if !ok {
+				return
 			}
-		}
-		dir := output.Text
-		run("Demuxing selected streams…", func(ctx context.Context) (func(), error) {
-			if err := validateOutputDir(dir); err != nil {
-				return nil, err
+			var chosen []mergerStream
+			for i, s := range streams {
+				if checks[i].Checked {
+					chosen = append(chosen, s)
+				}
 			}
-			tools, err := mergerTools(ctx)
-			if err != nil {
-				return nil, err
+			dir := output.Text
+			video := "mpeg2"
+			if format.Selected == "VOB video (.VOB)" {
+				video = "vob"
 			}
-			final, err := demuxMerger(ctx, tools, chosen, dir)
-			if err != nil {
-				return nil, err
-			}
-			return func() { status.SetText("Demux complete: " + final) }, nil
-		})
+			run("Demuxing selected streams…", func(ctx context.Context) (func(), error) {
+				if err := validateOutputDir(dir); err != nil {
+					return nil, err
+				}
+				tools, err := mergerTools(ctx)
+				if err != nil {
+					return nil, err
+				}
+				final, err := demuxMerger(ctx, tools, chosen, dir, video)
+				if err != nil {
+					return nil, err
+				}
+				return func() { status.SetText("Demux complete: " + final) }, nil
+			})
+		}, g.window).Show()
 	})
 	mux := widget.NewButton("MUX TO MKV", func() {
 		var chosen []mergerStream

@@ -42,7 +42,10 @@ func appendMergerDemuxInput(args []string, path string, title int, copyTS bool) 
 	return appendDesktopMediaInput(args, path)
 }
 
-func demuxMerger(ctx context.Context, tools toolPaths, selected []mergerStream, outputDir string) (final string, err error) {
+func demuxMerger(ctx context.Context, tools toolPaths, selected []mergerStream, outputDir, dvdVideo string) (final string, err error) {
+	if dvdVideo != "mpeg2" && dvdVideo != "vob" {
+		return "", errors.New("choose MPEG-2 or VOB video export")
+	}
 	if err = validateOutputDir(outputDir); err != nil {
 		return "", err
 	}
@@ -154,7 +157,7 @@ func demuxMerger(ctx context.Context, tools toolPaths, selected []mergerStream, 
 			if !ok {
 				return final, fmt.Errorf("selected stream %d is no longer available in %s", selectedStream.Track.Index, filepath.Base(g.path))
 			}
-			format, formatErr := streamDemuxFormat(meta.Codec, "")
+			format, formatErr := streamDemuxFormat(meta.Codec, dvdVideo)
 			if formatErr != nil {
 				return final, formatErr
 			}

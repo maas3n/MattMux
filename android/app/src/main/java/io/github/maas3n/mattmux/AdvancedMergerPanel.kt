@@ -57,7 +57,7 @@ class AdvancedMergerPanel(private val activity: Activity) {
         button("CHOOSE OUTPUT FOLDER") { activity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), FIRST_REQUEST + 4) }
         content.addView(outputLabel)
         content.addView(filename); controls += filename
-        button("DEMUX") { demux() }
+        button("DEMUX") { chooseDemux() }
         button("MUX TO MKV") { mux() }
         content.addView(cancelButton)
         content.addView(status)
@@ -170,7 +170,17 @@ class AdvancedMergerPanel(private val activity: Activity) {
         return TrackInfo(f[0].toInt(), f[1], f[2], f[3].takeUnless { it == "-" }, f[4].takeUnless { it == "-" }, f[5].toInt(), f[6].toInt(), f[7].toInt(), f[8].takeUnless { it == "-" })
     }
 
-    private fun demux() {
+    private fun chooseDemux() {
+        AlertDialog.Builder(activity)
+            .setTitle("MPEG-2 video export format")
+            .setItems(arrayOf("MPEG2 elementary video (.mpeg2)", "VOB video (.VOB)")) { _, choice ->
+                demux(choice == 1)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun demux(vob: Boolean) {
         val selected = selections.filter { it.check.isChecked }
         val unsupported = selected.filter { it.track.kind !in setOf("video", "audio", "subtitle", "chapters") }
         val folder = output
@@ -212,7 +222,7 @@ class AdvancedMergerPanel(private val activity: Activity) {
                         if (dvd != null) {
                             dvdEngine.demuxTitleToDirectory(
                                 activity, dvd.uri, temporary,
-                                media.map { it.demuxIndex }.toIntArray(), includeChapters, false,
+                                media.map { it.demuxIndex }.toIntArray(), includeChapters, vob,
                             ) { percent ->
                                 activity.runOnUiThread {
                                     if (!destroyed) status.text = "Demuxing ${file.name} directly from DVD… $percent%"
@@ -226,7 +236,7 @@ class AdvancedMergerPanel(private val activity: Activity) {
                             }
                             native.demux(
                                 file.absolutePath, temporary.absolutePath,
-                                media.map { it.demuxIndex }.toIntArray(), includeChapters, false,
+                                media.map { it.demuxIndex }.toIntArray(), includeChapters, vob,
                             )?.let { error("Demux failed for ${file.name}: $it") }
                         }
                         check(!native.cancelled.get()) { "Cancelled" }
