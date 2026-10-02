@@ -1,106 +1,129 @@
 # MattMux
 
-**MattMux** remuxes DVD-Video titles and combines selected media streams into MKV **without transcoding**. Windows, Linux, and Android/ChromeOS are developed together from the single `main` branch and released under one shared product version.
+**MattMux** is a cross-platform media remuxing, demuxing, merging, batch-processing, and CLI tool for **Windows, Linux, Android, and ChromeOS**. It focuses on copying existing media streams without transcoding.
 
-## Latest stable release: MattMux 1.4.8
+MattMux can remux DVD-Video titles to MKV, extract individual streams from DVD or MKV sources, combine selected streams from multiple files, and batch-remux DVD libraries. Windows, Linux, and Android/ChromeOS are developed together from the single `main` branch and use one shared product version.
 
-**MattMux 1.4.8 is the current public stable release.** It is a desktop hotfix/refactor release for Windows and Linux. It fixes Windows tab repaint ghosting, shortens the BATCH action label to **ONECLICK BATCH**, and makes the Windows/Linux DVD title-discovery path explicitly FFmpeg `dvdvideo`-based with the legacy MattMux `scanTitles()` / `probeDuration()` wrappers removed. Android/ChromeOS behavior is unchanged from 1.4.7.
+> MattMux does **not** bypass CSS or other DVD copy protection. Use unencrypted DVD-Video sources or media you are authorized to process.
 
-[**Download MattMux 1.4.8**](https://github.com/maas3n/MattMux/releases/tag/v1.4.8)
+## Latest stable release: MattMux 1.4.19
 
-**Windows 1.4.8 tab-switching hotfix:** the Setup, All-in-One, and Portable downloads now include the corrected background painting from [PR #48](https://github.com/maas3n/MattMux/pull/48). If you downloaded Windows 1.4.8 before this hotfix notice, download it again and replace or reinstall it. The version remains 1.4.8.
-
-The original `v1.4.8` tag and source archive remain at `2074d74ee8f69ed080db2374f44acaac066f2d95`. At the user's request, the Windows packages were rebuilt in place from `d570327918b537482bc0bf653ddd0cdd8e662c89`; their corresponding source is attached to the release as `MattMux-1.4.8-Windows-Hotfix-Source.tar.gz`. Windows and combined SHA-256 manifests are updated. Linux and Android/ChromeOS packages are unchanged.
+[**Download MattMux 1.4.19**](https://github.com/maas3n/MattMux/releases/tag/v1.4.19)
 
 | Platform | Recommended package | Other options |
 | --- | --- | --- |
-| Windows x64 | `MattMux-1.4.8-Windows-All-in-One.exe` | Setup EXE or Portable ZIP; Setup/Portable include `mattmux-cli.exe` |
-| Linux amd64 | `MattMux-1.4.8-Linux-amd64Standalone` | Self-contained `.deb` or tarball; packaged CLI included |
-| Android / ChromeOS | `MattMux-1.4.8-Android.apk` | One signed universal APK for Android phones/tablets and Chromebooks with Android app support |
+| Windows x64 | `MattMux-1.4.19-Windows-All-in-One.exe` | Setup EXE or Portable ZIP; Setup/Portable include `mattmux-cli.exe` |
+| Linux amd64 | `MattMux-1.4.19-Linux-amd64Standalone` | Self-contained `.deb` or tarball; packaged CLI included |
+| Android / ChromeOS | `MattMux-1.4.19-Android.apk` | One signed universal APK for Android phones/tablets and Chromebooks with Android app support |
 
-The release also includes source archives, third-party source/provenance files, per-platform SHA-256 manifests, and one combined `SHA256SUMS.txt`.
+Releases also include exact source, third-party source/provenance and license material, platform checksum manifests, and a combined `SHA256SUMS.txt`.
 
-## Highlights
+## What MattMux can do
 
-- DVD folder / `VIDEO_TS` / ISO input
-- Lossless stream-copy remuxing: no video or audio re-encoding
-- Desktop **BATCH** tab on Windows and Linux
-  - **ONECLICK BATCH** processes every immediate `Movie Title/VIDEO_TS` folder in the selected collection
-  - title discovery uses FFmpeg `dvdvideo` backed by `libdvdread`/`libdvdnav`; MattMux does not restore its old `ReadDVDTitleCount()` scanner
-  - automatically selects the longest readable DVD title
-  - includes all streams and chapters with `-c copy`
-  - always applies `-analyzeduration 100M -probesize 100M -fflags +genpts`
-  - completed MKVs go into their matching movie-title folders by default, or into one optional common output folder
-  - Windows and Linux CLI batch mode supports an optional log file
-- **Advanced Merger** for combining selected streams from multiple containers or elementary media files into MKV
-  - **CHOOSE MOVIE FILES** exposes every discovered stream plus a selectable embedded chapter set when present
-  - **CHOOSE AUDIO FILES FROM MKV or RAW** exposes only audio streams
-  - **CHOOSE SUBTITLE FILES FROM MKV or RAW** exposes only subtitle streams
-  - **CHOOSE CHAPTER FILE FROM MKV or RAW** accepts MKV chapters or valid `FFMETADATA1`
-  - exact per-stream checkboxes, explicit mapping, attachment/data support, and chapter-title preservation
-  - see [`docs/ADVANCED_MERGER.md`](docs/ADVANCED_MERGER.md)
-- **Selectable video, audio, and subtitle tracks** from **Show Metadata** for DVD remuxing
-  - every detected track is selected by default
-  - deselect anything you do not want in the MKV
-  - Windows and Linux use explicit FFmpeg `-map` stream selection
-  - Android/ChromeOS performs the equivalent selection directly through native libav
-- Longest-title auto-selection after scanning
-- Windows/Linux **Scan Titles** discovers candidate DVD titles through FFprobe `dvdvideo` (`libdvdread` + `libdvdnav`) for both folders and ISOs; the legacy MattMux `scanTitles()` / `probeDuration()` wrappers are removed from title discovery
-- Windows/Linux DVD remux and Advanced Merger inputs always use `-analyzeduration 100M -probesize 100M -fflags +genpts`; DVD **Start Remux** does not pre-index before muxing
-- Optional DVD chapter preservation
-- DVD chapter metadata on Windows/Linux comes only from FFprobe `dvdvideo` backed by `libdvdread` + `libdvdnav`; MattMux does not parse DVD IFO bytes
-- Cancelable scans, metadata reads, remuxes, Advanced Merger jobs, and desktop batch jobs
-- Unique operation-owned temporary outputs with validated, no-overwrite finalization on desktop
-- Pinned and SHA-256-verified third-party runtime tools
-- Windows installer, portable ZIP, one-file All-in-One EXE, and packaged batch CLI
-- Linux self-contained `.deb`, tarball, CLI, GUI, and one-file standalone executable
-- Android/ChromeOS native FFmpeg/libudfread remux and merger paths with dedicated parity tests
+### DVD Remux
 
-## BATCH
+The main **DVD Remux** tab accepts:
 
-Open the **BATCH** tab on Windows or Linux and choose a collection folder laid out like this:
+- DVD folders and `VIDEO_TS`
+- unmounted DVD ISO images
+- MKV files
+
+For DVD sources, MattMux discovers DVD titles, automatically selects the longest readable title, and lets you inspect metadata before processing. Video, audio, and subtitle streams are individually selectable. All detected streams are selected by default.
+
+Choose **Start Remux** to create an MKV using stream copy. Chapter preservation is optional.
+
+Windows and Linux use FFmpeg's `dvdvideo` input backed by `libdvdread`/`libdvdnav`. Android/ChromeOS uses its native FFmpeg/libav, libdvdnav, libdvdread, and libudfread path. MattMux does not use its own DVD IFO parser.
+
+### Demux
+
+The **Demux** action in the DVD Remux tab extracts selected streams without re-encoding. It works with DVD folders, DVD ISOs, and MKV sources on Windows, Linux, and Android/ChromeOS.
+
+Depending on the selected streams, MattMux can export:
+
+- MPEG-2 video as `.mpeg2` or video-only `.VOB`
+- H.264 as `.h264`
+- HEVC/H.265 as `.h265`
+- audio in its codec format, including AC-3 and DTS
+- SRT and ASS text subtitles
+- PGS subtitles as `.sup`
+- DVD/VobSub subtitles as paired `.idx` + `.sub`
+- chapters as `Chapters.txt` in simple OGM chapter format
+
+The VOB option creates a video-only MPEG program stream; it does not recreate DVD menus or DVD-Video structure. Unsupported selected codecs are reported rather than transcoded.
+
+Each demux operation creates a new output folder. DVD folders and ISOs are read directly from the selected title rather than being remuxed to a temporary MKV first. DVD inputs use the `100M / 100M / +genpts` input policy (`-analyzeduration 100M -probesize 100M -fflags +genpts` on desktop, with the native libav equivalent on Android/ChromeOS). MKV demux keeps its container-timestamp path instead of inheriting the DVD-specific 100M overrides.
+
+Android/ChromeOS temporarily holds exported files while saving them through the Storage Access Framework; MKV inputs also require an app-private input copy. Direct DVD demux keeps stream selection, chapters, subtitle metadata, cancellation, extraction progress, and the DVD clock-reset/discontinuity handling used by the native reader.
+
+### Advanced Merger
+
+The **Advanced Merger** combines selected streams from multiple sources into one MKV without transcoding.
+
+Inputs include normal containers such as MKV, MP4 and AVI, DVD ISOs, and supported elementary streams such as H.264, MPEG-2/VOB, AAC, AC-3, MP3, DTS, SRT, WebVTT and SUP.
+
+- **CHOOSE MOVIE FILES** exposes discovered video, audio, subtitle, attachment/data streams and embedded chapters.
+- **CHOOSE AUDIO FILES FROM MKV or RAW** exposes audio streams.
+- **CHOOSE SUBTITLE FILES FROM MKV or RAW** exposes subtitle streams.
+- **CHOOSE CHAPTER FILE FROM MKV or RAW** accepts chapters from MKV or valid `FFMETADATA1`.
+
+Streams are explicitly selectable. Embedded chapter titles are preserved, and a dedicated chapter source overrides selected embedded chapters.
+
+Advanced Merger also has a **DEMUX** action. Tick or untick the rows you want, then demux only the selected video, audio, and subtitle streams; a checked embedded chapter row exports `Chapters.txt`. Multiple inputs can be demuxed in one operation, with source-prefixed output names to avoid collisions. MPEG-2 video can be exported either as elementary `.mpeg2` or as video-only `.VOB`, matching the main Demux workflow.
+
+DVD ISO input uses the longest DVD title and keeps that title through stream selection and muxing. Windows/Linux Advanced Merger DEMUX reads DVD selections directly through `dvdvideo`. Android/ChromeOS maps the selected staged merger rows back to the original DVD stream indexes and performs DEMUX directly from the original DVD source rather than from the temporary MKV used for the MUX workflow. Android/ChromeOS stages Storage Access Framework documents as needed; paired VobSub input requires both the matching `.idx` and `.sub` files.
+
+See [`docs/ADVANCED_MERGER.md`](docs/ADVANCED_MERGER.md) for details.
+
+### BATCH
+
+**ONECLICK BATCH** scans a collection and losslessly remuxes discovered DVD movies to MKV. It supports `Movie/VIDEO_TS` folders and unmounted `.iso` files, automatically selects the longest readable title, preserves streams and chapters, and continues to later items when one item fails.
+
+Example collection:
 
 ```text
 Movies/
+├── Alien.iso
 ├── Movie One/
 │   └── VIDEO_TS/
 │       ├── VIDEO_TS.IFO
 │       └── ...
-├── Movie Two/
-│   └── VIDEO_TS/
-│       ├── VIDEO_TS.IFO
-│       └── ...
-└── Movie Three/
+└── Movie Two/
     └── VIDEO_TS/
         ├── VIDEO_TS.IFO
         └── ...
 ```
 
-Click **ONECLICK BATCH** after choosing the collection. MattMux processes each immediate movie folder independently. It scans candidate titles through FFmpeg's `dvdvideo` demuxer, which uses `libdvdread`/`libdvdnav`, chooses the longest readable title, then performs a lossless all-stream MKV remux. The batch remux input always receives `-analyzeduration 100M -probesize 100M -fflags +genpts`.
+Without an explicit output root, an ISO such as `Alien.iso` produces `Alien.mkv` beside the ISO, while `Movie One/VIDEO_TS` produces `Movie One/Movie One.mkv`. An explicit output root collects completed MKVs in that destination. Existing MKVs are not overwritten.
 
-Leave the BATCH output field blank to place the completed MKV inside the corresponding movie-title folder. Choose an output folder to collect all completed MKVs in one destination instead. Existing output files are not overwritten.
+Windows and Linux also expose batch processing through the packaged CLI. Android/ChromeOS provides BATCH through its Storage Access Framework-based app implementation.
 
-The Linux CLI and the Windows `mattmux-cli.exe` support the same batch interface:
+### CLI
 
-```bash
-mattmux-cli --batch --log=/my/folder/for/mattmux-batch.log /folder/containing/Movietitles /folder/for/finished/remuxes
+Windows and Linux share the core CLI commands:
+
+```text
+scan
+metadata
+remux
+--batch
 ```
 
-`--log` is optional. The output-root argument is also optional; when it is omitted, each completed MKV is written into its corresponding movie-title folder.
+Single-disc remuxing supports options including `--title`, `--streams 0,2`, `--no-chapters`, and `--output`. Windows Setup/Portable packages include `mattmux-cli.exe`; Linux packages include `mattmux-cli`, and the Linux Standalone accepts CLI commands directly or after `--cli`.
 
-## Advanced Merger
+Example:
 
-Open the **Advanced Merger** tab to combine tracks from multiple sources into one MKV without transcoding. Inputs may be normal containers such as MKV, MP4, AVI, and others supported by the bundled FFmpeg runtime, or supported elementary media such as H.264, MPEG-2/VOB, AAC, AC-3, MP3, DTS, SRT, WebVTT, SUP, and similar formats.
+```bash
+mattmux-cli remux --title 1 --streams 0,2 /path/to/DVD-or.iso
+mattmux-cli --batch --log=/path/to/mattmux-batch.log /path/to/Movies /path/to/output
+```
 
-**CHOOSE MOVIE FILES** adds every probed stream from each selected movie/container to **Select Streams**, including video, audio, subtitle, attachment/data streams and an embedded chapter-set row when chapters are present. The Audio and Subtitle buttons remain filtered so adding the same MKV through **CHOOSE AUDIO FILES FROM MKV or RAW** exposes only its audio streams, while **CHOOSE SUBTITLE FILES FROM MKV or RAW** exposes only subtitle streams.
+Android/ChromeOS also includes an in-app CLI with `scan`, `metadata`, `remux`, and `--batch` using Storage Access Framework content URIs. Android remux supports explicit `--streams` selection and `--no-chapters`.
 
-Embedded chapters can be selected from a movie input. Alternatively, **CHOOSE CHAPTER FILE FROM MKV or RAW** accepts either an MKV containing chapters or valid `FFMETADATA1`; a dedicated chapter source overrides selected movie chapters. Select the exact streams you want, choose the destination, and press **MUX TO MKV**.
+BATCH and CLI are DVD-oriented workflows; MKV source selection and raw-stream extraction belong to the GUI DVD Remux/Demux and Advanced Merger workflows.
 
-Android/ChromeOS stages selected documents and the in-progress output in private temporary storage because Storage Access Framework documents are not always directly seekable. For VobSub subtitles on Android/ChromeOS, select the matching `.idx` and `.sub` files together. See [`docs/ADVANCED_MERGER.md`](docs/ADVANCED_MERGER.md) for details.
+## Track selection and metadata
 
-## Track selection
-
-Click **Show Metadata** after selecting a DVD title to inspect its streams. MattMux presents detected video, audio, and subtitle tracks with checkboxes.
+Use **Show Metadata** to inspect a selected source and choose exactly which video, audio, and subtitle streams to process.
 
 For example:
 
@@ -117,70 +140,91 @@ Subtitles
 ☐ #4  DVD Subtitle  Norwegian
 ```
 
-All tracks start selected, preserving the traditional MattMux behavior unless you change the selection. At least one media stream must remain selected before remuxing. Chapter preservation remains a separate option.
+All tracks start selected. At least one media stream must remain selected for remuxing or demuxing. Chapter preservation/extraction is controlled separately.
 
-Changing the DVD source or selected title clears the previous track selection so stream indexes from one title cannot accidentally be reused for another.
+Changing the source or DVD title clears the previous selection so stream indexes cannot accidentally carry over to another title. MKV metadata in the DVD Remux tab is displayed using MediaInfo.
 
-## Requirements
+## Platform support
 
 ### Windows
 
 - Windows x64
-- Self-contained published packages are recommended
-- Current binaries are not Authenticode-signed
+- All-in-One single-file GUI
+- normal Setup package
+- Portable ZIP
+- packaged `mattmux-cli.exe` in Setup/Portable
+- bundled FFmpeg, FFprobe and MediaInfo
+- current binaries are not Authenticode-signed
 
 ### Linux
 
 - amd64 / x86_64
-- Published Linux binaries currently require **glibc 2.38 or newer**
-- `.deb` targets Debian/Ubuntu-family systems that meet that runtime requirement
-- Standalone build expects a normal 64-bit desktop Linux runtime
-- Bundled FFmpeg/FFprobe/MediaInfo remain private to MattMux and do not replace system tools
+- one-file Standalone executable
+- self-contained `.deb` and tarball packages
+- GUI and packaged CLI
+- published binaries currently require **glibc 2.38 or newer**
+- Standalone includes private graphics/runtime dependencies while still relying on the host glibc, display session and GPU driver environment
 
 ### Android / ChromeOS
 
-- Experimental
 - Android 8.0 / API 26 or newer
-- arm64-v8a and x86_64 are targeted
-- The v1.4.0 GitHub APK was debug-signed; v1.4.1 and later GitHub APKs use persistent distribution signing, so upgrading from v1.4.0 may require uninstalling v1.4.0 first
-- The single `Android.apk` release asset is the signed universal APK for Android phones/tablets and Chromebooks with Android app support
-- Advanced Merger requires temporary free space for staged inputs plus the in-progress MKV
-- See [`android/README.md`](android/README.md) for current native-remux details and limitations
+- arm64-v8a and x86_64 native runtimes
+- one persistently signed universal APK for Android phones/tablets and Chromebooks with Android app support
+- native stream-copy DVD remux, direct DVD/MKV demux, Advanced Merger MUX/DEMUX, BATCH and in-app CLI paths
+- Storage Access Framework input/output
+- DVD folder and read-only UDF ISO support
+- CI coverage includes API 26, API 35 and API 35 with 16 KB pages
 
-Use unencrypted DVD-Video sources or media you are authorized to process. MattMux does **not** bypass CSS or other DVD copy protection.
+Android/ChromeOS remains marked **experimental** while real-device/physical-Chromebook validation and production Play rollout remain separate gates. The v1.4.0 APK was debug-signed; v1.4.1 and later GitHub APKs use persistent distribution signing, so upgrading directly from v1.4.0 may require uninstalling it first.
+
+See [`android/README.md`](android/README.md) for Android-specific implementation details and limitations.
+
+## Important limitations
+
+- MattMux does not decrypt CSS or other protected DVD content.
+- Interleaved multi-angle DVD titles are unsupported on the current Android path.
+- Still/shuffle/multi-PGC DVD semantics are not fully supported on Android.
+- Android ISO input requires a seekable storage provider.
+- Android operations that stage media require sufficient temporary free space.
+- Output capabilities can depend on the selected Android document provider.
+- Remuxing and demuxing are stream-copy operations; unsupported formats are not silently transcoded.
 
 ## Quick start
 
 ### Windows
 
-Download one of these from the [MattMux 1.4.8 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.8):
+Download one of these from the [MattMux 1.4.19 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.19):
 
-- `MattMux-1.4.8-Windows-All-in-One.exe` — easiest single-file GUI option
-- `MattMux-1.4.8-Windows-Setup.exe` — normal installer; includes `mattmux-cli.exe`
-- `MattMux-1.4.8-Windows-Portable.zip` — portable GUI + `mattmux-cli.exe` with bundled tools and portable data directory
+- `MattMux-1.4.19-Windows-All-in-One.exe` — easiest single-file GUI option
+- `MattMux-1.4.19-Windows-Setup.exe` — normal installer with packaged CLI
+- `MattMux-1.4.19-Windows-Portable.zip` — portable GUI + CLI
 
 ### Linux standalone
 
 ```bash
-chmod +x MattMux-1.4.8-Linux-amd64Standalone
-./MattMux-1.4.8-Linux-amd64Standalone
+chmod +x MattMux-1.4.19-Linux-amd64Standalone
+./MattMux-1.4.19-Linux-amd64Standalone
 ```
 
 ### Debian / Ubuntu
 
 ```bash
-sudo apt install ./MattMux-1.4.8-Linux-amd64.deb
+sudo apt install ./MattMux-1.4.19-Linux-amd64.deb
 mattmux
 mattmux-cli --version
 ```
 
 ### Android / ChromeOS
 
-For Android phones/tablets and Chromebooks with Android app support, download `MattMux-1.4.8-Android.apk` from the [MattMux 1.4.8 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.8). It is the single persistently signed universal APK for both Android and ChromeOS; 1.4.8 does not change Android/ChromeOS product behavior from 1.4.7.
+Download `MattMux-1.4.19-Android.apk` from the [MattMux 1.4.19 release](https://github.com/maas3n/MattMux/releases/tag/v1.4.19). The same universal APK is used on Android phones/tablets and Chromebooks with Android app support.
 
-### Output location behavior
+### Output locations
 
-The Windows and Linux desktop GUIs default to the user's Videos directory (or home) and remember the chosen output folder. `mattmux-cli remux` instead writes to the current working directory when `--output` is omitted. BATCH has separate output behavior: omit its output root to write each MKV into its corresponding movie-title folder, or supply an output root to collect completed MKVs in one folder. The Windows All-in-One launcher may use its extraction directory as the child working directory, so the GUI output field remains authoritative.
+The Windows and Linux GUIs default to the user's Videos directory (or home) and remember the chosen output folder. `mattmux-cli remux` writes to the current working directory when `--output` is omitted, except where source-aware ISO output behavior applies.
+
+BATCH uses source-aware defaults: DVD-folder output goes into its movie folder and ISO output goes beside the ISO. An explicit output root overrides those defaults.
+
+Existing final outputs are not overwritten.
 
 ## Build from source
 
@@ -193,8 +237,6 @@ powershell -ExecutionPolicy Bypass -File .\src\build.ps1
 ```
 
 ### Linux
-
-For a development build:
 
 ```bash
 bash packaging/linux/build-linux-release.sh dev
@@ -211,84 +253,33 @@ bash android/native/build-ffmpeg-android.sh
 gradle -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
 
-GitHub Actions uses the same native build step before Gradle; see [`android/native/README.md`](android/native/README.md) for the full native build process.
+GitHub Actions uses the same native build step before Gradle. See [`android/native/README.md`](android/native/README.md) for the full native build process.
 
-## Unified development and release model
+## Development and release model
 
 `main` is the only long-lived source branch. Windows, Linux, and Android/ChromeOS changes are integrated into the same trunk and tested together.
-
-- `.github/workflows/build.yml` validates the Windows/Go path.
-- `.github/workflows/linux.yml` builds and validates Linux packages.
-- `.github/workflows/android.yml` runs Android/native tests and package validation.
-- `.github/workflows/release.yml` is the single GitHub Release publisher for all product versions.
-- `.github/workflows/android-play.yml` builds a signed Play bundle when production signing inputs are supplied; it does not create a separate GitHub Release.
 
 New public versions use one shared tag:
 
 - stable: `vMAJOR.MINOR.PATCH`
 - preview: `vMAJOR.MINOR.PATCH-alpha.N`, `-beta.N`, or `-rc.N`
 
-One tag produces one release containing all applicable platform packages from the same source commit. Published tags and release assets are treated as immutable; fixes are released under a new version rather than replacing an old one.
+A release is built from one source commit and publishes the applicable Windows, Linux and Android/ChromeOS packages together. Published tags and release assets are treated as immutable; fixes are shipped as a new version.
 
 See [`RELEASING.md`](RELEASING.md) for the full release policy.
 
-## Release history
+## Recent development
 
-MattMux **1.4.0** was the first unified release. MattMux **1.4.1** introduced persistent Android distribution signing plus the release-audit fixes. MattMux **1.4.2** added explicit Android phone/tablet and ChromeOS APK asset names for the same signed universal build. MattMux **1.4.3** introduced the cross-platform Advanced Merger. MattMux **1.4.4** expanded it with all-stream movie imports, embedded chapter selection, MKV/FFMETADATA1 chapter overrides, and metadata preservation. MattMux **1.4.5** changes Windows/Linux title scanning to rely entirely on FFmpeg `dvdvideo` with `libdvdread`/`libdvdnav` for title discovery. MattMux **1.4.6** makes robust 100M analyze/probe limits plus generated timestamps unconditional for Windows/Linux mux inputs and removes DVD remux pre-indexing while retaining the 1.4.5 libdvdread/libdvdnav title scanner. MattMux **1.4.7** adds desktop one-click BATCH processing plus the matching Windows/Linux CLI batch interface. MattMux **1.4.8** fixes Windows tab repaint ghosting, renames the BATCH action to **ONECLICK BATCH**, and removes the legacy desktop `scanTitles()` / `probeDuration()` wrapper structure while keeping title discovery on FFmpeg `dvdvideo` with `libdvdread`/`libdvdnav`.
+The current feature set grew substantially after the early 1.4.x releases. Notable additions and fixes include cross-platform Advanced Merger expansion, Advanced Merger selected-stream DEMUX with MPEG-2/VOB choice, one-click BATCH, shared Windows/Linux DVD CLI commands, Android BATCH and in-app CLI support, DVD ISO handling, native Android libdvdnav title selection, MKV input in the DVD Remux tab, direct DVD demux without a temporary MKV, DVD clock-reset/progress handling, DVD subtitle extraction, and stronger Windows/Linux/Android parity coverage.
 
-MattMux previously used separate platform-specific development release lines. Those obsolete release entries and tags have been retired now that the unified release model is active.
-
-Their development remains preserved in the Git history. The repository also retains the `archive/pre-single-trunk-history` archive tag for earlier history.
-
-For current downloads, use the unified **MattMux 1.4.8** release. Future public releases will continue to use one shared version and one GitHub Release for all supported platforms.
+For version-by-version details, see [GitHub Releases](https://github.com/maas3n/MattMux/releases).
 
 ## Third-party runtime tools
 
-Desktop builds use FFmpeg/FFprobe and MediaInfo CLI. Android/ChromeOS uses native FFmpeg and libudfread. Exact pinned versions, hashes, source revisions, and licensing notes are documented in [`THIRD_PARTY.md`](THIRD_PARTY.md).
+Desktop builds use FFmpeg/FFprobe and MediaInfo CLI. Android/ChromeOS uses native FFmpeg/libav plus DVD/UDF libraries and MediaInfo where required by the feature path.
+
+Exact pinned versions, hashes, source revisions, licensing notes, and provenance are documented in [`THIRD_PARTY.md`](THIRD_PARTY.md).
 
 ## License
 
 MattMux is licensed under the [MIT License](LICENSE). Third-party components remain governed by their own licenses.
-
-### Cross-platform DVD and CLI parity (1.4.11)
-
-Windows and Linux now share `scan`, `metadata`, `remux` and `--batch`, with
-`--title`, `--no-chapters` and `--streams 0,2` for single-disc remuxing. Both GUIs
-include a CLI tab; installed/portable packages also include `mattmux-cli`.
-The Linux Standalone accepts these commands directly, or after `--cli`.
-
-BATCH accepts unmounted `.iso` files in the chosen collection folder or its
-immediate movie folders, as well as `Movie/VIDEO_TS` DVDs. Without an output
-folder, `Alien.iso` produces `Alien.mkv` beside the ISO, and
-`Movie/VIDEO_TS` produces `Movie/Movie.mkv`. An explicit output folder overrides
-both defaults. Existing MKVs are never overwritten; failed items are reported
-while the rest of the batch continues.
-
-Advanced Merger accepts DVD ISOs through `dvdvideo` backed by
-libdvdread/libdvdnav. It selects the longest title and keeps that title through
-stream selection and muxing, including optional DVD chapters. All media remains
-stream-copied. Android retains its direct native library engine and SAF paths.
-No platform uses a MattMux-written IFO parser.
-
-Every release includes Windows Setup, All-in-One and Portable, Linux DEB,
-tarball and Standalone, Android APK, exact source, notices and checksums.
-
-### DVD Remux tab: MKV and Demux
-
-On Windows, Linux, and Android, the DVD Remux tab accepts an ISO, DVD folder,
-or MKV file. Scan/show metadata, tick the video/audio/subtitle tracks to include,
-and choose **Start Remux** for one MKV or **Demux** for separate stream files.
-MKV metadata is displayed with MediaInfo. The chapters checkbox applies to both actions.
-
-Demux exports MPEG-2 video as `.mpeg2` or video-only `.VOB`, H.264/HEVC as
-`.h264`/`.h265`, audio in its codec format (including AC3/DTS), SRT/ASS text,
-PGS `.sup`, and DVD subtitles as a paired `.idx`/`.sub`. Chapters are written
-as `Chapters.txt` in the simple OGM format. VOB export is a video stream in an
-MPEG program-stream container, not a recreated DVD. Streams are copied without
-re-encoding; unsupported selected codecs produce an error asking you to deselect them.
-Each demux operation creates a new output folder. DVD folders and ISOs are read
-directly from the selected title without first creating an MKV. Every DVD input
-uses `-analyzeduration 100M -probesize 100M -fflags +genpts` (or its native
-equivalent). Android temporarily holds the exported files before copying them
-to the selected folder; MKV sources additionally require an input copy.
-Sufficient free space for those files is required. BATCH and CLI retain their DVD-only behavior.
