@@ -24,8 +24,11 @@ class AdvancedMergerPanel(private val activity: Activity) {
     private val root = File(activity.cacheDir, "merger-${System.nanoTime()}").apply { mkdirs() }
     private val controls = mutableListOf<View>()
     private val sources = linkedMapOf<Uri, File>()
-    private data class Selection(val file: File, val track: TrackInfo, val check: CheckBox)
+    private data class Selection(val file: File, val track: TrackInfo, val check: CheckBox, val demuxIndex: Int = track.index)
+    private data class Candidate(val file: File, val track: TrackInfo, val demuxIndex: Int)
+    private data class DvdSource(val uri: Uri, val title: Int, val tracks: List<TrackInfo>)
     private val selections = mutableListOf<Selection>()
+    private val dvdSources = mutableMapOf<File, DvdSource>()
     private var chapters: File? = null
     private var output: Uri? = null
     @Volatile private var destroyed = false
@@ -45,7 +48,7 @@ class AdvancedMergerPanel(private val activity: Activity) {
         button("CHOOSE MOVIE FILES / DVD ISO") { choose(0) }
         button("CHOOSE AUDIO FILES FROM MKV or RAW") { choose(1) }
         button("CHOOSE SUBTITLE FILES FROM MKV or RAW") { choose(2) }
-        content.addView(TextView(activity).apply { text = "Select Streams — movie inputs include every stream and embedded chapters. DVD ISO inputs are first staged losslessly from the longest DVD title using the native DVD engine." })
+        content.addView(TextView(activity).apply { text = "Select Streams — movie inputs include every stream and embedded chapters. DVD ISO inputs are staged for MUX; DEMUX reads the original longest DVD title directly." })
         content.addView(streamList)
         button("Clear streams") { selections.clear(); streamList.removeAllViews() }
         button("CHOOSE CHAPTER FILE FROM MKV or RAW") { choose(3) }
@@ -94,17 +97,26 @@ class AdvancedMergerPanel(private val activity: Activity) {
                 // A VobSub .sub is data for the matching .idx, not another selectable subtitle source.
                 if (kind == 2 && file.extension.equals("sub", true) && files.any { it.nameWithoutExtension == file.nameWithoutExtension && it.extension.equals("idx", true) }) emptyList()
                 else {
-                    val tracks = native.probe(file.absolutePath).map(::parseTrack).filter { type == null || it.kind == type }
+                    val allTracks = native.probe(file.absolutePath).map(::parseTrack)
+                    val tracks = allTracks.filter { type == null || it.kind == type }
                     require(tracks.isNotEmpty()) { "${file.name} contains no ${type ?: "streams"}" }
-                    tracks.map { file to it }
+                    val dvd = dvdSources[file]
+                    val directIndexes = if (dvd == null) emptyMap() else {
+                        val stagedMedia = allTracks.filter { it.kind in setOf("video", "audio", "subtitle") }
+                        require(dvd.tracks.size == stagedMedia.size && dvd.tracks.zip(stagedMedia).all { (original, staged) ->
+                            original.kind == staged.kind && original.codec == staged.codec
+                        }) { "DVD stream mapping changed while staging ${file.name}" }
+                        stagedMedia.zip(dvd.tracks).associate { (staged, original) -> staged.index to original.index }
+                    }
+                    tracks.map { Candidate(file, it, directIndexes[it.index] ?: it.index) }
                 }
             }
             return@run {
-                added.forEach { (file, track) ->
+                added.forEach { (file, track, demuxIndex) ->
                     if (selections.none { it.file == file && it.track.index == track.index && it.track.kind == track.kind }) {
                         val label = if (track.kind == "chapters") "Chapters  ${track.title ?: "embedded chapter set"}" else track.displayLabel()
                         val check = CheckBox(activity).apply { text = "${file.name} — $label"; isChecked = true }
-                        selections += Selection(file, track, check); streamList.addView(check)
+                        selections += Selection(file, track, check, demuxIndex); streamList.addView(check)
                     }
                 }
                 status.text = "${selections.size} streams / chapter sets available"
@@ -121,9 +133,12 @@ class AdvancedMergerPanel(private val activity: Activity) {
             val safeStem = stem.replace(Regex("[^A-Za-z0-9._ -]"), "_")
             val staged = File(root, "$safeStem-dvd-title.mkv")
             require(!staged.exists()) { "Two movie inputs resolve to the same staged DVD title name: ${staged.name}" }
-            activity.runOnUiThread { status.text = "Reading DVD ISO and staging the longest title: $name" }
-            val title = dvdEngine.remuxTitleToFile(activity, uri, staged, requestedTitle = null, preserveChapters = true)
-            activity.runOnUiThread { status.text = "DVD ISO title $title staged for Advanced Merger" }
+            activity.runOnUiThread { status.text = "Reading DVD ISO and staging the longest title for MUX: $name" }
+            val direct = dvdEngine.probeTracks(activity, uri)
+            val title = dvdEngine.remuxTitleToFile(activity, uri, staged, requestedTitle = direct.title, preserveChapters = true)
+            check(title == direct.title) { "DVD title changed while staging" }
+            dvdSources[staged] = DvdSource(uri, title, direct.tracks)
+            activity.runOnUiThread { status.text = "DVD ISO title $title ready for MUX and direct DEMUX" }
             return staged
         }
         return copyInput(uri, name)
@@ -186,22 +201,34 @@ class AdvancedMergerPanel(private val activity: Activity) {
                     activity.contentResolver, parent, DocumentsContract.Document.MIME_TYPE_DIR,
                     "Demux-${System.currentTimeMillis()}",
                 ) ?: error("Cannot create demux output folder")
-                val outputFolder = destination
+                val outputFolder = destination ?: error("Cannot create demux output folder")
                 for ((file, group) in grouped) {
                     val media = group.filter { it.track.kind in setOf("video", "audio", "subtitle") }
                     if (media.isEmpty()) continue
                     val includeChapters = group.any { it.track.kind == "chapters" }
                     val temporary = File(root, "demux-${System.nanoTime()}").apply { check(mkdir()) }
                     try {
-                        native.progressListener = { percent ->
-                            activity.runOnUiThread {
-                                if (!destroyed) status.text = "Demuxing ${file.name}… $percent%"
+                        val dvd = dvdSources[file]
+                        if (dvd != null) {
+                            dvdEngine.demuxTitleToDirectory(
+                                activity, dvd.uri, temporary,
+                                media.map { it.demuxIndex }.toIntArray(), includeChapters, false,
+                            ) { percent ->
+                                activity.runOnUiThread {
+                                    if (!destroyed) status.text = "Demuxing ${file.name} directly from DVD… $percent%"
+                                }
                             }
+                        } else {
+                            native.progressListener = { percent ->
+                                activity.runOnUiThread {
+                                    if (!destroyed) status.text = "Demuxing ${file.name}… $percent%"
+                                }
+                            }
+                            native.demux(
+                                file.absolutePath, temporary.absolutePath,
+                                media.map { it.demuxIndex }.toIntArray(), includeChapters, false,
+                            )?.let { error("Demux failed for ${file.name}: $it") }
                         }
-                        native.demux(
-                            file.absolutePath, temporary.absolutePath,
-                            media.map { it.track.index }.toIntArray(), includeChapters, false,
-                        )?.let { error("Demux failed for ${file.name}: $it") }
                         check(!native.cancelled.get()) { "Cancelled" }
                         val rawStem = file.name.substringBeforeLast('.', file.name)
                         val stem = rawStem.replace(Regex("[^A-Za-z0-9._ -]"), "_").trim().ifBlank { "source" }
