@@ -54,6 +54,7 @@ class AdvancedMergerPanel(private val activity: Activity) {
         button("CHOOSE OUTPUT FOLDER") { activity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), FIRST_REQUEST + 4) }
         content.addView(outputLabel)
         content.addView(filename); controls += filename
+        button("DEMUX") { demux() }
         button("MUX TO MKV") { mux() }
         content.addView(cancelButton)
         content.addView(status)
@@ -152,6 +153,97 @@ class AdvancedMergerPanel(private val activity: Activity) {
         val f = record.split('\t', limit = 9)
         require(f.size == 9) { "Invalid stream metadata" }
         return TrackInfo(f[0].toInt(), f[1], f[2], f[3].takeUnless { it == "-" }, f[4].takeUnless { it == "-" }, f[5].toInt(), f[6].toInt(), f[7].toInt(), f[8].takeUnless { it == "-" })
+    }
+
+    private fun demux() {
+        val selected = selections.filter { it.check.isChecked }
+        val unsupported = selected.filter { it.track.kind !in setOf("video", "audio", "subtitle", "chapters") }
+        val folder = output
+        val mediaCount = selected.count { it.track.kind in setOf("video", "audio", "subtitle") }
+        if (folder == null || mediaCount == 0 || unsupported.isNotEmpty()) {
+            val message = if (unsupported.isNotEmpty())
+                "DEMUX supports video, audio, subtitle streams and embedded chapters. Deselect attachment/data rows."
+            else
+                "Select at least one video, audio, or subtitle stream and choose an output folder."
+            AlertDialog.Builder(activity).setMessage(message).setPositiveButton("OK", null).show()
+            return
+        }
+        val grouped = linkedMapOf<File, MutableList<Selection>>()
+        for (selection in selected) grouped.getOrPut(selection.file) { mutableListOf() }.add(selection)
+        for ((file, group) in grouped) {
+            if (group.any { it.track.kind == "chapters" } && group.none { it.track.kind in setOf("video", "audio", "subtitle") }) {
+                AlertDialog.Builder(activity)
+                    .setMessage("Select at least one media stream from ${file.name} to demux its chapters.")
+                    .setPositiveButton("OK", null).show()
+                return
+            }
+        }
+        run("Demuxing selected streams…") {
+            val parent = DocumentsContract.buildDocumentUriUsingTree(folder, DocumentsContract.getTreeDocumentId(folder))
+            var destination: Uri? = null
+            try {
+                destination = DocumentsContract.createDocument(
+                    activity.contentResolver, parent, DocumentsContract.Document.MIME_TYPE_DIR,
+                    "Demux-${System.currentTimeMillis()}",
+                ) ?: error("Cannot create demux output folder")
+                val outputFolder = destination
+                for ((file, group) in grouped) {
+                    val media = group.filter { it.track.kind in setOf("video", "audio", "subtitle") }
+                    if (media.isEmpty()) continue
+                    val includeChapters = group.any { it.track.kind == "chapters" }
+                    val temporary = File(root, "demux-${System.nanoTime()}").apply { check(mkdir()) }
+                    try {
+                        native.progressListener = { percent ->
+                            activity.runOnUiThread {
+                                if (!destroyed) status.text = "Demuxing ${file.name}… $percent%"
+                            }
+                        }
+                        native.demux(
+                            file.absolutePath, temporary.absolutePath,
+                            media.map { it.track.index }.toIntArray(), includeChapters, false,
+                        )?.let { error("Demux failed for ${file.name}: $it") }
+                        check(!native.cancelled.get()) { "Cancelled" }
+                        val rawStem = file.name.substringBeforeLast('.', file.name)
+                        val stem = rawStem.replace(Regex("[^A-Za-z0-9._ -]"), "_").trim().ifBlank { "source" }
+                        val files = temporary.listFiles()?.sortedBy { it.name } ?: error("No demux output files")
+                        check(files.isNotEmpty() && files.all { it.length() > 0L }) { "Demux produced an empty output" }
+                        for (source in files) {
+                            check(!native.cancelled.get()) { "Cancelled" }
+                            val name = if (source.name == "Chapters.txt") "$stem-Chapters.txt" else "$stem-${source.name}"
+                            val document = DocumentsContract.createDocument(
+                                activity.contentResolver, outputFolder, "application/octet-stream", name,
+                            ) ?: error("Cannot create $name")
+                            try {
+                                activity.contentResolver.openOutputStream(document, "w")?.use { out ->
+                                    source.inputStream().use { input ->
+                                        val buffer = ByteArray(256 * 1024)
+                                        while (true) {
+                                            check(!native.cancelled.get()) { "Cancelled" }
+                                            val n = input.read(buffer)
+                                            if (n < 0) break
+                                            out.write(buffer, 0, n)
+                                        }
+                                    }
+                                } ?: error("Cannot write $name")
+                            } catch (error: Throwable) {
+                                runCatching { DocumentsContract.deleteDocument(activity.contentResolver, document) }
+                                throw error
+                            }
+                        }
+                    } finally {
+                        native.progressListener = null
+                        temporary.deleteRecursively()
+                    }
+                }
+                val completed = outputFolder
+                return@run { status.text = "Demux complete: $completed" }
+            } catch (error: Throwable) {
+                destination?.let { runCatching { DocumentsContract.deleteDocument(activity.contentResolver, it) } }
+                throw error
+            } finally {
+                native.progressListener = null
+            }
+        }
     }
 
     private fun mux() {
