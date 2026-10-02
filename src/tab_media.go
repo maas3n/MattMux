@@ -65,7 +65,7 @@ func probeTabMKV(ctx context.Context, tools toolPaths, source string) (ffprobeRe
 
 func tabInput(args []string, source string, title int) []string {
 	if isMKVSource(source) {
-		return appendDesktopMediaInput(args, source)
+		return append(args, "-i", source)
 	}
 	// Pre-index DVD chapters and normalize the selected title timeline.
 	args = append(args, "-preindex", "1")

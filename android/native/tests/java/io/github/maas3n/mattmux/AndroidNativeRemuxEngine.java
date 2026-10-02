@@ -4,14 +4,18 @@ package io.github.maas3n.mattmux;
 public final class AndroidNativeRemuxEngine {
     native long[] nativeScanDvdNav(String path);
     native String[] nativePlanDvdNav(String path, int title);
-    private boolean cancelled;
+    boolean cancelled;
+    final java.util.List<Integer> demuxProgress = new java.util.ArrayList<>();
     private int progress;
     private boolean isNativeCancelled() { return cancelled; }
-    private void onNativeProgress(int value) { progress = value; }
+    private void onNativeProgress(int value) { progress = value; demuxProgress.add(value); }
     native long nativeOpenIso(int fd);
     native void nativeCloseIso(long handle);
     native byte[] nativeReadIsoIfo(long handle, int titleSet);
     private native String[] nativeProbeTracks(int[] fds, long[] starts, long[] ends, long iso, int titleSet, String[] languages, int[] palette);
+    native String nativeDemux(int[] fds, long[] starts, long[] ends, String directory,
+        long[] chapterStarts, long[] chapterEnds, int[] selectedStreams, long iso, int titleSet,
+        String[] languages, int[] palette, boolean vob);
     native String nativeRemux(int[] fds, long[] starts, long[] ends, int output,
         long[] chapterStarts, long[] chapterEnds, int[] selectedStreams, long iso, int titleSet, String[] languages, int[] palette);
     static native int openPath(String path, boolean output);

@@ -105,3 +105,11 @@ func TestOrdinaryMergerAndTabInputsHaveNoDVDProbeOverrides(t *testing.T) {
 		assertDVDInputOptions(t, tabInput(nil, dvd, 1), dvd)
 	}
 }
+
+func TestMKVDemuxInputUsesContainerTimestamps(t *testing.T) {
+	got := tabInput([]string{"-copyts"}, "movie.mkv", 0)
+	want := []string{"-copyts", "-i", "movie.mkv"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("MKV demux input = %q; want %q", got, want)
+	}
+}

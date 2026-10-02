@@ -31,3 +31,8 @@
 - `-safe 0` only relaxes concat-demuxer filename restrictions. It is not a
   timestamp/corruption recovery option and must not be passed to `dvdvideo`,
   `concat:` protocol inputs, or ordinary media readers.
+
+- DVD demux must read the selected title directly, never through a temporary MKV.
+  MKV demux remains supported and uses container timestamps without explicitly
+  adding the DVD option bundle (including GENPTS). This demux-specific rule does
+  not remove existing GENPTS from raw-media merging or any DVD path.

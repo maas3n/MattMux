@@ -220,6 +220,39 @@ class AndroidNativeRemuxEngine : RemuxEngine {
         }
     }
 
+    /** Extract the planned DVD cells directly to elementary/VOB outputs. */
+    internal fun demuxTitleToDirectory(
+        context: Context, sourceUri: Uri, directory: File, indexes: IntArray?,
+        chapters: Boolean, vob: Boolean, progress: (Int) -> Unit,
+    ) {
+        check(isAvailable) { unavailableReason ?: "Remux engine unavailable" }
+        require(indexes == null || indexes.isNotEmpty()) { "Select at least one track" }
+        check(remuxLock.tryLock()) { "Another native operation is still stopping. Try again shortly." }
+        try {
+            stagingProgressListener = progress
+            check(!cancelled.get()) { "Demux cancelled" }
+            openTitle(context, sourceUri).use { title ->
+                check(!cancelled.get()) { "Demux cancelled" }
+                nativeDemux(
+                    IntArray(title.vobs.size) { title.vobs[it].fd },
+                    LongArray(title.plan.cells.size) { title.plan.cells[it].startSector },
+                    LongArray(title.plan.cells.size) { title.plan.cells[it].endSectorExclusive },
+                    directory.absolutePath,
+                    if (chapters) title.plan.chapterStartsMs else LongArray(0),
+                    if (chapters) title.plan.chapterEndsMs else LongArray(0),
+                    indexes, title.isoHandle, title.plan.titleSet,
+                    title.plan.streamLanguages.map { "${it.streamId}\t${it.language}" }.toTypedArray(),
+                    title.plan.subtitlePalette, vob,
+                )?.let { error(it) }
+                check(!cancelled.get()) { "Demux cancelled" }
+            }
+        } finally {
+            stagingProgressListener = null
+            cancelled.set(false)
+            remuxLock.unlock()
+        }
+    }
+
     private fun remuxLocked(
         context: Context,
         sourceUri: Uri,
@@ -392,6 +425,12 @@ class AndroidNativeRemuxEngine : RemuxEngine {
     private external fun nativeReadIsoIfo(handle: Long, titleSet: Int): ByteArray?
     private external fun nativeCloseIso(handle: Long)
     private external fun nativeProbeTracks(vobFds: IntArray, cellStartSectors: LongArray, cellEndSectors: LongArray, isoHandle: Long, titleSet: Int, streamLanguages: Array<String>, subtitlePalette: IntArray): Array<String>?
+    private external fun nativeDemux(
+        vobFds: IntArray, cellStartSectors: LongArray, cellEndSectors: LongArray,
+        directory: String, chapterStartsMs: LongArray, chapterEndsMs: LongArray,
+        selectedStreamIndexes: IntArray?, isoHandle: Long, titleSet: Int,
+        streamLanguages: Array<String>, subtitlePalette: IntArray, vob: Boolean,
+    ): String?
     private external fun nativeRemux(
         vobFds: IntArray,
         cellStartSectors: LongArray,

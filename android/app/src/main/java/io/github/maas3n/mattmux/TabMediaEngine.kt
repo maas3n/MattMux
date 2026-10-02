@@ -147,15 +147,25 @@ class TabMediaEngine(private val context: Context, private val dvd: AndroidNativ
             android.util.Log.i("MattMuxDemux", message)
             status(message)
         }
-        report("Preparing source for demux…")
-        val source = prepare(uri, ::report); val selection = selected(source, indexes)
-        require(selection.isNotEmpty()) { "Select at least one track" }
         val directory = File(root, "export-${System.nanoTime()}").apply { check(mkdir()) }
         var destination: Uri? = null
         try {
-            report("Extracting selected streams…")
-            native.progressListener = { percent -> status("Extracting selected streams… $percent%") }
-            native.demux(source.absolutePath, directory.absolutePath, selection, chapters, vob)?.let { error("Demux failed: $it") }
+            if (isMKV(uri)) {
+                val source = prepare(uri, ::report)
+                val selection = selected(source, indexes)
+                require(selection.isNotEmpty()) { "Select at least one track" }
+                native.progressListener = { percent -> status("Extracting selected streams… $percent%") }
+                native.demux(source.absolutePath, directory.absolutePath, selection, chapters, vob)?.let { error("Demux failed: $it") }
+            } else {
+                preparingDVD = true
+                try {
+                    checkCancelled()
+                    report("Reading DVD title and stream metadata…")
+                    dvd.demuxTitleToDirectory(context, uri, directory, indexes, chapters, vob) { percent ->
+                        status("Extracting selected streams… $percent%")
+                    }
+                } finally { preparingDVD = false }
+            }
             checkCancelled()
             val files = directory.listFiles()?.sortedBy { it.name } ?: error("No output files")
             check(files.isNotEmpty() && files.all { it.length() > 0 }) { "An exported stream is empty" }

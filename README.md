@@ -286,6 +286,9 @@ PGS `.sup`, and DVD subtitles as a paired `.idx`/`.sub`. Chapters are written
 as `Chapters.txt` in the simple OGM format. VOB export is a video stream in an
 MPEG program-stream container, not a recreated DVD. Streams are copied without
 re-encoding; unsupported selected codecs produce an error asking you to deselect them.
-Each demux operation creates a new output folder. Android stages the source and
-exports in private temporary storage before copying them to the selected folder,
-so sufficient free space is required. BATCH and CLI retain their DVD-only behavior.
+Each demux operation creates a new output folder. DVD folders and ISOs are read
+directly from the selected title without first creating an MKV. Every DVD input
+uses `-analyzeduration 100M -probesize 100M -fflags +genpts` (or its native
+equivalent). Android temporarily holds the exported files before copying them
+to the selected folder; MKV sources additionally require an input copy.
+Sufficient free space for those files is required. BATCH and CLI retain their DVD-only behavior.

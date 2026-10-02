@@ -82,3 +82,34 @@ concat: protocol uses that private option. GENPTS fills missing presentation
 timestamps where decoding timestamps are available; it does not promise to
 repair all existing timestamp discontinuities.
 Source: https://ffmpeg.org/ffmpeg-formats.html (Format Options, concat, dvdvideo).
+
+
+## Direct DVD demux (October 2)
+
+DVD-tab demux now passes the libdvdnav/libdvdread title plan directly to a
+native DVD reader and the elementary/VOB output writers. It no longer calls
+remuxTitleToFile, creates source.mkv, or requires a successful Matroska write.
+The reader uses all three DVD input settings during discovery and each clock
+segment: 100M analyzeduration, 100M probesize, and GENPTS. A common timestamp
+origin/offset preserves relative A/V/subtitle timing across clock resets.
+Original DVD stream indexes are used directly for selection and filenames.
+IFO language/palette, subtitle canvas, and selected-title chapters are retained.
+
+Android still temporarily stores the exported files for SAF copying and the
+small IFO metadata needed by libdvdnav. MKV demux retains its input copy.
+Windows and Linux already demux directly through dvdvideo with all three DVD
+options; their extraction implementation does not need this Android adapter.
+Advanced Merger's internal DVD-to-MKV staging remains separate from Demux.
+
+Native tests exercise folder/ISO, elementary/video-only VOB, selected audio,
+chapters disabled, cancellation, and repeated DVD clocks. Payloads and subtitle
+timing are compared against independently remuxed reference files. The Android
+SAF instrumentation additionally checks extraction progress and absence of a
+source.mkv cache file. This removes the Matroska prerequisite from DVD demux;
+it does not establish the cause of the separately reported remux failure.
+
+MKV demux remains supported through the same button. Its dedicated input reader
+uses the container timestamps without explicitly adding GENPTS or either 100M
+probe override, on Android and desktop. Existing raw-media merger GENPTS and
+all DVD GENPTS handling remain intact. Android SAF tests select video/audio/SRT
+and chapters from an MKV through TabMediaEngine as well as testing DVD sources.

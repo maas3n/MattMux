@@ -240,7 +240,7 @@ class MainActivity : Activity(), BillingManager.Listener {
         root.addView(remuxStatus)
         includeChapters = android.widget.CheckBox(this).apply { text = "Include chapters"; isChecked = true }
         root.addView(includeChapters)
-        root.addView(value("MKV and demux operations need temporary space for an input copy or prepared DVD title and the exported files."))
+        root.addView(value("DVD demux reads the title directly. Exported files need temporary space while saving; MKV inputs also need an input copy."))
         remuxButton = button("Start Remux") { startRemux() }
         demuxButton = button("Demux") { chooseDemux() }
         root.addView(LinearLayout(this).apply {
