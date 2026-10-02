@@ -53,7 +53,7 @@ jobs:
           script: python3 android/scripts/test-startup.py "$(find startup-apk -name '*.apk' -print -quit)" startup-logs
       - name: Preserve startup diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: startup-${{ matrix.api }}-${{ matrix.target }}-${{ inputs.artifact }}
           path: startup-logs

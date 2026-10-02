@@ -112,7 +112,7 @@ jobs:
           unzip -l "$AAB" 'base/lib/x86_64/libmattmux_jni.so' | grep -q libmattmux_jni.so
 
       - name: Upload signed Play bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: MattMux-${{ inputs.version_name }}-Android-ChromeOS-Play-AAB
           if-no-files-found: error

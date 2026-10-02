@@ -110,7 +110,7 @@ jobs:
           grep -Fq '1.4.2-DVDNAV-BETA1' source/.build-v142-android-debug.sh
 
       - name: Upload reconstructed BETA helper
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: MattMux-1.4.2-Android-DVDNav-Beta1-helper
           include-hidden-files: true
@@ -171,14 +171,14 @@ jobs:
 
       - name: Upload BETA build log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: MattMux-1.4.2-Android-DVDNav-Beta1-build-log
           if-no-files-found: warn
           path: ${{ runner.temp }}/mattmux-v142-android-dvdnav-beta1-build.log
 
       - name: Upload BETA APK as workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: MattMux-1.4.2-Android-DVDNav-Beta1
           if-no-files-found: error
