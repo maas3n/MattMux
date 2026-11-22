@@ -280,6 +280,13 @@ Desktop builds use FFmpeg/FFprobe and MediaInfo CLI. Android/ChromeOS uses nativ
 
 Exact pinned versions, hashes, source revisions, licensing notes, and provenance are documented in [`THIRD_PARTY.md`](THIRD_PARTY.md).
 
+## Support MattMux
+
+If MattMux is useful to you and you'd like to support its development, Bitcoin donations are appreciated but entirely optional.
+
+<img src="https://upload.wikimedia.org/wikipedia/commons/4/46/Bitcoin.svg" width="14" height="14"> **BTC:** `bc1q79hj2zukfmm75278a7wssjmexanuhvs5nequel`
+
+
 ## License
 
 MattMux is licensed under the [MIT License](LICENSE). Third-party components remain governed by their own licenses.
